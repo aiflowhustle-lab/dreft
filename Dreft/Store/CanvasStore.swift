@@ -19,6 +19,8 @@ final class CanvasStore {
     var vaultSearchQuery = ""
     var vaultSelectedIndex = 0
     var isVaultOpen = false
+    /// Last rendered canvas size, used by viewport-only image export.
+    var viewportSize: CGSize = .zero
   /// Bumped when async image thumbnails finish decoding — refreshes card views.
   var imageCacheRevision = 0
 

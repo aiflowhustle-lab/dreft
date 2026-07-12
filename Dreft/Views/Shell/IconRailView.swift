@@ -96,7 +96,7 @@ struct IconRailButton: View {
                 }
             }
             .foregroundStyle(isActive || isHovered ? AppColors.textPrimary : AppColors.textSecondary)
-            .frame(width: 32, height: 32)
+            .frame(width: 28, height: 32)
             .background(
                 RoundedRectangle(cornerRadius: 4)
                     .fill(isActive || isHovered ? AppColors.sidebarSelection : Color.clear)
@@ -109,7 +109,7 @@ struct IconRailButton: View {
         .overlay(alignment: .leading) {
             if isHovered {
                 ShellRailTooltip(text: tooltip)
-                    .offset(x: 40)
+                    .offset(x: 32)
                     .zIndex(200)
             }
         }
@@ -134,14 +134,6 @@ struct IconRailView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 4) {
-                if !sidebarVisible {
-                    IconRailButton(systemName: "sidebar.left", tooltip: "Expand sidebar") {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            sidebarVisible = true
-                        }
-                    }
-                }
-
                 IconRailButton(systemName: "magnifyingglass", tooltip: "Go to file") {
                     onGoToFile()
                 }
@@ -170,7 +162,7 @@ struct IconRailView: View {
 
             Spacer(minLength: 0)
         }
-        .frame(width: 44)
+        .frame(width: 40)
         .frame(maxHeight: .infinity)
         .background(AppColors.railBackground)
         .zIndex(2)

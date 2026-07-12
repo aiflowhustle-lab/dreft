@@ -63,6 +63,16 @@
 		SM000056 /* NoteBodyTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100055; };
 		SM000057 /* WikilinkSuggestPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100056; };
 		SM000058 /* AddBookmarkSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100057; };
+		SM000059 /* CanvasDocumentOptionsMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100058; };
+		SM000060 /* CanvasExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100059; };
+		SM000061 /* CanvasVersionHistorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100060; };
+		SM000062 /* CanvasImageExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100061; };
+		SM000063 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100062; };
+		SM000064 /* AppearanceMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100063; };
+		SM000065 /* CanvasFloatingToolbarChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100064; };
+		SM000066 /* AppearanceSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100065; };
+		SM000067 /* CanvasIPadRightToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100066; };
+		SM000068 /* CanvasIPadBottomToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100067; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -121,6 +131,16 @@
 		SM100055 /* NoteBodyTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteBodyTextView.swift; sourceTree = "<group>"; };
 		SM100056 /* WikilinkSuggestPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikilinkSuggestPopover.swift; sourceTree = "<group>"; };
 		SM100057 /* AddBookmarkSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddBookmarkSheet.swift; sourceTree = "<group>"; };
+		SM100058 /* CanvasDocumentOptionsMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDocumentOptionsMenu.swift; sourceTree = "<group>"; };
+		SM100059 /* CanvasExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasExportView.swift; sourceTree = "<group>"; };
+		SM100060 /* CanvasVersionHistorySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasVersionHistorySheet.swift; sourceTree = "<group>"; };
+		SM100061 /* CanvasImageExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasImageExportSheet.swift; sourceTree = "<group>"; };
+		SM100062 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		SM100063 /* AppearanceMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceMode.swift; sourceTree = "<group>"; };
+		SM100064 /* CanvasFloatingToolbarChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFloatingToolbarChrome.swift; sourceTree = "<group>"; };
+		SM100065 /* AppearanceSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsSection.swift; sourceTree = "<group>"; };
+		SM100066 /* CanvasIPadRightToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasIPadRightToolbar.swift; sourceTree = "<group>"; };
+		SM100067 /* CanvasIPadBottomToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasIPadBottomToolbar.swift; sourceTree = "<group>"; };
 		SM100037 /* Dreft.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dreft.entitlements; sourceTree = "<group>"; };
 		SM200001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		SM200002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -179,7 +199,7 @@
 		};
 		SM500004 /* Theme */ = {
 			isa = PBXGroup;
-			children = (SM100002 /* AppColors.swift */);
+			children = (SM100002 /* AppColors.swift */, SM100062 /* AppTheme.swift */, SM100063 /* AppearanceMode.swift */);
 			path = Theme;
 			sourceTree = "<group>";
 		};
@@ -209,13 +229,13 @@
 		};
 		SM500009 /* Canvas */ = {
 			isa = PBXGroup;
-			children = (SM100006, SM100007, SM100008, SM100009, SM100016, SM100017, SM100021, SM100038, SM100039, SM100043);
+			children = (SM100006, SM100007, SM100008, SM100009, SM100016, SM100017, SM100021, SM100038, SM100039, SM100043, SM100059, SM100064, SM100066, SM100067);
 			path = Canvas;
 			sourceTree = "<group>";
 		};
 		SM500010 /* Shell */ = {
 			isa = PBXGroup;
-			children = (SM100010, SM100011, SM100012, SM100023, SM100024, SM100025, SM100030, SM100033, SM100040, SM100041, SM100042, SM100052, SM100053, SM100055, SM100056, SM100057);
+			children = (SM100010, SM100011, SM100012, SM100023, SM100024, SM100025, SM100030, SM100033, SM100040, SM100041, SM100042, SM100052, SM100053, SM100055, SM100056, SM100057, SM100058, SM100060, SM100061, SM100065);
 			path = Shell;
 			sourceTree = "<group>";
 		};
@@ -300,7 +320,7 @@
 		SM700001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (SM000001, SM000002, SM000003, SM000004, SM000005, SM000006, SM000007, SM000008, SM000009, SM000010, SM000011, SM000012, SM000014, SM000015, SM000016, SM000017, SM000018, SM000019, SM000020, SM000021, SM000022, SM000023, SM000024, SM000025, SM000026, SM000027, SM000028, SM000029, SM000030, SM000031, SM000032, SM000033, SM000034, SM000035, SM000036, SM000038, SM000039, SM000040, SM000041, SM000042, SM000043, SM000044, SM000045, SM000046, SM000047, SM000048, SM000049, SM000050, SM000053, SM000054, SM000055, SM000056, SM000057, SM000058);
+			files = (SM000001, SM000002, SM000003, SM000004, SM000005, SM000006, SM000007, SM000008, SM000009, SM000010, SM000011, SM000012, SM000014, SM000015, SM000016, SM000017, SM000018, SM000019, SM000020, SM000021, SM000022, SM000023, SM000024, SM000025, SM000026, SM000027, SM000028, SM000029, SM000030, SM000031, SM000032, SM000033, SM000034, SM000035, SM000036, SM000038, SM000039, SM000040, SM000041, SM000042, SM000043, SM000044, SM000045, SM000046, SM000047, SM000048, SM000049, SM000050, SM000053, SM000054, SM000055, SM000056, SM000057, SM000058, SM000059, SM000060, SM000061, SM000062, SM000063, SM000064, SM000065, SM000066, SM000067, SM000068);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		SM700003 /* Sources */ = {

@@ -243,12 +243,50 @@ struct VaultManagerView: View {
             ) {
                 openFolderAsVault()
             }
+
+            hairline
+
+            appearanceSection
         }
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.white.opacity(0.035))
         )
         .padding(.horizontal, 32)
+    }
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Appearance")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+
+            Picker("Appearance", selection: appearanceModeBinding) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Text(mode.title).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("Light mode uses a white canvas and light sidebar.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Color.white.opacity(0.5))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.dark.rawValue
+
+    private var appearanceModeBinding: Binding<String> {
+        Binding(
+            get: { appearanceModeRaw },
+            set: { newValue in
+                appearanceModeRaw = newValue
+                let mode = AppearanceMode(rawValue: newValue) ?? .dark
+                AppColors.setTheme(mode.theme)
+            }
+        )
     }
 
     private var createVaultSubtitle: String {

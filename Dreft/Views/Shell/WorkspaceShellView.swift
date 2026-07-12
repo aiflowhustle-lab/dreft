@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum SidebarLayout {
-    static let defaultWidth: CGFloat = 248
+    static let defaultWidth: CGFloat = 232
     static let minWidth: CGFloat = 180
     static let maxWidth: CGFloat = 480
 
@@ -15,11 +15,13 @@ struct WorkspaceShellView: View {
     @State private var canvasDocuments: CanvasDocumentRegistry
     @State private var persistenceCoordinator: WorkspacePersistenceCoordinator?
     @State private var sidebarVisible = true
+    @State private var rightSidebarVisible = false
     @State private var iconRailVisible = true
     @State private var sidebarPanel: SidebarPanel = .files
     @State private var showGoToFile = false
     @State private var noteIsReading = false
     @State private var noteSplitLayout: NoteSplitLayout = .none
+    @State private var canvasSplitLayout: NoteSplitLayout = .none
     @State private var showNoteFindBar = false
     @AppStorage("sidebarWidth") private var sidebarWidthStorage = SidebarLayout.defaultWidth
     @State private var sidebarWidth = SidebarLayout.defaultWidth
@@ -141,6 +143,7 @@ struct WorkspaceShellView: View {
                 )
                 .frame(maxHeight: .infinity)
                 ShellVerticalHairline()
+                    .padding(.top, AppColors.chromeRowHeight)
             }
 
             if sidebarVisible && usesDesktopChrome {
@@ -149,8 +152,15 @@ struct WorkspaceShellView: View {
             }
 
             editorColumn
+
+            if rightSidebarVisible && usesDesktopChrome {
+                ShellVerticalHairline()
+                rightSidebarColumn
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .animation(isResizingSidebar ? nil : .easeInOut(duration: 0.2), value: sidebarVisible)
+        .animation(.easeInOut(duration: 0.2), value: rightSidebarVisible)
     }
 
     private var sidebarColumn: some View {
@@ -159,6 +169,9 @@ struct WorkspaceShellView: View {
                 .frame(height: AppColors.chromeRowHeight)
                 .background(AppColors.tabBarBackground)
                 .overlay(alignment: .bottom) { ShellHairline() }
+                #if os(macOS)
+                .background { MacWindowDragHandle() }
+                #endif
 
             SidebarView(
                 workspace: workspace,
@@ -180,6 +193,76 @@ struct WorkspaceShellView: View {
                 }
             )
         }
+    }
+
+    private var rightSidebarColumn: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "link")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppColors.textSecondary)
+                Text("Backlinks")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppColors.textPrimary)
+                Spacer()
+                chromeIconButton("xmark", tip: "Collapse right sidebar") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        rightSidebarVisible = false
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: AppColors.chromeRowHeight)
+            .background(AppColors.tabBarBackground)
+            .overlay(alignment: .bottom) { ShellHairline() }
+
+            if let fileID = activeTab?.fileID {
+                let linkedIDs = workspace.incomingLinkIDs(for: fileID)
+                if linkedIDs.isEmpty {
+                    Spacer()
+                    Text("No backlinks found")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppColors.textMuted)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(linkedIDs, id: \.self) { linkedID in
+                                if let file = workspace.files.first(where: { $0.id == linkedID }) {
+                                    Button {
+                                        workspace.selectFile(file.id)
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: file.kind == .canvas ? "square.grid.2x2" : "doc.text")
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(AppColors.textSecondary)
+                                            Text(file.name)
+                                                .font(.system(size: 12.5))
+                                                .foregroundStyle(AppColors.textPrimary)
+                                                .lineLimit(1)
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Spacer()
+                Text("No active file")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppColors.textMuted)
+                Spacer()
+            }
+        }
+        .frame(width: 240)
+        .frame(maxHeight: .infinity)
+        .background(AppColors.shellBackground)
     }
 
     private var editorColumn: some View {
@@ -244,6 +327,7 @@ struct WorkspaceShellView: View {
         .onChange(of: workspace.activeTabID) { _, _ in
             noteIsReading = false
             noteSplitLayout = .none
+            canvasSplitLayout = .none
             showNoteFindBar = false
         }
         .onChange(of: workspace.selectedFileID) { _, _ in
@@ -302,6 +386,7 @@ struct WorkspaceShellView: View {
         .onChange(of: workspace.activeTabID) { _, _ in
             noteIsReading = false
             noteSplitLayout = .none
+            canvasSplitLayout = .none
             showNoteFindBar = false
         }
         .onChange(of: workspace.selectedFileID) { _, _ in
@@ -332,10 +417,24 @@ struct WorkspaceShellView: View {
 
     private var tabBar: some View {
         HStack(spacing: 0) {
+            if !sidebarVisible && usesDesktopChrome {
+                #if os(macOS)
+                Color.clear
+                    .frame(width: 28)
+                #endif
+                chromeIconButton("sidebar.left", tip: "Expand sidebar") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        sidebarVisible = true
+                    }
+                }
+                .frame(width: 28)
+            }
+
             GeometryReader { geo in
                 let plusSlot: CGFloat = 34
-                let trailingSlot: CGFloat = 72
-                let width = chromeTabWidth(available: max(0, geo.size.width - plusSlot - trailingSlot))
+                let available = max(0, geo.size.width - plusSlot)
+                let width = chromeTabWidth(available: available)
+                let tabsWidth = min(available, CGFloat(workspace.tabs.count) * width)
                 HStack(spacing: 0) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 0) {
@@ -345,6 +444,7 @@ struct WorkspaceShellView: View {
                             }
                         }
                     }
+                    .frame(width: tabsWidth)
                     .padding(.leading, 8)
 
                     Button(action: workspace.addTab) {
@@ -380,7 +480,42 @@ struct WorkspaceShellView: View {
         }
         .padding(.leading, 8)
         #else
-        EmptyView()
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(workspace.tabs) { tab in
+                    Button {
+                        workspace.activeTabID = tab.id
+                        workspace.selectedFileID = tab.fileID
+                    } label: {
+                        if tab.id == workspace.activeTabID {
+                            Label(tab.title, systemImage: "checkmark")
+                        } else {
+                            Text(tab.title)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("List tabs")
+
+            chromeIconButton(
+                "sidebar.right",
+                tip: rightSidebarVisible ? "Collapse right sidebar" : "Expand right sidebar",
+                isActive: rightSidebarVisible
+            ) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    rightSidebarVisible.toggle()
+                }
+            }
+        }
         #endif
     }
 
@@ -495,6 +630,32 @@ struct WorkspaceShellView: View {
                         showFindBar: $showNoteFindBar
                     )
                 }
+                if activeTab?.kind == .canvas, let fileID = activeTab?.fileID {
+                    Button {
+                        workspace.presentBookmarkEditor(for: fileID)
+                    } label: {
+                        Image(systemName: workspace.isBookmarked(fileID) ? "bookmark.fill" : "bookmark")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(
+                                workspace.isBookmarked(fileID)
+                                    ? AppColors.selectionStroke
+                                    : AppColors.textSecondary
+                            )
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(workspace.isBookmarked(fileID) ? "Edit bookmark" : "Add bookmark")
+
+                    CanvasDocumentOptionsMenu(
+                        workspace: workspace,
+                        canvasStore: canvasDocuments.store(for: fileID),
+                        fileID: fileID,
+                        splitLayout: $canvasSplitLayout,
+                        sidebarVisible: $sidebarVisible,
+                        sidebarPanel: $sidebarPanel
+                    )
+                }
             }
             .frame(width: documentNavTrailingWidth, alignment: .trailing)
         }
@@ -553,15 +714,7 @@ struct WorkspaceShellView: View {
             case .canvas:
                 let documentID = activeTab?.fileID ?? activeTab?.id ?? "default"
                 let canvasStore = canvasDocuments.store(for: documentID)
-                InfiniteCanvasView(
-                    store: canvasStore,
-                    workspace: workspace,
-                    sidebarVisible: $sidebarVisible,
-                    sidebarPanel: $sidebarPanel,
-                    documentTitle: documentTitle,
-                    vaultURL: workspace.activeVaultURL
-                )
-                .id(documentID)
+                canvasDocumentContent(store: canvasStore, documentID: documentID)
                 .onAppear {
                     canvasStore.setVaultFiles(workspace.files)
                 }
@@ -597,6 +750,42 @@ struct WorkspaceShellView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func canvasDocumentContent(store: CanvasStore, documentID: String) -> some View {
+        switch canvasSplitLayout {
+        case .none:
+            canvasInstance(store: store, documentID: documentID, instance: "primary")
+        case .right:
+            HStack(spacing: 0) {
+                canvasInstance(store: store, documentID: documentID, instance: "primary")
+                ShellVerticalHairline()
+                canvasInstance(store: store, documentID: documentID, instance: "right")
+            }
+        case .down:
+            VStack(spacing: 0) {
+                canvasInstance(store: store, documentID: documentID, instance: "primary")
+                ShellHairline()
+                canvasInstance(store: store, documentID: documentID, instance: "down")
+            }
+        }
+    }
+
+    private func canvasInstance(
+        store: CanvasStore,
+        documentID: String,
+        instance: String
+    ) -> some View {
+        InfiniteCanvasView(
+            store: store,
+            workspace: workspace,
+            sidebarVisible: $sidebarVisible,
+            sidebarPanel: $sidebarPanel,
+            documentTitle: documentTitle,
+            vaultURL: workspace.activeVaultURL
+        )
+        .id("\(documentID)-\(instance)")
     }
 
     private var newTabPlaceholder: some View {
@@ -727,7 +916,9 @@ private struct MacWindowChromeConfigurator: NSViewRepresentable {
     private func configure(window: NSWindow?) {
         guard let window else { return }
         window.titleVisibility = .hidden
+        window.title = ""
         window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
         window.styleMask.insert(.fullSizeContentView)
         window.isMovableByWindowBackground = false
     }

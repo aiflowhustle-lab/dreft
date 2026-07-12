@@ -858,7 +858,7 @@ struct GraphView: View {
                         .fill(AppColors.floatingChrome)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
                         )
                 )
         }
@@ -882,7 +882,7 @@ struct GraphView: View {
                 .fill(AppColors.floatingChrome)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -1026,8 +1026,8 @@ struct GraphView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(
                                     focusedGroupID == group.wrappedValue.id
-                                        ? Color.white.opacity(0.35)
-                                        : Color.white.opacity(0.08),
+                                        ? AppColors.selectionStroke.opacity(0.55)
+                                        : AppColors.floatingChromeBorder,
                                     lineWidth: 1
                                 )
                         )
@@ -1212,7 +1212,7 @@ struct GraphView: View {
                 .fill(Color.black.opacity(0.28))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
                 )
         )
     }
@@ -1456,16 +1456,16 @@ private struct GroupColorPickerPopover: View {
             .textFieldStyle(.plain)
             .multilineTextAlignment(.center)
             .font(.system(size: 13))
-            .foregroundStyle(.white)
+            .foregroundStyle(AppColors.textPrimary)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 5)
-                    .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                    .stroke(AppColors.border, lineWidth: 1)
             )
 
             Text(label)
                 .font(.system(size: 12))
-                .foregroundStyle(Color.white.opacity(0.7))
+                .foregroundStyle(AppColors.textSecondary)
         }
     }
 }

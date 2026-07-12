@@ -41,8 +41,8 @@ struct GraphCanvasLayer: View {
 
     private func drawLinks(in context: inout GraphicsContext) {
         guard linkRenderOpacity > 0.01 else { return }
-        let baseOpacity = linksDimmed ? 0.16 : 0.45
-        let linkColor = Color.white.opacity(baseOpacity * linkRenderOpacity)
+        let linkColor = (linksDimmed ? AppColors.graphLinkDimmedColor : AppColors.graphLinkColor)
+            .opacity(linkRenderOpacity)
 
         for link in links {
             guard let from = positions[link.fromID],
@@ -89,7 +89,7 @@ struct GraphCanvasLayer: View {
             let layout = nodeLayout(for: node.position, dotSize: nodeDotSize, isActive: node.isActive)
             let dotColor = node.isActive
                 ? AppColors.selectionStroke
-                : (node.groupColor ?? Color.white.opacity(0.92))
+                : (node.groupColor ?? AppColors.graphNodeColor)
 
             if node.isActive {
                 let haloRect = CGRect(
@@ -116,7 +116,7 @@ struct GraphCanvasLayer: View {
 
             let labelColor = node.isActive
                 ? AppColors.selectionStroke.opacity(0.95 * labelOpacity * nodeOpacity)
-                : Color.white.opacity(0.88 * labelOpacity * nodeOpacity)
+                : AppColors.graphLabelColor.opacity(labelOpacity * nodeOpacity)
             let labelText = Text(node.label)
                 .font(.system(size: 11, weight: node.isActive ? .semibold : .regular))
                 .foregroundStyle(labelColor)
@@ -173,7 +173,7 @@ struct GraphNodeLabelsLayer: View {
         if node.isActive {
             return AppColors.selectionStroke.opacity(0.95 * labelOpacity * nodeOpacity)
         }
-        return Color.white.opacity(0.88 * labelOpacity * nodeOpacity)
+        return AppColors.graphLabelColor.opacity(labelOpacity * nodeOpacity)
     }
 
     private func labelCenter(for position: CGPoint) -> CGPoint {

@@ -4,6 +4,7 @@ import SwiftUI
 /// Screen-space dot grid — fixed dot size (Obsidian-style), shifts only with pan offset.
 struct DotGridBackground: View {
   let panOffset: CGSize
+  var dotColor: Color = AppColors.gridDotColor
 
   var body: some View {
     GeometryReader { geo in
@@ -11,7 +12,7 @@ struct DotGridBackground: View {
       let ox = CanvasMath.positiveModulo(panOffset.width, divisor: spacing)
       let oy = CanvasMath.positiveModulo(panOffset.height, divisor: spacing)
 
-      Image(decorative: DotGridTile.image, scale: 1, orientation: .up)
+      Image(decorative: DotGridTile.image(for: dotColor), scale: 1, orientation: .up)
         .resizable(resizingMode: .tile)
         .frame(width: geo.size.width + spacing, height: geo.size.height + spacing)
         .offset(x: ox, y: oy)
@@ -23,7 +24,36 @@ struct DotGridBackground: View {
 }
 
 private enum DotGridTile {
-  static let image: CGImage = {
+  private static var cache: [String: CGImage] = [:]
+
+  static func image(for color: Color) -> CGImage {
+    let key = colorKey(for: color)
+    if let cached = cache[key] {
+      return cached
+    }
+    let image = makeTile(dotColor: color)
+    cache[key] = image
+    return image
+  }
+
+  private static func colorKey(for color: Color) -> String {
+    #if canImport(AppKit)
+    let ns = NSColor(color).usingColorSpace(.sRGB) ?? .white
+    return String(format: "%.3f-%.3f-%.3f-%.3f", ns.redComponent, ns.greenComponent, ns.blueComponent, ns.alphaComponent)
+    #elseif canImport(UIKit)
+    let ui = UIColor(color)
+    var r: CGFloat = 0
+    var g: CGFloat = 0
+    var b: CGFloat = 0
+    var a: CGFloat = 0
+    ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+    return String(format: "%.3f-%.3f-%.3f-%.3f", r, g, b, a)
+    #else
+    return "default"
+    #endif
+  }
+
+  private static func makeTile(dotColor: Color) -> CGImage {
     let spacing = Int(CanvasConstants.dotSpacing)
     let colorSpace = CGColorSpaceCreateDeviceRGB()
     guard let context = CGContext(
@@ -39,7 +69,11 @@ private enum DotGridTile {
     }
 
     context.clear(CGRect(x: 0, y: 0, width: spacing, height: spacing))
-    context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.09))
+    #if canImport(AppKit)
+    context.setFillColor(NSColor(dotColor).usingColorSpace(.sRGB)?.cgColor ?? CGColor(gray: 1, alpha: 0.09))
+    #elseif canImport(UIKit)
+    context.setFillColor(UIColor(dotColor).cgColor)
+    #endif
     let dot = CanvasConstants.dotSize
     context.fillEllipse(in: CGRect(x: 0, y: 0, width: dot, height: dot))
 
@@ -47,5 +81,11 @@ private enum DotGridTile {
       fatalError("DotGridTile: failed to make image")
     }
     return cgImage
-  }()
+  }
 }
+
+#if canImport(AppKit)
+import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif

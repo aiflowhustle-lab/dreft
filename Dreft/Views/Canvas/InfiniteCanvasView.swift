@@ -21,7 +21,9 @@ struct InfiniteCanvasView: View {
   @State private var cardResizeOverrides: [String: CGRect] = [:]
   @State private var panActive = false
   @State private var panAnchor = CGSize.zero
-  @State private var pinchStartZoom: CGFloat = 1
+  @State private var pinchStartZoom: CGFloat?
+  @State private var showCanvasSettings = false
+  @AppStorage("canvasShowGrid") private var showCanvasGrid = true
   @State private var showImagePicker = false
   @State private var swapImageCardID: String?
   @State private var showImageSwapPicker = false
@@ -39,7 +41,14 @@ struct InfiniteCanvasView: View {
     GeometryReader { geo in
       let size = geo.size
       ZStack {
-        DotGridBackground(panOffset: CGSize(width: displayTransform.x, height: displayTransform.y))
+        AppColors.canvasBackground
+
+        if showCanvasGrid {
+          DotGridBackground(
+            panOffset: CGSize(width: displayTransform.x, height: displayTransform.y),
+            dotColor: AppColors.gridDotColor
+          )
+        }
 
         canvasInteractionBackground(canvasSize: size)
 
@@ -82,24 +91,6 @@ struct InfiniteCanvasView: View {
         cardToolbarColorRowOpen = false
         cardToolbarCustomColorOpen = false
       }
-      .overlay(alignment: .topTrailing) {
-        canvasRightToolbar(canvasSize: size)
-      }
-      .overlay(alignment: .bottom) {
-        canvasBottomToolbar(canvasSize: size)
-      }
-      .overlay(alignment: .bottomLeading) {
-        zoomIndicator
-      }
-      .overlay(alignment: .bottomTrailing) {
-        backlinkBadge
-      }
-      .overlay {
-        if store.isVaultOpen {
-          VaultSearchSheet(store: store, workspace: workspace, canvasSize: size)
-            .zIndex(200)
-        }
-      }
       #if os(iOS)
       .overlay {
         CanvasTouchCaptureView(
@@ -117,19 +108,40 @@ struct InfiniteCanvasView: View {
             pinchStartZoom = displayTransform.zoom
           },
           onPinchChanged: { scale, anchor in
+            let startZoom = pinchStartZoom ?? displayTransform.zoom
             let newZoom = min(
               CanvasViewTransform.maxZoom,
-              max(CanvasViewTransform.minZoom, pinchStartZoom * scale)
+              max(CanvasViewTransform.minZoom, startZoom * scale)
             )
             applyZoom(at: anchor, targetZoom: newZoom)
           },
           onPinchEnded: {
-            pinchStartZoom = 1
+            pinchStartZoom = nil
             finishCanvasInteraction()
           }
         )
       }
       #endif
+      .overlay(alignment: .topTrailing) {
+        canvasRightToolbar(canvasSize: size)
+          .zIndex(300)
+      }
+      .overlay(alignment: .bottom) {
+        canvasBottomToolbar(canvasSize: size)
+          .zIndex(300)
+      }
+      .overlay(alignment: .bottomLeading) {
+        zoomIndicator
+      }
+      .overlay(alignment: .bottomTrailing) {
+        backlinkBadge
+      }
+      .overlay {
+        if store.isVaultOpen {
+          VaultSearchSheet(store: store, workspace: workspace, canvasSize: size)
+            .zIndex(200)
+        }
+      }
       .contentShape(Rectangle())
       .clipped()
       .coordinateSpace(name: "canvasScreen")
@@ -156,6 +168,10 @@ struct InfiniteCanvasView: View {
       .onAppear {
         displayTransform = store.transform
         store.vaultURL = vaultURL
+        store.viewportSize = size
+      }
+      .onChange(of: size) { _, newSize in
+        store.viewportSize = newSize
       }
       .onChange(of: vaultURL) { _, newURL in
         store.vaultURL = newURL
@@ -490,16 +506,17 @@ struct InfiniteCanvasView: View {
   private func pinchGesture(in size: CGSize) -> some Gesture {
     MagnificationGesture()
       .onChanged { value in
-        if pinchStartZoom == 1 {
+        if pinchStartZoom == nil {
           isCanvasInteracting = true
           pinchStartZoom = displayTransform.zoom
         }
         let anchor = CGPoint(x: size.width / 2, y: size.height / 2)
-        let newZoom = min(CanvasViewTransform.maxZoom, max(CanvasViewTransform.minZoom, pinchStartZoom * value))
+        let startZoom = pinchStartZoom ?? displayTransform.zoom
+        let newZoom = min(CanvasViewTransform.maxZoom, max(CanvasViewTransform.minZoom, startZoom * value))
         applyZoom(at: anchor, targetZoom: newZoom)
       }
       .onEnded { _ in
-        pinchStartZoom = 1
+        pinchStartZoom = nil
         finishCanvasInteraction()
       }
   }
@@ -652,55 +669,118 @@ struct InfiniteCanvasView: View {
   }
 
   private func canvasBottomToolbar(canvasSize: CGSize) -> some View {
+    #if os(iOS)
+    obsidianBottomToolbar(canvasSize: canvasSize)
+    #else
+    macBottomToolbar(canvasSize: canvasSize)
+    #endif
+  }
+
+  private func macBottomToolbar(canvasSize: CGSize) -> some View {
     HStack(spacing: 2) {
-      canvasToolButton("doc", tip: "Add card") {
-        store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
-        store.focusCardID = store.selectedCardID
-      }
-      canvasToolButton("doc.text", tip: "Vault note") {
-        store.setVaultFiles(workspace.files)
-        store.isVaultOpen = true
-        store.vaultSearchQuery = ""
-        store.vaultSelectedIndex = 0
-      }
-      canvasToolButton("photo.on.rectangle.angled", tip: "Add image") {
-        #if canImport(PhotosUI)
-        showImagePicker = true
-        #else
-        openMacImagePanel(canvasSize: canvasSize)
-        #endif
-      }
+      bottomToolbarButtons(canvasSize: canvasSize)
     }
     .padding(.horizontal, 6)
     .padding(.vertical, 5)
     .background(AppColors.floatingChrome)
     .clipShape(RoundedRectangle(cornerRadius: 10))
-    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
-    .shadow(color: .black.opacity(0.45), radius: 16, y: 4)
+    .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppColors.floatingChromeBorder, lineWidth: 1))
+    .shadow(color: AppColors.floatingChromeShadow, radius: 16, y: 4)
     .padding(.bottom, 16)
   }
 
+  #if os(iOS)
+  private func obsidianBottomToolbar(canvasSize: CGSize) -> some View {
+    CanvasIPadBottomToolbar(
+      onAddCard: {
+        store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
+        store.focusCardID = store.selectedCardID
+      },
+      onVaultNote: {
+        store.setVaultFiles(workspace.files)
+        store.isVaultOpen = true
+        store.vaultSearchQuery = ""
+        store.vaultSelectedIndex = 0
+      },
+      onAddImage: {
+        #if canImport(PhotosUI)
+        showImagePicker = true
+        #endif
+      }
+    )
+  }
+  #endif
+
+  @ViewBuilder
+  private func bottomToolbarButtons(canvasSize: CGSize) -> some View {
+    canvasToolButton("doc", tip: "Add card") {
+      store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
+      store.focusCardID = store.selectedCardID
+    }
+    canvasToolButton("doc.text", tip: "Vault note") {
+      store.setVaultFiles(workspace.files)
+      store.isVaultOpen = true
+      store.vaultSearchQuery = ""
+      store.vaultSelectedIndex = 0
+    }
+    #if os(iOS)
+    canvasToolButton("doc.circle", tip: "Add image") {
+      #if canImport(PhotosUI)
+      showImagePicker = true
+      #endif
+    }
+    #else
+    canvasToolButton("photo.on.rectangle.angled", tip: "Add image") {
+      #if canImport(PhotosUI)
+      showImagePicker = true
+      #else
+      openMacImagePanel(canvasSize: canvasSize)
+      #endif
+    }
+    #endif
+  }
+
   private func canvasRightToolbar(canvasSize: CGSize) -> some View {
+    #if os(iOS)
+    obsidianRightToolbar(canvasSize: canvasSize)
+    #else
+    macRightToolbar(canvasSize: canvasSize)
+    #endif
+  }
+
+  private func macRightToolbar(canvasSize: CGSize) -> some View {
     let _ = store.historyRevision
     return VStack(alignment: .trailing, spacing: 10) {
       floatingChromePill {
+        canvasToolButton("gearshape", tip: "Canvas settings") {
+          showCanvasSettings.toggle()
+        }
+      }
+      .popover(isPresented: $showCanvasSettings, arrowEdge: .trailing) {
+        canvasSettingsPanel(canvasSize: canvasSize)
+      }
+
+      floatingChromePill {
         VStack(spacing: 0) {
-          canvasToolButton("plus", tip: "Zoom in") {
-            isCanvasInteracting = true
-            applyZoom(at: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2), factor: 1.15)
-            finishCanvasInteraction()
+          canvasToolButton(
+            "plus",
+            tip: "Zoom in",
+            enabled: displayTransform.zoom < CanvasViewTransform.maxZoom
+          ) {
+            stepZoom(factor: 1.15, canvasSize: canvasSize)
           }
           canvasToolButton("arrow.clockwise", tip: "Reset zoom") {
-            displayTransform = CanvasViewTransform()
-            store.setTransform(displayTransform)
+            resetCanvasView()
           }
           canvasToolButton("viewfinder", tip: "Zoom to fit") {
             zoomToFitAll(canvasSize: canvasSize)
           }
-          canvasToolButton("minus", tip: "Zoom out") {
-            isCanvasInteracting = true
-            applyZoom(at: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2), factor: 0.85)
-            finishCanvasInteraction()
+          canvasToolButton(
+            "minus",
+            tip: "Zoom out",
+            enabled: displayTransform.zoom > CanvasViewTransform.minZoom
+          ) {
+            stepZoom(factor: 0.85, canvasSize: canvasSize)
           }
         }
       }
@@ -719,9 +799,106 @@ struct InfiniteCanvasView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-    .padding(.top, 10)
+    .padding(.top, 22)
     .padding(.bottom, 72)
     .padding(.trailing, 12)
+  }
+
+  #if os(iOS)
+  private func obsidianRightToolbar(canvasSize: CGSize) -> some View {
+    let _ = store.historyRevision
+    return CanvasIPadRightToolbar(
+      canvasSize: canvasSize,
+      sidebarVisible: sidebarVisible,
+      canUndo: store.canUndo,
+      canRedo: store.canRedo,
+      canZoomIn: displayTransform.zoom < CanvasViewTransform.maxZoom,
+      canZoomOut: displayTransform.zoom > CanvasViewTransform.minZoom,
+      onSettings: { showCanvasSettings = true },
+      onZoomIn: { stepZoom(factor: 1.15, canvasSize: canvasSize) },
+      onResetZoom: { resetCanvasView() },
+      onZoomToFit: { zoomToFitAll(canvasSize: canvasSize) },
+      onZoomOut: { stepZoom(factor: 0.85, canvasSize: canvasSize) },
+      onUndo: { store.undo() },
+      onRedo: { store.redo() }
+    )
+    .sheet(isPresented: $showCanvasSettings) {
+      NavigationStack {
+        canvasSettingsPanel(canvasSize: canvasSize)
+          .navigationTitle("Canvas settings")
+          .navigationBarTitleDisplayMode(.inline)
+          .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+              Button("Done") { showCanvasSettings = false }
+            }
+          }
+      }
+      .presentationDetents([.medium, .large])
+    }
+  }
+  #endif
+
+  private func canvasSettingsPanel(canvasSize: CGSize) -> some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 18) {
+        AppearanceSettingsSection()
+
+        Toggle("Show dot grid", isOn: $showCanvasGrid)
+          .toggleStyle(.switch)
+
+        VStack(alignment: .leading, spacing: 6) {
+          HStack {
+            Text("Zoom")
+            Spacer()
+            Text("\(Int(displayTransform.zoom * 100))%")
+              .foregroundStyle(AppColors.textSecondary)
+          }
+          Slider(
+            value: Binding(
+              get: { displayTransform.zoom },
+              set: { newZoom in
+                isCanvasInteracting = true
+                applyZoom(
+                  at: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
+                  targetZoom: newZoom
+                )
+                finishCanvasInteraction()
+              }
+            ),
+            in: CanvasViewTransform.minZoom...CanvasViewTransform.maxZoom
+          )
+        }
+
+        HStack {
+          Button("Reset view") {
+            resetCanvasView()
+          }
+          Button("Zoom to fit") {
+            zoomToFitAll(canvasSize: canvasSize)
+          }
+        }
+      }
+      .font(.system(size: 12.5))
+      .padding(16)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    #if os(macOS)
+    .frame(width: 260)
+    #endif
+  }
+
+  private func stepZoom(factor: CGFloat, canvasSize: CGSize) {
+    isCanvasInteracting = true
+    applyZoom(
+      at: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
+      factor: factor
+    )
+    finishCanvasInteraction()
+  }
+
+  private func resetCanvasView() {
+    displayTransform = CanvasViewTransform()
+    store.setTransform(displayTransform)
   }
 
   private func floatingChromePill<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -730,8 +907,8 @@ struct InfiniteCanvasView: View {
       .padding(.horizontal, 6)
       .background(AppColors.floatingChrome)
       .clipShape(RoundedRectangle(cornerRadius: 14))
-      .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08), lineWidth: 1))
-      .shadow(color: .black.opacity(0.45), radius: 16, y: 4)
+      .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.floatingChromeBorder, lineWidth: 1))
+      .shadow(color: AppColors.floatingChromeShadow, radius: 16, y: 4)
   }
 
   private func canvasToolButton(
@@ -742,9 +919,18 @@ struct InfiniteCanvasView: View {
   ) -> some View {
     Button(action: action) {
       Image(systemName: name)
-        .font(.system(size: 15, weight: .regular))
-        .foregroundStyle(AppColors.textPrimary.opacity(enabled ? 0.9 : 0.35))
-        .frame(width: 32, height: 32)
+        #if os(iOS)
+        .font(.system(size: CanvasFloatingToolbarChrome.iconSize, weight: .regular))
+        .symbolRenderingMode(.monochrome)
+        #else
+        .font(.system(size: CanvasFloatingToolbarChrome.iconSize, weight: .regular))
+        #endif
+        .foregroundStyle(AppColors.textPrimary.opacity(enabled ? 0.92 : 0.35))
+        .frame(
+          width: CanvasFloatingToolbarChrome.buttonSize,
+          height: CanvasFloatingToolbarChrome.buttonSize
+        )
+        .contentShape(Rectangle())
     }
     .buttonStyle(CanvasToolButtonStyle())
     .disabled(!enabled)
@@ -965,11 +1151,54 @@ struct InfiniteCanvasView: View {
     return rect.insetBy(dx: -6, dy: -6).contains(screenPoint)
   }
 
+  private func isPointOnCanvasToolbar(_ screenPoint: CGPoint, canvasSize: CGSize) -> Bool {
+    #if os(iOS)
+    let toolbarWidth: CGFloat = 72
+    let topControlsHeight: CGFloat = 250
+    let historyHeight: CGFloat = 150
+    let bottomBarHeight: CGFloat = 64
+    let trailing: CGFloat = 18
+    let top: CGFloat = 12
+    let bottom: CGFloat = 96
+    #else
+    let toolbarWidth: CGFloat = 44
+    let topControlsHeight: CGFloat = 198
+    let historyHeight: CGFloat = 76
+    let bottomBarHeight: CGFloat = 0
+    let trailing: CGFloat = 12
+    let top: CGFloat = 22
+    let bottom: CGFloat = 72
+    #endif
+
+    let topRect = CGRect(
+      x: canvasSize.width - trailing - toolbarWidth,
+      y: top,
+      width: toolbarWidth,
+      height: topControlsHeight
+    )
+    let historyRect = CGRect(
+      x: canvasSize.width - trailing - toolbarWidth,
+      y: canvasSize.height - bottom - historyHeight,
+      width: toolbarWidth,
+      height: historyHeight
+    )
+    let bottomRect = CGRect(
+      x: (canvasSize.width - 220) / 2,
+      y: canvasSize.height - 20 - bottomBarHeight,
+      width: 220,
+      height: bottomBarHeight
+    )
+    return topRect.insetBy(dx: -8, dy: -8).contains(screenPoint)
+      || historyRect.insetBy(dx: -8, dy: -8).contains(screenPoint)
+      || bottomRect.insetBy(dx: -8, dy: -8).contains(screenPoint)
+  }
+
   private func edgeInteractionGesture(canvasSize: CGSize) -> some Gesture {
     DragGesture(minimumDistance: 0, coordinateSpace: .named("canvasScreen"))
       .onChanged { value in
         guard store.contextMenu == nil, !isCardDragging, !isCardResizing else { return }
         guard !isPointOnSelectedCardToolbar(value.startLocation) else { return }
+        guard !isPointOnCanvasToolbar(value.startLocation, canvasSize: canvasSize) else { return }
 
         if pendingEdgeInteractionID == nil, !edgeInteractionActive, store.editingEdgeID == nil {
           guard let edgeID = hitTestEdge(at: value.startLocation, canvasSize: canvasSize) else { return }
@@ -1010,6 +1239,7 @@ struct InfiniteCanvasView: View {
 
         guard store.contextMenu == nil, !isCardDragging, !isCardResizing else { return }
         guard !isPointOnSelectedCardToolbar(value.startLocation) else { return }
+        guard !isPointOnCanvasToolbar(value.startLocation, canvasSize: canvasSize) else { return }
 
         if let edgeID = pendingEdgeInteractionID {
           store.showEdgeMenu(edgeID: edgeID, screenPoint: value.startLocation)
@@ -1073,7 +1303,7 @@ private struct CanvasToolButtonStyle: ButtonStyle {
       .foregroundStyle(configuration.isPressed ? AppColors.textPrimary : AppColors.textSecondary)
       .background(
         RoundedRectangle(cornerRadius: 6)
-          .fill(configuration.isPressed ? Color.white.opacity(0.08) : Color.clear)
+          .fill(configuration.isPressed ? AppColors.toolbarButtonPressed : Color.clear)
       )
   }
 }
@@ -1129,11 +1359,6 @@ private final class CanvasScrollNSView: NSView {
 
   /// Pass clicks through to SwiftUI — scroll is captured via the local monitor.
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-  override func scrollWheel(with event: NSEvent) {
-    guard isPointerInsideView else { return }
-    processScrollEvent(event)
-  }
 
   private var isPointerInsideView: Bool {
     guard let window else { return false }

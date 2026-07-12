@@ -376,7 +376,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
 
         private func updateCaretRect(for textView: UITextView) {
             guard let range = textView.selectedTextRange else { return }
-            parent.caretRect = textView.caretRect(for: range)
+            parent.caretRect = textView.caretRect(for: range.end)
         }
 
         private func clampedRange(_ range: NSRange, in content: String) -> NSRange {

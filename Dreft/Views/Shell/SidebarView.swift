@@ -53,8 +53,6 @@ struct SidebarPanelSwitcherBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Spacer(minLength: 0)
-
             HStack(spacing: 6) {
                 PanelSwitcherButton(systemName: "folder", label: "Files", isActive: activePanel == .files) {
                     activePanel = .files
@@ -84,7 +82,7 @@ struct SidebarPanelSwitcherBar: View {
             .help("Collapse sidebar")
             .padding(.trailing, 10)
         }
-        .padding(.leading, 8)
+        .padding(.leading, 46)
     }
 }
 
