@@ -86,13 +86,22 @@ enum VaultSecurityAccess {
     }
 
     static func isInsideAppContainer(_ url: URL) -> Bool {
-        let path = url.standardizedFileURL.path
+        let path = canonicalSandboxPath(url)
         let containerRoots = [
-            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].path,
-            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path,
-            FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].path,
-        ]
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0],
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0],
+            FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0],
+        ].map { canonicalSandboxPath($0) }
         return containerRoots.contains { path.hasPrefix($0) }
+    }
+
+    /// Normalizes sandbox paths so `/private/var/...` and `/var/...` compare equal on iOS.
+    static func canonicalSandboxPath(_ url: URL) -> String {
+        var path = url.standardizedFileURL.path
+        if path.hasPrefix("/private") {
+            path = String(path.dropFirst("/private".count))
+        }
+        return path
     }
 
     static func refreshBookmarkIfNeeded(for vault: inout WorkspaceVault, url: URL) {

@@ -14,6 +14,7 @@ final class CanvasStore {
     var cards: [CanvasCard] = []
     var edges: [CanvasEdge] = []
     var selectedCardID: String?
+    var selectedEdgeID: String?
     var hoverCardID: String?
     var isDragOver = false
     var vaultSearchQuery = ""
@@ -141,6 +142,19 @@ final class CanvasStore {
         contentEditCheckpointRecorded = false
     }
 
+    /// Replace the whole document (version-history restore) as an undoable step,
+    /// so the user can always get back to what they had before restoring.
+    func restoreDocumentSnapshot(_ snapshot: CanvasDocumentSnapshot) {
+        withUndo {
+            cards = snapshot.cards
+            edges = snapshot.edges
+            transform = snapshot.transform
+        }
+        selectedCardID = nil
+        selectedEdgeID = nil
+        notifyMutated()
+    }
+
     func undo() {
         guard let previous = undoStack.popLast() else { return }
         endContentEdit()
@@ -221,6 +235,56 @@ final class CanvasStore {
     func zoomToSelection(canvasSize: CGSize, padding: CGFloat = 80) {
         guard let selectedID = selectedCardID else { return }
         applyZoomFit(to: Set([selectedID]), canvasSize: canvasSize, padding: padding)
+    }
+
+    /// Frame the connection path and its linked cards.
+    func zoomToEdge(_ edgeID: String, canvasSize: CGSize, padding: CGFloat = 100) {
+        guard let edge = edges.first(where: { $0.id == edgeID }),
+              let from = cards.first(where: { $0.id == edge.fromID }),
+              let endpoint = edgeEndpoint(for: edge) else { return }
+
+        let p1 = CanvasGeometry.anchor(for: from, side: edge.fromSide, overrides: [:])
+        var bounds = CGRect.null
+        for index in 0...28 {
+            let t = CGFloat(index) / 28
+            let point = CanvasGeometry.pointOnCurve(
+                from: p1,
+                fromSide: edge.fromSide,
+                to: endpoint.point,
+                toSide: endpoint.toSide,
+                t: t
+            )
+            bounds = bounds.union(CGRect(x: point.x - 40, y: point.y - 40, width: 80, height: 80))
+        }
+        let fromRect = CGRect(x: from.x, y: from.y, width: from.width, height: from.height)
+        bounds = bounds.union(fromRect)
+        if let toID = edge.toID, let to = cards.first(where: { $0.id == toID }) {
+            bounds = bounds.union(CGRect(x: to.x, y: to.y, width: to.width, height: to.height))
+        }
+        guard bounds.width > 1, bounds.height > 1 else { return }
+        transform = fitTransform(to: bounds, canvasSize: canvasSize, padding: padding)
+        notifyMutated()
+    }
+
+    func setEdgeLabel(_ edgeID: String, label: String) {
+        guard let index = edges.firstIndex(where: { $0.id == edgeID }) else { return }
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = trimmed.isEmpty ? nil : trimmed
+        guard edges[index].label != resolved else { return }
+        withUndo {
+            edges[index].label = resolved
+        }
+        notifyMutated()
+    }
+
+    func setEdgeColor(_ edgeID: String, hex: String) {
+        guard let index = edges.firstIndex(where: { $0.id == edgeID }) else { return }
+        let resolved = hex.isEmpty ? nil : hex
+        guard edges[index].colorHex != resolved else { return }
+        withUndo {
+            edges[index].colorHex = resolved
+        }
+        notifyMutated()
     }
 
     private func applyZoomFit(to cardIDs: Set<String>, canvasSize: CGSize, padding: CGFloat) {
@@ -380,7 +444,7 @@ final class CanvasStore {
                 width: displaySize.width,
                 height: displaySize.height,
                 content: content,
-                title: title
+                title: Self.resolvedImageTitle(title)
             ))
             selectedCardID = id
 
@@ -502,6 +566,38 @@ final class CanvasStore {
         }
         cards[index].content = content
         notifyMutated()
+    }
+
+    func updateTitle(for id: String, title: String) {
+        guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = trimmed.isEmpty ? Self.defaultImageTitle : trimmed
+        guard cards[index].title != resolved else { return }
+        withUndo {
+            cards[index].title = resolved
+        }
+        notifyMutated()
+    }
+
+    /// Display name for an image card, never the bare placeholder "Image".
+    func displayTitle(for card: CanvasCard) -> String {
+        if let title = card.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            return title
+        }
+        if let path = imageRelativePath(for: card) {
+            let stem = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+            if !stem.isEmpty { return stem }
+        }
+        return Self.defaultImageTitle
+    }
+
+    static let defaultImageTitle = "Untitled image"
+
+    static func resolvedImageTitle(_ title: String?) -> String {
+        guard let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else {
+            return defaultImageTitle
+        }
+        return (title as NSString).deletingPathExtension
     }
 
     func moveCard(_ id: String, to origin: CGPoint) {
@@ -709,12 +805,49 @@ final class CanvasStore {
     }
 
     func showEdgeMenu(edgeID: String, screenPoint: CGPoint) {
+        selectedEdgeID = edgeID
+        selectedCardID = nil
         contextMenu = (screenPoint, .edge(edgeID: edgeID))
+    }
+
+    func selectEdge(_ edgeID: String) {
+        selectedEdgeID = edgeID
+        selectedCardID = nil
+        contextMenu = nil
+    }
+
+    func setEdgeDirection(_ edgeID: String, direction: CanvasEdgeDirection) {
+        guard let index = edges.firstIndex(where: { $0.id == edgeID }),
+              edges[index].direction != direction else { return }
+        withUndo {
+            edges[index].direction = direction
+        }
+        selectedEdgeID = edgeID
+        notifyMutated()
+    }
+
+    /// Apply direction to every edge touching this card (including dangling lines).
+    func setConnectedEdgeDirection(forCard cardID: String, direction: CanvasEdgeDirection) {
+        let indexes = edges.indices.filter { i in
+            let edge = edges[i]
+            return edge.fromID == cardID || edge.toID == cardID
+        }
+        guard !indexes.isEmpty else { return }
+        withUndo {
+            for i in indexes {
+                edges[i].direction = direction
+            }
+        }
+        if let first = indexes.first {
+            selectedEdgeID = edges[first].id
+        }
+        notifyMutated()
     }
 
     func deleteEdge(_ id: String) {
         withUndo {
             edges.removeAll { $0.id == id }
+            if selectedEdgeID == id { selectedEdgeID = nil }
             if editingEdgeID == id {
                 editingEdgeID = nil
                 clearConnecting()

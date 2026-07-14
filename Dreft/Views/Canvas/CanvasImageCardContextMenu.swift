@@ -16,6 +16,7 @@ struct CanvasImageCardContextMenu: View {
     var onZoom: () -> Void
     var onSwap: () -> Void
     var onRemove: () -> Void
+    var onRename: () -> Void
 
     private var linkedFileID: String? {
         workspace.fileID(forRelativePath: card.content)
@@ -41,7 +42,7 @@ struct CanvasImageCardContextMenu: View {
         Divider()
 
         Button("Rename...") {
-            renameImage()
+            onRename()
         }
 
         if let linkedFileID {
@@ -110,21 +111,6 @@ struct CanvasImageCardContextMenu: View {
                     }
                 }
             }
-        }
-    }
-
-    private func renameImage() {
-        sidebarPanel = .files
-        sidebarVisible = true
-        if let linkedFileID {
-            workspace.beginInlineRename(for: linkedFileID)
-        } else if let linkedByPath = relativePath.flatMap({ workspace.fileID(forRelativePath: $0) }) {
-            workspace.beginInlineRename(for: linkedByPath)
-        } else {
-            workspace.reportVaultError(
-                title: "Rename image",
-                message: "This canvas image isn't linked to a vault file yet. Rename it from the file list after adding it to the vault."
-            )
         }
     }
 

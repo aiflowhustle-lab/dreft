@@ -44,13 +44,27 @@ struct GraphCanvasLayer: View {
         let linkColor = (linksDimmed ? AppColors.graphLinkDimmedColor : AppColors.graphLinkColor)
             .opacity(linkRenderOpacity)
 
+        let radiusByID = Dictionary(uniqueKeysWithValues: nodes.map { node in
+            let radius = (node.isActive ? nodeDotSize + 2 : nodeDotSize) / 2
+            return (node.id, radius)
+        })
+
         for link in links {
-            guard let from = positions[link.fromID],
-                  let to = positions[link.toID] else { continue }
+            guard let fromPos = positions[link.fromID],
+                  let toPos = positions[link.toID] else { continue }
+
+            // Links attach to the visual dots (labels live below the stored layout point).
+            let fromCenter = visualDotCenter(for: fromPos)
+            let toCenter = visualDotCenter(for: toPos)
+            let fromRadius = radiusByID[link.fromID] ?? (nodeDotSize / 2)
+            let toRadius = radiusByID[link.toID] ?? (nodeDotSize / 2)
+
+            let start = edgePoint(from: fromCenter, toward: toCenter, radius: fromRadius)
+            let end = edgePoint(from: toCenter, toward: fromCenter, radius: toRadius)
 
             var path = Path()
-            path.move(to: from)
-            path.addLine(to: to)
+            path.move(to: start)
+            path.addLine(to: end)
             context.stroke(
                 path,
                 with: .color(linkColor),
@@ -58,7 +72,7 @@ struct GraphCanvasLayer: View {
             )
 
             if showArrows {
-                drawArrow(in: &context, from: from, to: to, color: linkColor)
+                drawArrow(in: &context, from: start, to: end, color: linkColor)
             }
         }
     }
@@ -81,6 +95,22 @@ struct GraphCanvasLayer: View {
             with: .color(color),
             style: StrokeStyle(lineWidth: linkStrokeWidth, lineCap: .round)
         )
+    }
+
+    /// Dot sits above the layout point; labels live below. Links must use the dot.
+    private func visualDotCenter(for position: CGPoint) -> CGPoint {
+        CGPoint(x: position.x, y: position.y - 12)
+    }
+
+    /// Stop the stroke at the circle rim so lines meet the nodes cleanly.
+    private func edgePoint(from center: CGPoint, toward other: CGPoint, radius: CGFloat) -> CGPoint {
+        let dx = other.x - center.x
+        let dy = other.y - center.y
+        let length = hypot(dx, dy)
+        guard length > 0.001 else { return center }
+        let inset = min(radius + 0.75, length * 0.42)
+        let t = inset / length
+        return CGPoint(x: center.x + dx * t, y: center.y + dy * t)
     }
 
     private func drawNodes(in context: inout GraphicsContext) {

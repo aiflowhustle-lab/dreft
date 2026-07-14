@@ -1021,7 +1021,7 @@ struct GraphView: View {
                 .padding(.vertical, 7)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.black.opacity(0.28))
+                        .fill(AppColors.inputFieldBackground)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(
@@ -1209,7 +1209,7 @@ struct GraphView: View {
         .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.black.opacity(0.28))
+                .fill(AppColors.inputFieldBackground)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
@@ -1280,7 +1280,9 @@ private struct GroupColorPickerPopover: View {
             saturationBrightnessArea
 
             HStack(spacing: 12) {
+                #if os(macOS)
                 eyedropperButton
+                #endif
 
                 Circle()
                     .fill(currentColor)
@@ -1315,6 +1317,13 @@ private struct GroupColorPickerPopover: View {
         hue = h
         saturation = s
         brightness = b
+        #else
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        if UIColor(color).getHue(&h, saturation: &s, brightness: &b, alpha: &a) {
+            hue = h
+            saturation = s
+            brightness = b
+        }
         #endif
     }
 
@@ -1414,25 +1423,28 @@ private struct GroupColorPickerPopover: View {
         let ns = NSColor(currentColor).usingColorSpace(.sRGB) ?? .black
         return (Int(ns.redComponent * 255), Int(ns.greenComponent * 255), Int(ns.blueComponent * 255))
         #else
-        return (0, 0, 0)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(currentColor).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return (Int(r * 255), Int(g * 255), Int(b * 255))
         #endif
     }
 
     private func setRGB(r: Int, g: Int, b: Int) {
-        #if os(macOS)
-        let ns = NSColor(
-            srgbRed: CGFloat(min(max(r, 0), 255)) / 255,
-            green: CGFloat(min(max(g, 0), 255)) / 255,
-            blue: CGFloat(min(max(b, 0), 255)) / 255,
-            alpha: 1
-        )
+        let red = CGFloat(min(max(r, 0), 255)) / 255
+        let green = CGFloat(min(max(g, 0), 255)) / 255
+        let blue = CGFloat(min(max(b, 0), 255)) / 255
         var h: CGFloat = 0, s: CGFloat = 0, br: CGFloat = 0, a: CGFloat = 0
+        #if os(macOS)
+        let ns = NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
         ns.getHue(&h, saturation: &s, brightness: &br, alpha: &a)
+        #else
+        UIColor(red: red, green: green, blue: blue, alpha: 1)
+            .getHue(&h, saturation: &s, brightness: &br, alpha: &a)
+        #endif
         hue = h
         saturation = s
         brightness = br
         commit()
-        #endif
     }
 
     private var rgbFields: some View {

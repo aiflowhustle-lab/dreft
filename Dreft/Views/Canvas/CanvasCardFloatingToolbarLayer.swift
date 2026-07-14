@@ -11,6 +11,7 @@ struct CanvasCardFloatingToolbarLayer: View {
     var onDelete: () -> Void
     var onZoomToCard: () -> Void
     var onBeginEditingNote: () -> Void
+    var onRenameImage: () -> Void = {}
 
     private var isImage: Bool { card.kind == .image }
 
@@ -68,15 +69,21 @@ struct CanvasCardFloatingToolbarLayer: View {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { showColorRow.toggle() }
             }
             ToolbarIconButton(systemName: "viewfinder", tip: "Zoom to selection", action: onZoomToCard)
-            if !isImage {
+
+            if isImage {
+                ToolbarIconButton(systemName: "square.and.pencil", tip: "Rename image", action: onRenameImage)
+            } else {
                 ToolbarIconButton(systemName: "square.and.pencil", tip: "Edit note", action: onBeginEditingNote)
             }
         }
         .padding(3)
         .background(AppColors.canvasBackground.opacity(0.98))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 1))
-        .shadow(color: .black.opacity(0.45), radius: 10, y: 3)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
+        )
+        .shadow(color: AppColors.floatingChromeShadow, radius: 10, y: 3)
         .fixedSize()
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
@@ -96,20 +103,22 @@ struct CanvasCardFloatingToolbarLayer: View {
                     .foregroundStyle(
                         isActive
                             ? AppColors.selectionStroke
-                            : (hovered ? Color.white.opacity(0.92) : AppColors.textSecondary)
+                            : (hovered ? AppColors.textPrimary : AppColors.textSecondary)
                     )
                     .background(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .fill(
                                 isActive
                                     ? AppColors.selectionStroke.opacity(0.16)
-                                    : (hovered ? Color.white.opacity(0.07) : .clear)
+                                    : (hovered ? AppColors.sidebarSelection : .clear)
                             )
                     )
                     .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .buttonStyle(.plain)
+            #if os(macOS)
             .onHover { hovered = $0 }
+            #endif
             .help(tip)
         }
     }

@@ -28,7 +28,7 @@ struct VaultManagerView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.45)
+            AppColors.canvasBackground.opacity(0.55)
                 .ignoresSafeArea()
                 .onTapGesture {
                     closeManager()
@@ -69,13 +69,13 @@ struct VaultManagerView: View {
         #else
         .frame(width: 710, height: 560)
         #endif
-        .background(Color(red: 0.125, green: 0.12, blue: 0.13))
+        .background(AppColors.overlayPanel)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.5), radius: 40, y: 18)
+        .shadow(color: AppColors.floatingChromeShadow, radius: 40, y: 18)
     }
 
     @ViewBuilder
@@ -88,9 +88,9 @@ struct VaultManagerView: View {
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.75))
+                .foregroundStyle(AppColors.textSecondary)
                 .frame(width: 28, height: 28)
-                .background(Circle().fill(Color.white.opacity(0.08)))
+                .background(Circle().fill(AppColors.sidebarSelection))
         }
         .buttonStyle(.plain)
         #endif
@@ -135,10 +135,10 @@ struct VaultManagerView: View {
         .frame(width: 250)
         #endif
         .frame(maxHeight: .infinity)
-        .background(Color(red: 0.10, green: 0.095, blue: 0.105))
+        .background(AppColors.shellBackground)
         .overlay(alignment: .trailing) {
             Rectangle()
-                .fill(Color.white.opacity(0.07))
+                .fill(AppColors.borderSubtle)
                 .frame(width: 1)
         }
     }
@@ -149,10 +149,10 @@ struct VaultManagerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(vault.name)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.textPrimary)
                 Text(vault.path)
                     .font(.system(size: 11))
-                    .foregroundStyle(Color.white.opacity(0.45))
+                    .foregroundStyle(AppColors.textMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -165,7 +165,7 @@ struct VaultManagerView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.45))
+                    .foregroundStyle(AppColors.textMuted)
                     .frame(width: 20, height: 20)
                     .contentShape(Rectangle())
             }
@@ -177,7 +177,7 @@ struct VaultManagerView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.white.opacity(isActive ? 0.06 : 0))
+                .fill(isActive ? AppColors.sidebarSelection : Color.clear)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -197,11 +197,11 @@ struct VaultManagerView: View {
 
             Text("Dreft")
                 .font(.system(size: 34, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.textPrimary)
 
             Text("Version 1.0.0")
                 .font(.system(size: 12))
-                .foregroundStyle(Color.white.opacity(0.5))
+                .foregroundStyle(AppColors.textMuted)
                 .padding(.top, 2)
 
             Spacer().frame(height: 28)
@@ -246,47 +246,15 @@ struct VaultManagerView: View {
 
             hairline
 
-            appearanceSection
+            AppearanceSettingsSection()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
         }
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.white.opacity(0.035))
+                .fill(AppColors.sidebarSelection.opacity(0.65))
         )
         .padding(.horizontal, 32)
-    }
-
-    private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Appearance")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-
-            Picker("Appearance", selection: appearanceModeBinding) {
-                ForEach(AppearanceMode.allCases) { mode in
-                    Text(mode.title).tag(mode.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            Text("Light mode uses a white canvas and light sidebar.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Color.white.opacity(0.5))
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.dark.rawValue
-
-    private var appearanceModeBinding: Binding<String> {
-        Binding(
-            get: { appearanceModeRaw },
-            set: { newValue in
-                appearanceModeRaw = newValue
-                let mode = AppearanceMode(rawValue: newValue) ?? .dark
-                AppColors.setTheme(mode.theme)
-            }
-        )
     }
 
     private var createVaultSubtitle: String {
@@ -313,7 +281,7 @@ struct VaultManagerView: View {
                     Text("Back")
                         .font(.system(size: 12.5))
                 }
-                .foregroundStyle(Color.white.opacity(0.7))
+                .foregroundStyle(AppColors.textSecondary)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -322,7 +290,7 @@ struct VaultManagerView: View {
 
             Text("Create local vault")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.textPrimary)
 
             Spacer().frame(height: 14)
 
@@ -331,10 +299,10 @@ struct VaultManagerView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Vault name")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColors.textPrimary)
                         Text("Pick a name for your awesome vault.")
                             .font(.system(size: 11.5))
-                            .foregroundStyle(Color.white.opacity(0.5))
+                            .foregroundStyle(AppColors.textMuted)
                     }
 
                     Spacer()
@@ -342,20 +310,20 @@ struct VaultManagerView: View {
                     TextField("Vault name", text: $newVaultName)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12.5))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.textPrimary)
                         .focused($nameFieldFocused)
                         .frame(width: 150)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(
                             RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.white.opacity(0.05))
+                                .fill(AppColors.sidebarSelection)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 6)
                                         .stroke(
                                             nameFieldFocused
                                                 ? AppColors.selectionStroke.opacity(0.8)
-                                                : Color.white.opacity(0.12),
+                                                : AppColors.border,
                                             lineWidth: 1
                                         )
                                 )
@@ -371,10 +339,10 @@ struct VaultManagerView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Location")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColors.textPrimary)
                         Text(locationDescription)
                             .font(.system(size: 11.5))
-                            .foregroundStyle(Color.white.opacity(0.5))
+                            .foregroundStyle(AppColors.textMuted)
                             .lineLimit(2)
                             .truncationMode(.middle)
                     }
@@ -384,15 +352,15 @@ struct VaultManagerView: View {
                     Button(action: browseForLocation) {
                         Text("Browse")
                             .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColors.textPrimary)
                             .padding(.horizontal, 18)
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.white.opacity(0.09))
+                                    .fill(AppColors.sidebarSelection)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                                            .stroke(AppColors.border, lineWidth: 1)
                                     )
                             )
                     }
@@ -403,7 +371,7 @@ struct VaultManagerView: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.white.opacity(0.035))
+                    .fill(AppColors.sidebarSelection.opacity(0.65))
             )
 
             Spacer().frame(height: 18)
@@ -532,7 +500,7 @@ struct VaultManagerView: View {
 
     private var hairline: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.07))
+            .fill(AppColors.borderSubtle)
             .frame(height: 1)
             .padding(.horizontal, 14)
     }
@@ -548,10 +516,10 @@ struct VaultManagerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.textPrimary)
                 Text(subtitle)
                     .font(.system(size: 11.5))
-                    .foregroundStyle(Color.white.opacity(0.5))
+                    .foregroundStyle(AppColors.textMuted)
             }
 
             Spacer()
@@ -559,15 +527,18 @@ struct VaultManagerView: View {
             Button(action: action) {
                 Text(buttonTitle)
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isPrimary ? .white : AppColors.textPrimary)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(isPrimary ? AppColors.selectionStroke : Color.white.opacity(0.09))
+                            .fill(isPrimary ? AppColors.selectionStroke : AppColors.sidebarSelection)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.white.opacity(isPrimary ? 0 : 0.12), lineWidth: 1)
+                                    .stroke(
+                                        isPrimary ? Color.clear : AppColors.border,
+                                        lineWidth: 1
+                                    )
                             )
                     )
             }

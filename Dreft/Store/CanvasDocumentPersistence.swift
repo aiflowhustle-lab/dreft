@@ -105,6 +105,10 @@ enum CanvasDocumentFormat {
             let fromSide: CanvasSide?
             let toNode: String
             let toSide: CanvasSide?
+            let fromEnd: String?
+            let toEnd: String?
+            let label: String?
+            let color: String?
         }
 
         struct JSONCanvasDocument: Decodable {
@@ -195,7 +199,10 @@ enum CanvasDocumentFormat {
                 fromID: edge.fromNode,
                 fromSide: edge.fromSide ?? .right,
                 toID: edge.toNode,
-                toSide: edge.toSide ?? .left
+                toSide: edge.toSide ?? .left,
+                direction: .fromObsidian(fromEnd: edge.fromEnd, toEnd: edge.toEnd),
+                label: edge.label,
+                colorHex: obsidianEdgeColorHex(edge.color)
             )
             mapped.id = edge.id
             edges.append(mapped)
@@ -206,5 +213,20 @@ enum CanvasDocumentFormat {
             edges: edges,
             transform: CanvasViewTransform()
         )
+    }
+
+    /// JSON Canvas preset color ids → hex (Obsidian palette).
+    private static func obsidianEdgeColorHex(_ preset: String?) -> String? {
+        switch preset {
+        case "1": return "#FB464C"
+        case "2": return "#E9973F"
+        case "3": return "#E0DE71"
+        case "4": return "#44CF6E"
+        case "5": return "#53DFDD"
+        case "6": return "#A882FF"
+        default:
+            if let preset, preset.hasPrefix("#") { return preset }
+            return nil
+        }
     }
 }

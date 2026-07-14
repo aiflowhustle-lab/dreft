@@ -145,7 +145,7 @@ struct CanvasImageExportSheet: View {
                         }
                     }
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.white)
                     .frame(minWidth: 42)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
@@ -161,7 +161,7 @@ struct CanvasImageExportSheet: View {
             .padding(16)
         }
         .frame(width: 440)
-        .background(Color(hex: 0x202020))
+        .background(AppColors.overlayPanel)
         .foregroundStyle(AppColors.textPrimary)
     }
 
@@ -169,7 +169,7 @@ struct CanvasImageExportSheet: View {
         HStack {
             Text("Export as image")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.textPrimary)
             Spacer()
             Button {
                 dismiss()
@@ -222,22 +222,7 @@ struct CanvasImageExportSheet: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         isExporting = true
-        let renderer = ImageRenderer(
-            content: CanvasExportView(
-                snapshot: snapshot,
-                vaultURL: workspace.activeVaultURL,
-                cropBounds: exportBounds,
-                requestedScale: exportZoom,
-                showLogo: showLogo,
-                privacyMode: privacyMode
-            )
-        )
-        renderer.scale = 1
-
-        guard let image = renderer.nsImage,
-              let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let data = bitmap.representation(using: .png, properties: [:]) else {
+        guard let data = renderPNGData() else {
             isExporting = false
             workspace.reportVaultError(
                 title: "Export failed",
@@ -255,10 +240,53 @@ struct CanvasImageExportSheet: View {
             workspace.reportVaultError(title: "Export failed", message: error.localizedDescription)
         }
         #else
-        workspace.reportVaultError(
-            title: "Export as image",
-            message: "Canvas image export is currently available on macOS."
+        isExporting = true
+        guard let data = renderPNGData() else {
+            isExporting = false
+            workspace.reportVaultError(
+                title: "Export failed",
+                message: "Dreft could not render this canvas as an image."
+            )
+            return
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(fileName).png")
+        do {
+            try data.write(to: url, options: .atomic)
+            isExporting = false
+            dismiss()
+            // Let the sheet dismiss before presenting the share sheet.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                IOSShareSheet.present(fileURL: url)
+            }
+        } catch {
+            isExporting = false
+            workspace.reportVaultError(title: "Export failed", message: error.localizedDescription)
+        }
+        #endif
+    }
+
+    private func renderPNGData() -> Data? {
+        let renderer = ImageRenderer(
+            content: CanvasExportView(
+                snapshot: snapshot,
+                vaultURL: workspace.activeVaultURL,
+                cropBounds: exportBounds,
+                requestedScale: exportZoom,
+                showLogo: showLogo,
+                privacyMode: privacyMode
+            )
         )
+        renderer.scale = 1
+
+        #if os(macOS)
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
+        #else
+        return renderer.uiImage?.pngData()
         #endif
     }
 }

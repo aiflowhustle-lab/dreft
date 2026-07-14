@@ -9,6 +9,8 @@ struct AppTheme: Equatable {
     let floatingChrome: Color
     let floatingChromeBorder: Color
     let floatingChromeShadow: Color
+    let overlayPanel: Color
+    let inputFieldBackground: Color
     let toolbarButtonPressed: Color
     let pillButtonFill: Color
     let pillButtonText: Color
@@ -45,6 +47,8 @@ struct AppTheme: Equatable {
         floatingChrome: Color(hex: 0x2B2B2B).opacity(0.72),
         floatingChromeBorder: Color.white.opacity(0.12),
         floatingChromeShadow: Color.black.opacity(0.45),
+        overlayPanel: Color(hex: 0x161616),
+        inputFieldBackground: Color.white.opacity(0.08),
         toolbarButtonPressed: Color.white.opacity(0.08),
         pillButtonFill: Color(hex: 0x1A1A1A),
         pillButtonText: Color(hex: 0xA78BFA),
@@ -77,11 +81,14 @@ struct AppTheme: Equatable {
         canvasBackground: Color(hex: 0xFFFFFF),
         shellBackground: Color(hex: 0xF3F3F3),
         railBackground: Color(hex: 0xF3F3F3),
-        tabBarBackground: Color(hex: 0xFFFFFF),
+        // Slightly cooler than canvas white so the active tab reads as elevated.
+        tabBarBackground: Color(hex: 0xF0F0F0),
         toolbarBackground: Color.white.opacity(0.92),
-        floatingChrome: Color.white.opacity(0.72),
+        floatingChrome: Color.white,
         floatingChromeBorder: Color.black.opacity(0.08),
         floatingChromeShadow: Color.black.opacity(0.12),
+        overlayPanel: Color(hex: 0xF7F7F7),
+        inputFieldBackground: Color.white,
         toolbarButtonPressed: Color.black.opacity(0.06),
         pillButtonFill: Color(hex: 0xFFFFFF),
         pillButtonText: Color(hex: 0x7C3AED),
@@ -96,17 +103,17 @@ struct AppTheme: Equatable {
         textSecondary: Color(red: 0.45, green: 0.45, blue: 0.45),
         textMuted: Color(red: 0.62, green: 0.62, blue: 0.62),
         gridDotColor: Color.black.opacity(0.12),
-        edgeOuter: Color.black.opacity(0.06),
-        edgeStroke: Color(hex: 0x8A8A8A),
-        edgeHighlight: Color(hex: 0x6A6A6A),
-        edgeShadow: Color(hex: 0xD8D8D8),
+        edgeOuter: Color.black.opacity(0.08),
+        edgeStroke: Color(hex: 0x7A7A7A),
+        edgeHighlight: Color(hex: 0x5A5A5A),
+        edgeShadow: Color(hex: 0xD0D0D0),
         handleFill: Color(red: 0.35, green: 0.35, blue: 0.35),
         handleStroke: Color.black.opacity(0.35),
         connectHandle: Color(red: 0.45, green: 0.45, blue: 0.45),
-        graphLinkColor: Color(hex: 0x333333).opacity(0.58),
+        graphLinkColor: Color(hex: 0x2A2A2A).opacity(0.72),
         graphLinkDimmedColor: Color(hex: 0x666666).opacity(0.28),
         graphNodeColor: Color(hex: 0x2A2A2A),
-        graphLabelColor: Color(hex: 0x333333),
-        usesMaterialChrome: true
+        graphLabelColor: Color(hex: 0x222222),
+        usesMaterialChrome: false
     )
 }

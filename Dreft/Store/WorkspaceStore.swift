@@ -276,34 +276,75 @@ final class WorkspaceStore {
         migrateLegacyVaultPaths()
         removeUnsuitableVaults()
         VaultSecurityAccess.restoreAccess(for: vaults)
+        // The vault must be scanned before restoring UI state — tabs, bookmarks,
+        // and the selection are validated against `files` and would otherwise be
+        // silently dropped on every launch.
+        if let vault = activeVault {
+            loadVaultFromDisk(vault)
+        }
         restoreUIState(from: state.currentWorkspace)
+    }
+
+    private static let vaultMigrationNoticeKey = "didShowVaultStorageMigrationNotice"
+
+    /// The iOS app container UUID changes on every app update, so absolute vault
+    /// paths saved by a previous version point at a container that no longer
+    /// exists. Rewrite them onto the current container when the target exists.
+    private static func rebasedContainerPath(_ path: String) -> String {
+        #if os(iOS)
+        let home = NSHomeDirectory()
+        guard !path.hasPrefix(home + "/") else { return path }
+        guard let range = path.range(of: "/Containers/Data/Application/") else { return path }
+        let tail = path[range.upperBound...]
+        guard let slash = tail.firstIndex(of: "/") else { return path }
+        let relative = String(tail[tail.index(after: slash)...])
+        let rebased = home + "/" + relative
+        return FileManager.default.fileExists(atPath: rebased) ? rebased : path
+        #else
+        return path
+        #endif
     }
 
     private func migrateLegacyVaultPaths() {
         let defaultURL = VaultFilesystem.defaultVaultURL()
+        let defaultPath = VaultSecurityAccess.canonicalSandboxPath(defaultURL)
         var didRemapLegacyVault = false
         for index in vaults.indices {
-            if let bookmark = vaults[index].securityScopedBookmark,
-               VaultSecurityAccess.resolveBookmark(bookmark) != nil {
+            vaults[index].path = Self.rebasedContainerPath(vaults[index].path)
+            let pathURL = URL(fileURLWithPath: vaults[index].path, isDirectory: true)
+            let canonicalVaultPath = VaultSecurityAccess.canonicalSandboxPath(pathURL)
+
+            // Already at the correct in-app vault location — skip.
+            if canonicalVaultPath == defaultPath,
+               FileManager.default.fileExists(atPath: pathURL.path) {
                 continue
             }
 
-            let pathURL = URL(fileURLWithPath: vaults[index].path, isDirectory: true)
+            // External vault with a saved permission bookmark: never clobber it,
+            // even if the bookmark is momentarily stale — access is re-requested later.
+            if vaults[index].securityScopedBookmark != nil {
+                continue
+            }
+
             let isLegacyDesktop = vaults[index].path.hasSuffix("/Desktop") && !vaults[index].path.contains("/Dreft")
             let isLegacyUserDocuments = vaults[index].path.contains("/Documents/Dreft")
                 && !VaultSecurityAccess.isInsideAppContainer(pathURL)
             let missingPath = !FileManager.default.fileExists(atPath: pathURL.path)
             let externalWithoutBookmark = !VaultSecurityAccess.isInsideAppContainer(pathURL)
-                && vaults[index].securityScopedBookmark == nil
 
             if isLegacyDesktop || isLegacyUserDocuments || missingPath || externalWithoutBookmark {
-                didRemapLegacyVault = true
+                // Only the legacy locations warrant the one-time migration notice.
+                if isLegacyDesktop || isLegacyUserDocuments {
+                    didRemapLegacyVault = true
+                }
                 vaults[index].path = defaultURL.path
                 vaults[index].name = defaultURL.lastPathComponent
                 vaults[index].securityScopedBookmark = nil
             }
         }
-        if didRemapLegacyVault {
+        if didRemapLegacyVault,
+           !UserDefaults.standard.bool(forKey: Self.vaultMigrationNoticeKey) {
+            UserDefaults.standard.set(true, forKey: Self.vaultMigrationNoticeKey)
             reportVaultError(
                 title: "Vault moved to app storage",
                 message: """

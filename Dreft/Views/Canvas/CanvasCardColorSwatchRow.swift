@@ -1,16 +1,16 @@
 import SwiftUI
 
-/// Obsidian-style inline color picker row for canvas cards.
+/// Obsidian-style inline color picker row for canvas cards and connection lines.
 struct CanvasCardColorSwatchRow: View {
-    let card: CanvasCard
+    let activeColorHex: String?
     let frameWidth: CGFloat
     let zoom: CGFloat
     let cardColors: [(name: String, hex: String)]
     @Binding var showCustomColorPicker: Bool
     var onSetColor: (String) -> Void
 
-    private var cardColor: Color? {
-        guard let hex = card.colorHex else { return nil }
+    private var activeColor: Color? {
+        guard let hex = activeColorHex else { return nil }
         return Color(hexString: hex)
     }
 
@@ -24,7 +24,7 @@ struct CanvasCardColorSwatchRow: View {
     }
 
     private var isCustomPresetColor: Bool {
-        guard let hex = card.colorHex, !hex.isEmpty else { return false }
+        guard let hex = activeColorHex, !hex.isEmpty else { return false }
         return cardColors.contains { $0.hex.uppercased() == hex.uppercased() }
     }
 
@@ -34,7 +34,7 @@ struct CanvasCardColorSwatchRow: View {
                 ColorSwatchButton(
                     hex: entry.hex,
                     name: entry.name,
-                    isActive: (card.colorHex ?? "").uppercased() == entry.hex.uppercased(),
+                    isActive: (activeColorHex ?? "").uppercased() == entry.hex.uppercased(),
                     action: { onSetColor(entry.hex) }
                 )
                 .frame(maxWidth: .infinity)
@@ -64,7 +64,7 @@ struct CanvasCardColorSwatchRow: View {
                 )
                 .frame(width: 18, height: 18)
                 .overlay {
-                    if card.colorHex != nil, !isCustomPresetColor {
+                    if activeColorHex != nil, !isCustomPresetColor {
                         Circle()
                             .stroke(AppColors.selectionStroke, lineWidth: 1.5)
                             .padding(-3)
@@ -76,7 +76,7 @@ struct CanvasCardColorSwatchRow: View {
         .popover(isPresented: $showCustomColorPicker, arrowEdge: .bottom) {
             AdvancedColorPickerPopover(
                 color: Binding(
-                    get: { cardColor ?? AppColors.selectionStroke },
+                    get: { activeColor ?? AppColors.selectionStroke },
                     set: { onSetColor($0.canvasHexString) }
                 )
             )

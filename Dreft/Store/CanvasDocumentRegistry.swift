@@ -114,6 +114,15 @@ extension CanvasStore {
     }
 
     func applyDocumentSnapshot(_ snapshot: CanvasDocumentSnapshot) {
+        // Re-syncs after our own saves deliver identical content; replacing the
+        // document then would needlessly wipe undo history and yank the camera.
+        if cards == snapshot.cards && edges == snapshot.edges {
+            if transform == CanvasViewTransform() {
+                // Fresh store that hasn't been viewed yet — adopt the saved camera.
+                transform = snapshot.transform
+            }
+            return
+        }
         cards = snapshot.cards
         edges = snapshot.edges
         transform = snapshot.transform

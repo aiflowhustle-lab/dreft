@@ -80,6 +80,41 @@ struct CanvasCard: Identifiable, Codable, Equatable {
     }
 }
 
+enum CanvasEdgeDirection: String, Codable, CaseIterable, Identifiable {
+    case nondirectional
+    case unidirectional
+    case bidirectional
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .nondirectional: "Nondirectional"
+        case .unidirectional: "Unidirectional"
+        case .bidirectional: "Bidirectional"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .nondirectional: "minus"
+        case .unidirectional: "arrow.right"
+        case .bidirectional: "arrow.left.and.right"
+        }
+    }
+
+    var showsFromArrow: Bool { self == .bidirectional }
+    var showsToArrow: Bool { self == .unidirectional || self == .bidirectional }
+
+    static func fromObsidian(fromEnd: String?, toEnd: String?) -> CanvasEdgeDirection {
+        let fromArrow = fromEnd == "arrow"
+        let toArrow = toEnd == nil || toEnd == "arrow"
+        if fromArrow && toArrow { return .bidirectional }
+        if !fromArrow && !toArrow { return .nondirectional }
+        return .unidirectional
+    }
+}
+
 struct CanvasEdge: Identifiable, Codable, Equatable {
     var id: String
     var fromID: String
@@ -87,14 +122,59 @@ struct CanvasEdge: Identifiable, Codable, Equatable {
     var toID: String?
     var toSide: CanvasSide?
     var toPoint: CGPoint?
+    var direction: CanvasEdgeDirection
+    var label: String?
+    var colorHex: String?
 
-    init(fromID: String, fromSide: CanvasSide, toID: String? = nil, toSide: CanvasSide? = nil, toPoint: CGPoint? = nil) {
+    enum CodingKeys: String, CodingKey {
+        case id, fromID, fromSide, toID, toSide, toPoint, direction, label, colorHex
+    }
+
+    init(
+        fromID: String,
+        fromSide: CanvasSide,
+        toID: String? = nil,
+        toSide: CanvasSide? = nil,
+        toPoint: CGPoint? = nil,
+        direction: CanvasEdgeDirection = .unidirectional,
+        label: String? = nil,
+        colorHex: String? = nil
+    ) {
         self.id = UUID().uuidString
         self.fromID = fromID
         self.fromSide = fromSide
         self.toID = toID
         self.toSide = toSide
         self.toPoint = toPoint
+        self.direction = direction
+        self.label = label
+        self.colorHex = colorHex
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        fromID = try container.decode(String.self, forKey: .fromID)
+        fromSide = try container.decode(CanvasSide.self, forKey: .fromSide)
+        toID = try container.decodeIfPresent(String.self, forKey: .toID)
+        toSide = try container.decodeIfPresent(CanvasSide.self, forKey: .toSide)
+        toPoint = try container.decodeIfPresent(CGPoint.self, forKey: .toPoint)
+        direction = try container.decodeIfPresent(CanvasEdgeDirection.self, forKey: .direction) ?? .unidirectional
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        colorHex = try container.decodeIfPresent(String.self, forKey: .colorHex)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(fromID, forKey: .fromID)
+        try container.encode(fromSide, forKey: .fromSide)
+        try container.encodeIfPresent(toID, forKey: .toID)
+        try container.encodeIfPresent(toSide, forKey: .toSide)
+        try container.encodeIfPresent(toPoint, forKey: .toPoint)
+        try container.encode(direction, forKey: .direction)
+        try container.encodeIfPresent(label, forKey: .label)
+        try container.encodeIfPresent(colorHex, forKey: .colorHex)
     }
 }
 

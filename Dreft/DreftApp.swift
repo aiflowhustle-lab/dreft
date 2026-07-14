@@ -19,7 +19,6 @@ struct DreftApp: App {
     var body: some Scene {
         WindowGroup {
             WorkspaceShellView()
-                .id(appearanceModeRaw)
                 .preferredColorScheme(appearanceMode.colorScheme)
                 .onChange(of: appearanceModeRaw) { _, newValue in
                     let mode = AppearanceMode(rawValue: newValue) ?? .dark

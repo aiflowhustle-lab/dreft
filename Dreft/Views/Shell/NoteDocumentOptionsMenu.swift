@@ -237,10 +237,61 @@ struct NoteDocumentOptionsMenu: View {
     }
 
     private func exportPDF() {
-        workspace.reportVaultError(
-            title: "Export to PDF",
-            message: "PDF export is available on macOS for now."
-        )
+        guard let file else { return }
+        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let textRect = pageRect.insetBy(dx: 36, dy: 36)
+
+        let content = NSMutableAttributedString()
+        content.append(NSAttributedString(
+            string: "\(file.name)\n\n",
+            attributes: [
+                .font: UIFont.systemFont(ofSize: 20, weight: .bold),
+                .foregroundColor: UIColor.black
+            ]
+        ))
+        content.append(NSAttributedString(
+            string: file.noteContent,
+            attributes: [
+                .font: UIFont.systemFont(ofSize: 12),
+                .foregroundColor: UIColor.black
+            ]
+        ))
+
+        let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
+        let data = renderer.pdfData { context in
+            let framesetter = CTFramesetterCreateWithAttributedString(content)
+            var location = 0
+            repeat {
+                context.beginPage()
+                let path = CGPath(rect: textRect, transform: nil)
+                let frame = CTFramesetterCreateFrame(
+                    framesetter,
+                    CFRange(location: location, length: 0),
+                    path,
+                    nil
+                )
+
+                let cgContext = context.cgContext
+                cgContext.saveGState()
+                cgContext.translateBy(x: 0, y: pageRect.height)
+                cgContext.scaleBy(x: 1, y: -1)
+                CTFrameDraw(frame, cgContext)
+                cgContext.restoreGState()
+
+                let visible = CTFrameGetVisibleStringRange(frame)
+                if visible.length == 0 { break }
+                location = visible.location + visible.length
+            } while location < content.length
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(file.name).pdf")
+        do {
+            try data.write(to: url, options: .atomic)
+            IOSShareSheet.present(fileURL: url)
+        } catch {
+            workspace.reportVaultError(title: "Export failed", message: error.localizedDescription)
+        }
     }
 
     private func openInNewWindow() {
@@ -254,4 +305,5 @@ struct NoteDocumentOptionsMenu: View {
 
 #if os(iOS)
 import UIKit
+import CoreText
 #endif

@@ -1,10 +1,19 @@
 import SwiftUI
+import Observation
+
+/// Observable holder so every SwiftUI view that reads `AppColors` re-renders
+/// automatically when the theme changes (no `.id()` teardown hacks needed).
+@Observable
+final class AppThemeState {
+    static let shared = AppThemeState()
+    var theme: AppTheme = .dark
+}
 
 enum AppColors {
-    private static var theme: AppTheme = .dark
+    private static var theme: AppTheme { AppThemeState.shared.theme }
 
     static func setTheme(_ theme: AppTheme) {
-        self.theme = theme
+        AppThemeState.shared.theme = theme
     }
 
     static var canvasBackground: Color { theme.canvasBackground }
@@ -13,6 +22,8 @@ enum AppColors {
     static var tabBarBackground: Color { theme.tabBarBackground }
     static var toolbarBackground: Color { theme.toolbarBackground }
     static var floatingChrome: Color { theme.floatingChrome }
+    static var overlayPanel: Color { theme.overlayPanel }
+    static var inputFieldBackground: Color { theme.inputFieldBackground }
     static var floatingChromeBorder: Color { theme.floatingChromeBorder }
     static var floatingChromeShadow: Color { theme.floatingChromeShadow }
     static var toolbarButtonPressed: Color { theme.toolbarButtonPressed }

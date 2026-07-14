@@ -208,8 +208,53 @@ enum VaultFilesystem {
         let url = vaultURL.appendingPathComponent(relativePath)
         guard CanvasDocumentFormat.shouldOverwriteExistingFile(at: url, with: snapshot) else { return }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        recordCanvasVersionIfNeeded(at: url, relativePath: relativePath, vaultURL: vaultURL)
         let data = try CanvasDocumentFormat.encode(snapshot)
         try data.write(to: url, options: .atomic)
+    }
+
+    static let canvasVersionsFolder = ".dreft/versions"
+    private static let canvasVersionInterval: TimeInterval = 60
+    private static let canvasVersionLimit = 20
+
+    static func canvasVersionsDirectory(forRelativePath relativePath: String, vaultURL: URL) -> URL {
+        let sanitized = relativePath.replacingOccurrences(of: "/", with: "__")
+        return vaultURL
+            .appendingPathComponent(canvasVersionsFolder)
+            .appendingPathComponent(sanitized)
+    }
+
+    /// Plain `Data.write` never creates system file versions on either platform,
+    /// so snapshot the previous contents into a hidden folder before overwriting
+    /// (throttled and pruned). Version history restores read from this folder.
+    private static func recordCanvasVersionIfNeeded(at url: URL, relativePath: String, vaultURL: URL) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return }
+
+        let dir = canvasVersionsDirectory(forRelativePath: relativePath, vaultURL: vaultURL)
+        let existing = (try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        let newest = existing
+            .compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
+            .max() ?? .distantPast
+        guard Date().timeIntervalSince(newest) > canvasVersionInterval else { return }
+
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let stamp = ISO8601DateFormatter().string(from: Date())
+                .replacingOccurrences(of: ":", with: "-")
+            try fm.copyItem(at: url, to: dir.appendingPathComponent("\(stamp).canvas"))
+
+            let all = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
+                .sorted { $0.lastPathComponent > $1.lastPathComponent }
+            for old in all.dropFirst(canvasVersionLimit) {
+                try? fm.removeItem(at: old)
+            }
+        } catch {
+            // Versioning is best-effort; never block the actual save.
+        }
     }
 
     static func writeNotes(_ files: [WorkspaceFileEntry], vaultURL: URL) -> VaultBatchWriteResult {

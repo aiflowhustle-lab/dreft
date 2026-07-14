@@ -28,12 +28,12 @@ struct DreftHelpView: View {
 
                 Text("Dreft")
                     .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.textPrimary)
                     .padding(.top, 14)
 
                 Text("Version \(appVersion)")
                     .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.5))
+                    .foregroundStyle(AppColors.textSecondary)
                     .padding(.top, 2)
 
                 Spacer().frame(height: 24)
@@ -51,7 +51,11 @@ struct DreftHelpView: View {
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.white.opacity(0.035))
+                        .fill(AppColors.sidebarSelection)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(AppColors.borderSubtle, lineWidth: 1)
                 )
                 .padding(.horizontal, 28)
 
@@ -63,13 +67,13 @@ struct DreftHelpView: View {
             #else
             .frame(width: 420, height: 360)
             #endif
-            .background(Color(red: 0.125, green: 0.12, blue: 0.13))
+            .background(AppColors.overlayPanel)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    .stroke(AppColors.border, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.5), radius: 40, y: 18)
+            .shadow(color: AppColors.floatingChromeShadow, radius: 40, y: 18)
         }
     }
 
@@ -88,17 +92,17 @@ struct DreftHelpView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.85))
+                .foregroundStyle(AppColors.textPrimary.opacity(0.85))
                 .frame(width: 22, height: 22)
                 .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.textPrimary)
                 Text(subtitle)
                     .font(.system(size: 11.5))
-                    .foregroundStyle(Color.white.opacity(0.5))
+                    .foregroundStyle(AppColors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -107,15 +111,18 @@ struct DreftHelpView: View {
             Button(action: action) {
                 Text(buttonTitle)
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isPrimary ? Color.white : AppColors.textPrimary)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(isPrimary ? AppColors.selectionStroke : Color.white.opacity(0.09))
+                            .fill(isPrimary ? AppColors.selectionStroke : AppColors.pillButtonFill)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.white.opacity(isPrimary ? 0 : 0.12), lineWidth: 1)
+                                    .stroke(
+                                        isPrimary ? Color.clear : AppColors.border,
+                                        lineWidth: 1
+                                    )
                             )
                     )
             }

@@ -11,6 +11,10 @@ struct InfiniteCanvasView: View {
   @Binding var sidebarPanel: SidebarPanel
   var documentTitle: String = "Untitled"
   var vaultURL: URL?
+  /// When true (split panes), this view owns its camera and does not follow `store.transform`.
+  var independentCamera = false
+  /// When true, this pane writes its camera into the shared document on gesture end.
+  var persistsCamera = true
 
   /// Single render transform — never nil-flipped during gestures (prevents shake).
   @State private var displayTransform = CanvasViewTransform()
@@ -32,7 +36,13 @@ struct InfiniteCanvasView: View {
   @State private var edgeInteractionStartLocation: CGPoint?
   @State private var cardToolbarColorRowOpen = false
   @State private var cardToolbarCustomColorOpen = false
+  @State private var edgeToolbarColorRowOpen = false
+  @State private var edgeToolbarCustomColorOpen = false
   @State private var suppressCanvasTapUntil: Date?
+  @State private var imageTitleRenameTokens: [String: Int] = [:]
+  @State private var hoverEdgeID: String?
+  @State private var editingEdgeLabelID: String?
+  @State private var edgeLabelDraft = ""
   #if canImport(PhotosUI)
   @State private var photoItems: [PhotosPickerItem] = []
   #endif
@@ -55,15 +65,65 @@ struct InfiniteCanvasView: View {
         canvasCardsLayer(canvasSize: size)
           .zIndex(3)
 
+        CanvasEdgeHitOverlay(
+          transform: displayTransform,
+          cardIndex: cardIndex,
+          edges: store.edges,
+          positionOverrides: cardDragOverrides,
+          resizeOverrides: cardResizeOverrides,
+          edgeEndpoint: { edge in
+            store.edgeEndpoint(
+              for: edge,
+              positionOverrides: cardDragOverrides,
+              resizeOverrides: cardResizeOverrides
+            )
+          },
+          onHoverEdge: { hoverEdgeID = $0 }
+        )
+        .zIndex(4)
+        #if os(macOS)
+        .canvasEdgeHandCursor(
+          isActive: hoverEdgeID != nil
+            || store.selectedEdgeID != nil
+            || edgeInteractionActive
+            || pendingEdgeInteractionID != nil
+            || store.editingEdgeID != nil,
+          isGrabbing: edgeInteractionActive
+            || pendingEdgeInteractionID != nil
+            || store.editingEdgeID != nil
+        )
+        #endif
+
         CanvasEdgesScreenOverlay(
           transform: displayTransform,
           cardIndex: cardIndex,
           edges: store.edges,
           connectingFrom: store.connectingFrom,
           positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides
+          resizeOverrides: cardResizeOverrides,
+          selectedEdgeID: store.selectedEdgeID,
+          editingEdgeID: editingEdgeLabelID,
+          editingLabelDraft: edgeLabelDraft
         )
         .zIndex(5)
+
+        CanvasEdgeLabelLayer(
+          transform: displayTransform,
+          cardIndex: cardIndex,
+          edges: store.edges,
+          positionOverrides: cardDragOverrides,
+          resizeOverrides: cardResizeOverrides,
+          editingEdgeID: editingEdgeLabelID,
+          labelDraft: $edgeLabelDraft,
+          onCommit: { edgeID, label in
+            store.setEdgeLabel(edgeID, label: label)
+            editingEdgeLabelID = nil
+          },
+          onBeginEdit: { edgeID in
+            editingEdgeLabelID = edgeID
+          }
+        )
+        .zIndex(6)
 
         canvasCardToolbarLayer(canvasSize: size)
           .zIndex(101)
@@ -90,6 +150,17 @@ struct InfiniteCanvasView: View {
       .onChange(of: store.selectedCardID) { _, _ in
         cardToolbarColorRowOpen = false
         cardToolbarCustomColorOpen = false
+        edgeToolbarColorRowOpen = false
+        edgeToolbarCustomColorOpen = false
+      }
+      .onChange(of: store.selectedEdgeID) { _, newValue in
+        if newValue != editingEdgeLabelID {
+          editingEdgeLabelID = nil
+        }
+        if newValue == nil {
+          edgeToolbarColorRowOpen = false
+          edgeToolbarCustomColorOpen = false
+        }
       }
       #if os(iOS)
       .overlay {
@@ -177,7 +248,8 @@ struct InfiniteCanvasView: View {
         store.vaultURL = newURL
       }
       .onChange(of: store.transform) { _, newValue in
-        guard !isCanvasInteracting else { return }
+        // Split panes keep independent cameras; only the primary document owner syncs.
+        guard !independentCamera, !isCanvasInteracting else { return }
         displayTransform = newValue
       }
       .onDrop(of: [.image, .fileURL], isTargeted: $store.isDragOver) { providers, location in
@@ -262,9 +334,17 @@ struct InfiniteCanvasView: View {
       .onTapGesture(count: 2, coordinateSpace: .named("canvasScreen")) { location in
         handleCanvasTap(at: location, canvasSize: canvasSize)
       }
-      .onTapGesture {
+      .onTapGesture(coordinateSpace: .named("canvasScreen")) { location in
+        // Tapping a connection line selects it (floating toolbar); the edge drag
+        // gesture also selects, but this tap fires later and must not clear it.
+        if let edgeID = hitTestEdge(at: location, canvasSize: canvasSize) {
+          store.selectEdge(edgeID)
+          return
+        }
         store.selectedCardID = nil
+        store.selectedEdgeID = nil
         store.focusCardID = nil
+        editingEdgeLabelID = nil
       }
   }
 
@@ -330,7 +410,10 @@ struct InfiniteCanvasView: View {
       isConnectingLine: store.isConnectingLine,
       zoom: displayTransform.zoom,
       vaultURL: vaultURL,
-      onSelect: { store.selectedCardID = card.id },
+      onSelect: {
+        store.selectedCardID = card.id
+        store.selectedEdgeID = nil
+      },
       onDragBegan: { isCardDragging = true },
       onMove: { preview in
         if var frame = cardResizeOverrides[card.id] {
@@ -390,11 +473,13 @@ struct InfiniteCanvasView: View {
         )
       },
       onUpdateContent: { store.updateContent(for: card.id, content: $0) },
+      onUpdateTitle: { store.updateTitle(for: card.id, title: $0) },
       onSetColor: { store.setCardColor(card.id, hex: $0) },
       shouldAutoFocus: store.focusCardID == card.id,
       onDidFocus: { store.focusCardID = nil },
       onBeginContentEdit: { store.beginContentEdit(for: card.id) },
       onEndContentEdit: { store.endContentEdit() },
+      beginTitleRenameToken: imageTitleRenameTokens[card.id] ?? 0,
       cardColors: store.cardColors,
       showColorRow: $cardToolbarColorRowOpen,
       showCustomColorPicker: $cardToolbarCustomColorOpen
@@ -421,7 +506,11 @@ struct InfiniteCanvasView: View {
             showImageSwapPicker = true
             #endif
           },
-          onRemove: { store.deleteCard(card.id) }
+          onRemove: { store.deleteCard(card.id) },
+          onRename: {
+            store.selectedCardID = card.id
+            imageTitleRenameTokens[card.id, default: 0] += 1
+          }
         )
       }
     } else {
@@ -476,11 +565,87 @@ struct InfiniteCanvasView: View {
         onBeginEditingNote: {
           store.beginContentEdit(for: card.id)
           store.focusCardID = card.id
+        },
+        onRenameImage: {
+          imageTitleRenameTokens[card.id, default: 0] += 1
         }
       )
       .frame(width: worldFrame.width, height: worldFrame.height)
       .scaleEffect(zoom, anchor: .center)
       .position(screenCenter)
+    }
+
+    if let edgeID = store.selectedEdgeID,
+       store.selectedCardID == nil,
+       let edge = store.edges.first(where: { $0.id == edgeID }),
+       !isCardDragging,
+       !isCardResizing {
+      edgeFloatingToolbar(for: edge, canvasSize: canvasSize)
+    }
+  }
+
+  @ViewBuilder
+  private func edgeFloatingToolbar(for edge: CanvasEdge, canvasSize: CGSize) -> some View {
+    if let from = cardIndex[edge.fromID],
+       let endpoint = store.edgeEndpoint(
+        for: edge,
+        positionOverrides: cardDragOverrides,
+        resizeOverrides: cardResizeOverrides
+       ) {
+      let p1 = CanvasGeometry.anchor(
+        for: from,
+        side: edge.fromSide,
+        overrides: cardDragOverrides,
+        resizeOverrides: cardResizeOverrides
+      )
+      let mid = CanvasGeometry.pointOnCurve(
+        from: p1,
+        fromSide: edge.fromSide,
+        to: endpoint.point,
+        toSide: endpoint.toSide,
+        t: 0.5
+      )
+      let screen = store.worldToScreen(mid, transform: displayTransform)
+      let zoom = displayTransform.zoom
+      let toolbarWorldScale = 1 / min(max(zoom, 0.45), 1.35)
+
+      VStack(spacing: 6) {
+        CanvasEdgeFloatingToolbar(
+          direction: edge.direction,
+          hasActiveColor: edge.colorHex != nil && !(edge.colorHex?.isEmpty ?? true),
+          showColorRow: $edgeToolbarColorRowOpen,
+          onDelete: {
+            editingEdgeLabelID = nil
+            store.deleteEdge(edge.id)
+          },
+          onZoomToLine: {
+            store.zoomToEdge(edge.id, canvasSize: canvasSize)
+            displayTransform = store.transform
+          },
+          onSetDirection: { store.setEdgeDirection(edge.id, direction: $0) },
+          onEditLabel: {
+            editingEdgeLabelID = edge.id
+            edgeLabelDraft = edge.label ?? ""
+          }
+        )
+
+        if edgeToolbarColorRowOpen {
+          CanvasCardColorSwatchRow(
+            activeColorHex: edge.colorHex,
+            frameWidth: 280,
+            zoom: zoom,
+            cardColors: store.cardColors,
+            showCustomColorPicker: $edgeToolbarCustomColorOpen,
+            onSetColor: { store.setEdgeColor(edge.id, hex: $0) }
+          )
+          .scaleEffect(toolbarWorldScale, anchor: .top)
+          .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
+        }
+      }
+      .animation(.spring(response: 0.28, dampingFraction: 0.85), value: edgeToolbarColorRowOpen)
+      // Hover above the line so the toolbar never covers it (and drags on the
+      // toolbar can't grab the edge underneath).
+      .position(x: screen.x, y: max(28, screen.y - 46))
     }
   }
 
@@ -538,7 +703,10 @@ struct InfiniteCanvasView: View {
   }
 
   private func finishCanvasInteraction() {
-    store.setTransform(displayTransform)
+    // Only the designated owner persists camera into the shared document snapshot.
+    if persistsCamera {
+      store.setTransform(displayTransform)
+    }
     isCanvasInteracting = false
   }
 
@@ -898,7 +1066,9 @@ struct InfiniteCanvasView: View {
 
   private func resetCanvasView() {
     displayTransform = CanvasViewTransform()
-    store.setTransform(displayTransform)
+    if persistsCamera {
+      store.setTransform(displayTransform)
+    }
   }
 
   private func floatingChromePill<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -1242,7 +1412,7 @@ struct InfiniteCanvasView: View {
         guard !isPointOnCanvasToolbar(value.startLocation, canvasSize: canvasSize) else { return }
 
         if let edgeID = pendingEdgeInteractionID {
-          store.showEdgeMenu(edgeID: edgeID, screenPoint: value.startLocation)
+          store.selectEdge(edgeID)
           return
         }
 
@@ -1408,6 +1578,50 @@ private final class CanvasScrollNSView: NSView {
 extension View {
   func onCanvasScroll(_ handler: @escaping (CGSize, CGPoint, Bool, Bool) -> Void) -> some View {
     modifier(CanvasScrollModifier(onScroll: handler))
+  }
+
+  func canvasEdgeHandCursor(isActive: Bool, isGrabbing: Bool) -> some View {
+    modifier(CanvasEdgeHandCursorModifier(isActive: isActive, isGrabbing: isGrabbing))
+  }
+}
+
+private struct CanvasEdgeHandCursorModifier: ViewModifier {
+  let isActive: Bool
+  let isGrabbing: Bool
+  @State private var hasPushed = false
+
+  func body(content: Content) -> some View {
+    content
+      .onChange(of: isActive) { _, active in
+        if active {
+          pushCursor()
+        } else {
+          popCursor()
+        }
+      }
+      .onChange(of: isGrabbing) { _, _ in
+        guard isActive else { return }
+        popCursor()
+        pushCursor()
+      }
+      .onAppear {
+        if isActive { pushCursor() }
+      }
+      .onDisappear {
+        popCursor()
+      }
+  }
+
+  private func pushCursor() {
+    guard !hasPushed else { return }
+    (isGrabbing ? NSCursor.closedHand : NSCursor.openHand).push()
+    hasPushed = true
+  }
+
+  private func popCursor() {
+    guard hasPushed else { return }
+    NSCursor.pop()
+    hasPushed = false
   }
 }
 #endif

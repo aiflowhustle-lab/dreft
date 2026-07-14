@@ -133,6 +133,9 @@ struct IconRailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            AppColors.tabBarBackground
+                .frame(height: AppColors.chromeRowHeight)
+
             VStack(spacing: 4) {
                 IconRailButton(systemName: "magnifyingglass", tooltip: "Go to file") {
                     onGoToFile()
@@ -158,7 +161,7 @@ struct IconRailView: View {
                     workspace.isVaultManagerOpen = true
                 }
             }
-            .padding(.top, contentTopInset)
+            .padding(.top, max(0, contentTopInset - AppColors.chromeRowHeight))
 
             Spacer(minLength: 0)
         }

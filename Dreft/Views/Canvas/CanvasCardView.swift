@@ -25,11 +25,13 @@ struct CanvasCardView: View {
     var onUpdateConnect: (CGPoint) -> Void
     var onEndConnect: (CGPoint, Bool) -> Void
     var onUpdateContent: (String) -> Void
+    var onUpdateTitle: (String) -> Void = { _ in }
     var onSetColor: (String) -> Void
     var shouldAutoFocus: Bool = false
     var onDidFocus: () -> Void = {}
     var onBeginContentEdit: () -> Void = {}
     var onEndContentEdit: () -> Void = {}
+    var beginTitleRenameToken: Int = 0
 
     let cardColors: [(name: String, hex: String)]
     @Binding var showColorRow: Bool
@@ -44,7 +46,10 @@ struct CanvasCardView: View {
     @State private var hoveredPremiumHandleID: String?
     @State private var hoveredConnectSide: CanvasSide?
     @State private var connectingSide: CanvasSide?
+    @State private var isRenamingTitle = false
+    @State private var titleDraft = ""
     @FocusState private var isContentFocused: Bool
+    @FocusState private var isTitleFocused: Bool
 
     private var isImage: Bool { card.kind == .image }
     private var frameWidth: CGFloat { displayFrame.width }
@@ -157,7 +162,11 @@ struct CanvasCardView: View {
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
                     .offset(y: showsSelectionChrome ? imageTitleOffsetY : (-18 * toolbarWorldScale))
-                    .if(!isResizing) { view in
+                    .onChange(of: beginTitleRenameToken) { _, _ in
+                        guard beginTitleRenameToken > 0 else { return }
+                        beginTitleRename()
+                    }
+                    .if(!isResizing && !isRenamingTitle) { view in
                         view
                             .highPriorityGesture(cardDragGesture)
                             .canvasCardCursor(isGrabbing: isPressingCard)
@@ -174,13 +183,68 @@ struct CanvasCardView: View {
         .zIndex(isSelected ? 10 : (isLinkTarget ? 8 : 1))
     }
 
+    private var imageDisplayTitle: String {
+        if let title = card.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            return title
+        }
+        if !VaultFilesystem.isEmbeddedImageContent(card.content) {
+            let stem = URL(fileURLWithPath: card.content).deletingPathExtension().lastPathComponent
+            if !stem.isEmpty { return stem }
+        }
+        return CanvasStore.defaultImageTitle
+    }
+
     private var imageTitleLabel: some View {
-        Text(card.title ?? "Image")
-            .font(.system(size: 11))
-            .foregroundStyle(AppColors.textSecondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(width: frameWidth, alignment: .center)
+        Group {
+            if isRenamingTitle {
+                TextField("Image name", text: $titleDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AppColors.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .focused($isTitleFocused)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(AppColors.canvasBackground)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .stroke(AppColors.selectionStroke, lineWidth: 1.5)
+                            )
+                    )
+                    .frame(width: max(80, frameWidth * 0.85))
+                    .onSubmit { commitTitleRename() }
+                    .onAppear {
+                        DispatchQueue.main.async { isTitleFocused = true }
+                    }
+                    .onChange(of: isTitleFocused) { _, focused in
+                        if !focused { commitTitleRename() }
+                    }
+            } else {
+                Text(imageDisplayTitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: frameWidth, alignment: .center)
+                    .onTapGesture(count: 2) {
+                        onSelect()
+                        beginTitleRename()
+                    }
+            }
+        }
+    }
+
+    private func beginTitleRename() {
+        titleDraft = imageDisplayTitle
+        isRenamingTitle = true
+    }
+
+    private func commitTitleRename() {
+        guard isRenamingTitle else { return }
+        isRenamingTitle = false
+        onUpdateTitle(titleDraft)
     }
 
     private var cardFrame: some View {
@@ -341,7 +405,7 @@ struct CanvasCardView: View {
     @ViewBuilder
     private var inlineColorSwatchRow: some View {
         CanvasCardColorSwatchRow(
-            card: card,
+            activeColorHex: card.colorHex,
             frameWidth: frameWidth,
             zoom: zoom,
             cardColors: cardColors,

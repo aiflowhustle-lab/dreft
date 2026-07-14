@@ -3,10 +3,32 @@ import SwiftUI
 import AppKit
 #endif
 
-enum SidebarPanel: String {
+enum SidebarPanel: String, CaseIterable {
     case files
     case search
+    case tags
+    case allProperties
     case bookmarks
+
+    var displayName: String {
+        switch self {
+        case .files: "Files"
+        case .search: "Search"
+        case .tags: "Tags"
+        case .allProperties: "All properties"
+        case .bookmarks: "Bookmarks"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .files: "folder"
+        case .search: "magnifyingglass"
+        case .tags: "tag"
+        case .allProperties: "archivebox"
+        case .bookmarks: "bookmark"
+        }
+    }
 }
 
 // MARK: - Row 1: panel switcher (aligns with tab bar)
@@ -648,6 +670,8 @@ struct SidebarView: View {
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
     var activePanel: SidebarPanel = .files
+    /// Floating overlay style (iPad): transparent background, no built-in footer.
+    var floatingStyle = false
     @State private var dropTarget: SidebarDropTarget = .none
     @State private var searchQuery = ""
     @State private var searchMatchCase = false
@@ -660,10 +684,38 @@ struct SidebarView: View {
                 filesPanel
             case .search:
                 searchPanel
+            case .tags:
+                emptyStatePanel("No tags found")
+            case .allProperties:
+                emptyStatePanel("No properties found")
             case .bookmarks:
                 bookmarksPanel
             }
 
+            if !floatingStyle {
+                sidebarFooter
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            if !floatingStyle {
+                AppColors.shellBackground
+            }
+        }
+    }
+
+    private func emptyStatePanel(_ message: String) -> some View {
+        VStack {
+            Spacer()
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundStyle(AppColors.textMuted)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var sidebarFooter: some View {
             HStack(spacing: 8) {
                 Menu {
                     ForEach(workspace.vaults) { vault in
@@ -706,9 +758,6 @@ struct SidebarView: View {
             .padding(.horizontal, 12)
             .frame(height: 34)
             .overlay(alignment: .top) { ShellHairline() }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppColors.shellBackground)
     }
 
     // MARK: Files panel
@@ -789,13 +838,13 @@ struct SidebarView: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.black.opacity(0.25))
+                        .fill(AppColors.inputFieldBackground)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(
                                     searchFieldFocused
                                         ? AppColors.selectionStroke.opacity(0.7)
-                                        : Color.white.opacity(0.1),
+                                        : AppColors.floatingChromeBorder,
                                     lineWidth: 1
                                 )
                         )
@@ -1064,7 +1113,7 @@ private struct SidebarFooterIconButton: View {
                 .frame(width: 24, height: 24)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(isHovered ? Color.white.opacity(0.1) : Color.clear)
+                        .fill(isHovered ? AppColors.sidebarSelection : Color.clear)
                 )
                 .contentShape(Rectangle())
         }

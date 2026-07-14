@@ -4,6 +4,8 @@ struct GoToFileSheet: View {
     @Bindable var workspace: WorkspaceStore
     @Binding var isPresented: Bool
     var replacingTabID: String?
+    /// When set, chosen files open through this handler instead of the main tab group.
+    var onFileSelected: ((WorkspaceFileEntry) -> Void)?
 
     @State private var query = ""
     @State private var selectedIndex = 0
@@ -143,16 +145,28 @@ struct GoToFileSheet: View {
             createFromQuery()
             return
         }
-        workspace.openFileFromQuickSwitcher(
-            filteredFiles[selectedIndex],
-            replacingTabID: replacingTabID
-        )
+        let file = filteredFiles[selectedIndex]
+        if let onFileSelected {
+            onFileSelected(file)
+        } else {
+            workspace.openFileFromQuickSwitcher(
+                file,
+                replacingTabID: replacingTabID
+            )
+        }
         dismiss()
     }
 
     private func createFromQuery() {
         let name = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
+        if onFileSelected != nil {
+            workspace.reportVaultError(
+                title: "Create note",
+                message: "Creating a new note from Go to file is only available in the main tab group."
+            )
+            return
+        }
         workspace.createNote(named: name, replacingTabID: replacingTabID)
         dismiss()
     }
