@@ -7,7 +7,8 @@ struct DreftHelpView: View {
     @Bindable var workspace: WorkspaceStore
     @Environment(\.openURL) private var openURL
 
-    private static let documentationURL = URL(string: "https://dreft.app/help")!
+    private static let documentationURL = URL(string: "https://lavish-birthday-3cc.notion.site/Dreft-Help-Support-39e2796a24538094b200c799f7ddf41d")!
+    private static let privacyPolicyURL = URL(string: "https://lavish-birthday-3cc.notion.site/Dreft-Privacy-Policy-39e2796a245380869bb7f48509695d5e")!
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
@@ -22,7 +23,7 @@ struct DreftHelpView: View {
                 }
 
             VStack(spacing: 0) {
-                DreftGemLogo()
+                DreftAppMark(cornerRadius: 12)
                     .frame(width: 52, height: 52)
                     .padding(.top, 28)
 
@@ -48,6 +49,20 @@ struct DreftHelpView: View {
                     ) {
                         openURL(Self.documentationURL)
                     }
+
+                    Divider()
+                        .background(AppColors.borderSubtle)
+                        .padding(.leading, 48)
+
+                    helpActionRow(
+                        icon: "hand.raised",
+                        title: "Privacy policy",
+                        subtitle: "How Dreft handles your data on your device.",
+                        buttonTitle: "View",
+                        isPrimary: false
+                    ) {
+                        openURL(Self.privacyPolicyURL)
+                    }
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 10)
@@ -65,7 +80,7 @@ struct DreftHelpView: View {
             .frame(maxWidth: 420, maxHeight: 360)
             .padding(.horizontal, 20)
             #else
-            .frame(width: 420, height: 360)
+            .frame(width: 420, height: 400)
             #endif
             .background(AppColors.overlayPanel)
             .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -74,11 +89,14 @@ struct DreftHelpView: View {
                     .stroke(AppColors.border, lineWidth: 1)
             )
             .shadow(color: AppColors.floatingChromeShadow, radius: 40, y: 18)
+            .onTapGesture { }
         }
     }
 
     private func closeHelp() {
-        workspace.isHelpOpen = false
+        withAnimation(.easeOut(duration: 0.15)) {
+            workspace.isHelpOpen = false
+        }
     }
 
     private func helpActionRow(

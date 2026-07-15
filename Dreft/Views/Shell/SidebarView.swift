@@ -731,7 +731,9 @@ struct SidebarView: View {
                     }
                     Divider()
                     Button("Manage vaults...") {
-                        workspace.isVaultManagerOpen = true
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            workspace.isVaultManagerOpen = true
+                        }
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -747,10 +749,14 @@ struct SidebarView: View {
                 .fixedSize()
                 Spacer()
                 SidebarFooterIconButton(systemName: "questionmark.circle", label: "Help") {
-                    workspace.isHelpOpen = true
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        workspace.isHelpOpen = true
+                    }
                 }
                 SidebarFooterIconButton(systemName: "gearshape", label: "Settings") {
-                    workspace.isVaultManagerOpen = true
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        workspace.isVaultManagerOpen = true
+                    }
                 }
             }
             .font(.system(size: 13))

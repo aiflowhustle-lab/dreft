@@ -26,6 +26,10 @@ struct VaultManagerView: View {
         case createLocation
     }
 
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+
     var body: some View {
         ZStack {
             AppColors.canvasBackground.opacity(0.55)
@@ -39,6 +43,9 @@ struct VaultManagerView: View {
                     closeButton
                         .padding(12)
                 }
+        }
+        .onAppear {
+            screen = .home
         }
         #if os(iOS)
         .fileImporter(
@@ -76,6 +83,7 @@ struct VaultManagerView: View {
                 .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
         )
         .shadow(color: AppColors.floatingChromeShadow, radius: 40, y: 18)
+        .onTapGesture { }
     }
 
     @ViewBuilder
@@ -190,8 +198,8 @@ struct VaultManagerView: View {
         VStack(spacing: 0) {
             Spacer().frame(height: 40)
 
-            DreftGemLogo()
-                .frame(width: 88, height: 96)
+            DreftAppMark(cornerRadius: 18)
+                .frame(width: 88, height: 88)
 
             Spacer().frame(height: 16)
 
@@ -199,7 +207,7 @@ struct VaultManagerView: View {
                 .font(.system(size: 34, weight: .bold))
                 .foregroundStyle(AppColors.textPrimary)
 
-            Text("Version 1.0.0")
+            Text("Version \(appVersion)")
                 .font(.system(size: 12))
                 .foregroundStyle(AppColors.textMuted)
                 .padding(.top, 2)
@@ -421,7 +429,9 @@ struct VaultManagerView: View {
     }
 
     private func closeManager() {
-        workspace.isVaultManagerOpen = false
+        withAnimation(.easeOut(duration: 0.15)) {
+            workspace.isVaultManagerOpen = false
+        }
         screen = .home
     }
 

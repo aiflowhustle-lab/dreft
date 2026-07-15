@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 private struct GraphNode: Identifiable {
     let id: String
@@ -67,6 +70,10 @@ private enum GraphScope: String, CaseIterable, Identifiable {
     }
 }
 
+private func isSignificantCanvasSizeChange(from old: CGSize, to new: CGSize) -> Bool {
+    abs(old.width - new.width) > 4 || abs(old.height - new.height) > 4
+}
+
 struct GraphView: View {
     @Bindable var workspace: WorkspaceStore
 
@@ -76,6 +83,7 @@ struct GraphView: View {
     @State private var panOffset: CGSize = .zero
     @State private var panDragStart: CGSize = .zero
     @State private var draggedNodeID: String?
+    @State private var hoveredNodeID: String?
     @State private var nodeDragStart: CGPoint?
     @State private var isPanningGraph = false
     @State private var canvasSize: CGSize = .zero
@@ -141,8 +149,9 @@ struct GraphView: View {
                     syncGraph(in: geo.size)
                     kickSimulation(to: simulationEnergyAfterSync())
                 }
-                .onChange(of: geo.size) { _, newSize in
+                .onChange(of: geo.size) { oldSize, newSize in
                     canvasSize = newSize
+                    guard isSignificantCanvasSizeChange(from: oldSize, to: newSize) else { return }
                     scheduleGraphSync(in: newSize, simulationEnergy: 0.5)
                 }
                 .onChange(of: workspace.files) { _, _ in
@@ -177,21 +186,12 @@ struct GraphView: View {
                     scheduleGraphSync(in: geo.size, simulationEnergy: 0.6)
                 }
             }
-
-            VStack(spacing: 0) {
-                HStack {
-                    Spacer()
-                    if controlsVisible {
-                        graphControlsPanel
-                    } else {
-                        reopenControlsButton
-                    }
-                }
-                Spacer()
-            }
-            .padding(14)
         }
-        .background(AppColors.canvasBackground)
+        .overlay(alignment: .topTrailing) {
+            graphControlsChrome
+                .padding(14)
+                .animation(nil, value: controlsVisible)
+        }
         .overlay(alignment: .bottomLeading) {
             if !nodes.isEmpty {
                 Text(graphStatusText)
@@ -201,6 +201,7 @@ struct GraphView: View {
                     .padding(.bottom, 10)
             }
         }
+        .background(AppColors.canvasBackground)
         .onDisappear {
             simulationTask?.cancel()
             graphSyncTask?.cancel()
@@ -209,10 +210,19 @@ struct GraphView: View {
         }
     }
 
+    @ViewBuilder
+    private var graphControlsChrome: some View {
+        if controlsVisible {
+            graphControlsPanel
+        } else {
+            reopenControlsButton
+        }
+    }
+
     private func scheduleGraphSync(in size: CGSize, simulationEnergy: CGFloat) {
         graphSyncTask?.cancel()
         graphSyncTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(120))
+            try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             syncGraph(in: size)
             kickSimulation(to: simulationEnergy)
@@ -468,8 +478,60 @@ struct GraphView: View {
         return nil
     }
 
+    private var focusNodeID: String? {
+        guard !isPanningGraph else { return nil }
+        if let draggedNodeID { return draggedNodeID }
+        return hoveredNodeID
+    }
+
+    private var focusNeighborhoodIDs: Set<String> {
+        guard let focusNodeID else { return [] }
+        var ids: Set<String> = [focusNodeID]
+        for link in renderedLinks {
+            if link.fromID == focusNodeID { ids.insert(link.toID) }
+            if link.toID == focusNodeID { ids.insert(link.fromID) }
+        }
+        return ids
+    }
+
+    private var isNeighborhoodFocusActive: Bool {
+        focusNodeID != nil
+    }
+
+    private func nodeIsDimmed(_ node: GraphNode) -> Bool {
+        if isNeighborhoodFocusActive, !focusNeighborhoodIDs.contains(node.id) {
+            return true
+        }
+        return !nodeMatchesSearch(node)
+    }
+
     private var canvasDrawLinks: [GraphCanvasLink] {
-        renderedLinks.map { GraphCanvasLink(fromID: $0.fromID, toID: $0.toID) }
+        let focusIDs = focusNeighborhoodIDs
+        return renderedLinks.map { link in
+            let keepsFocus = isNeighborhoodFocusActive
+                && focusIDs.contains(link.fromID)
+                && focusIDs.contains(link.toID)
+            let isDimmed = isNeighborhoodFocusActive && !keepsFocus
+            return GraphCanvasLink(
+                fromID: link.fromID,
+                toID: link.toID,
+                isDimmed: isDimmed
+            )
+        }
+    }
+
+    private var hoverHitTestNodes: [GraphCanvasDrawNode] {
+        renderedNodes.map { node in
+            GraphCanvasDrawNode(
+                id: node.id,
+                label: node.label,
+                position: node.position,
+                isActive: false,
+                isDimmed: false,
+                groupColor: nil,
+                showsLabel: true
+            )
+        }
     }
 
     private var canvasDrawNodes: [GraphCanvasDrawNode] {
@@ -478,8 +540,8 @@ struct GraphView: View {
                 id: node.id,
                 label: node.label,
                 position: node.position,
-                isActive: draggedNodeID == node.id,
-                isDimmed: !nodeMatchesSearch(node),
+                isActive: false,
+                isDimmed: nodeIsDimmed(node),
                 groupColor: groupColor(for: node),
                 showsLabel: shouldShowLabel(for: node)
             )
@@ -519,12 +581,61 @@ struct GraphView: View {
                 )
             }
         }
+        .drawingGroup()
     }
 
     private var graphNodeInteractionLayer: some View {
         Color.clear
             .contentShape(Rectangle())
             .gesture(graphNodeInteractionGesture)
+            .onContinuousHover(coordinateSpace: .named("graphCanvas")) { phase in
+                updateHoveredNode(for: phase)
+            }
+    }
+
+    private func updateHoveredNode(for phase: HoverPhase) {
+        DispatchQueue.main.async {
+            applyHoveredNodeUpdate(for: phase)
+        }
+    }
+
+    private func applyHoveredNodeUpdate(for phase: HoverPhase) {
+        guard draggedNodeID == nil, !isPanningGraph else {
+            #if os(macOS)
+            if draggedNodeID != nil {
+                NSCursor.closedHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+            #endif
+            return
+        }
+
+        switch phase {
+        case .active(let location):
+            let nextID = GraphCanvasHitTesting.nodeID(
+                at: location,
+                in: hoverHitTestNodes,
+                dotOnly: true
+            )
+            if hoveredNodeID != nextID {
+                hoveredNodeID = nextID
+            }
+            #if os(macOS)
+            if nextID != nil {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+            #endif
+        case .ended:
+            if hoveredNodeID != nil {
+                hoveredNodeID = nil
+            }
+            #if os(macOS)
+            NSCursor.arrow.set()
+            #endif
+        }
     }
 
     private var graphNodeInteractionGesture: some Gesture {
@@ -533,13 +644,19 @@ struct GraphView: View {
                 if draggedNodeID == nil, !isPanningGraph {
                     if let nodeID = GraphCanvasHitTesting.nodeID(
                         at: value.startLocation,
-                        in: canvasDrawNodes
+                        in: hoverHitTestNodes
                     ) {
                         draggedNodeID = nodeID
                         nodeDragStart = nodes[nodeIndexByID[nodeID]!].position
                         kickSimulation(to: 0.6)
+                        #if os(macOS)
+                        NSCursor.closedHand.set()
+                        #endif
                     } else if hypot(value.translation.width, value.translation.height) > 4 {
                         isPanningGraph = true
+                        if hoveredNodeID != nil {
+                            hoveredNodeID = nil
+                        }
                     }
                 }
 
@@ -572,7 +689,7 @@ struct GraphView: View {
 
                 let moved = hypot(value.translation.width, value.translation.height) > 3
                 let tappedID = draggedNodeID
-                    ?? GraphCanvasHitTesting.nodeID(at: value.location, in: canvasDrawNodes)
+                    ?? GraphCanvasHitTesting.nodeID(at: value.location, in: hoverHitTestNodes)
 
                 if !moved, let nodeID = tappedID,
                    let file = workspace.files.first(where: { $0.id == nodeID }) {
@@ -886,6 +1003,7 @@ struct GraphView: View {
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .compositingGroup()
         .onChange(of: centerForce) { _, _ in kickSimulation(to: 0.35) }
         .onChange(of: repelForce) { _, _ in kickSimulation(to: 0.35) }
         .onChange(of: linkForce) { _, _ in kickSimulation(to: 0.35) }

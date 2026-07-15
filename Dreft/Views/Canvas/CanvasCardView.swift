@@ -718,40 +718,48 @@ extension Color {
 // MARK: - Resize cursors (macOS)
 
 #if os(macOS)
+private final class MacCursorStackGate {
+    var hasPushed = false
+
+    func push(_ cursor: NSCursor) {
+        guard !hasPushed else { return }
+        cursor.push()
+        hasPushed = true
+    }
+
+    func pop() {
+        guard hasPushed else { return }
+        NSCursor.pop()
+        hasPushed = false
+    }
+}
+
+private final class CanvasCardCursorState {
+    var isHovering = false
+}
+
 private struct CanvasCardCursorModifier: ViewModifier {
     let isGrabbing: Bool
-    @State private var isHovering = false
-    @State private var hasPushed = false
+    @State private var gate = MacCursorStackGate()
+    @State private var hoverState = CanvasCardCursorState()
 
     func body(content: Content) -> some View {
         content
             .onContinuousHover { phase in
                 switch phase {
                 case .active:
-                    isHovering = true
-                    pushCursor()
+                    hoverState.isHovering = true
+                    gate.push(isGrabbing ? .closedHand : .openHand)
                 case .ended:
-                    isHovering = false
-                    popCursor()
+                    hoverState.isHovering = false
+                    gate.pop()
                 }
             }
             .onChange(of: isGrabbing) { _, _ in
-                guard isHovering else { return }
-                popCursor()
-                pushCursor()
+                guard hoverState.isHovering else { return }
+                gate.pop()
+                gate.push(isGrabbing ? .closedHand : .openHand)
             }
-    }
-
-    private func pushCursor() {
-        guard !hasPushed else { return }
-        (isGrabbing ? NSCursor.closedHand : NSCursor.openHand).push()
-        hasPushed = true
-    }
-
-    private func popCursor() {
-        guard hasPushed else { return }
-        NSCursor.pop()
-        hasPushed = false
     }
 }
 #endif

@@ -78,7 +78,11 @@ struct InfiniteCanvasView: View {
               resizeOverrides: cardResizeOverrides
             )
           },
-          onHoverEdge: { hoverEdgeID = $0 }
+          onHoverEdge: { edgeID in
+            Task { @MainActor in
+              hoverEdgeID = edgeID
+            }
+          }
         )
         .zIndex(4)
         #if os(macOS)
@@ -1585,43 +1589,44 @@ extension View {
   }
 }
 
+private final class MacCursorStackGate {
+    var hasPushed = false
+
+    func push(_ cursor: NSCursor) {
+        guard !hasPushed else { return }
+        cursor.push()
+        hasPushed = true
+    }
+
+    func pop() {
+        guard hasPushed else { return }
+        NSCursor.pop()
+        hasPushed = false
+    }
+}
+
 private struct CanvasEdgeHandCursorModifier: ViewModifier {
   let isActive: Bool
   let isGrabbing: Bool
-  @State private var hasPushed = false
+  @State private var gate = MacCursorStackGate()
 
   func body(content: Content) -> some View {
     content
       .onChange(of: isActive) { _, active in
         if active {
-          pushCursor()
+          gate.push(isGrabbing ? .closedHand : .openHand)
         } else {
-          popCursor()
+          gate.pop()
         }
       }
       .onChange(of: isGrabbing) { _, _ in
         guard isActive else { return }
-        popCursor()
-        pushCursor()
-      }
-      .onAppear {
-        if isActive { pushCursor() }
+        gate.pop()
+        gate.push(isGrabbing ? .closedHand : .openHand)
       }
       .onDisappear {
-        popCursor()
+        gate.pop()
       }
-  }
-
-  private func pushCursor() {
-    guard !hasPushed else { return }
-    (isGrabbing ? NSCursor.closedHand : NSCursor.openHand).push()
-    hasPushed = true
-  }
-
-  private func popCursor() {
-    guard hasPushed else { return }
-    NSCursor.pop()
-    hasPushed = false
   }
 }
 #endif

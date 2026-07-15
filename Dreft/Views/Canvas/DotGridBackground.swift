@@ -54,7 +54,7 @@ private enum DotGridTile {
   }
 
   private static func makeTile(dotColor: Color) -> CGImage {
-    let spacing = Int(CanvasConstants.dotSpacing)
+    let spacing = max(1, Int(CanvasConstants.dotSpacing))
     let colorSpace = CGColorSpaceCreateDeviceRGB()
     guard let context = CGContext(
       data: nil,
@@ -65,7 +65,7 @@ private enum DotGridTile {
       space: colorSpace,
       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
     ) else {
-      fatalError("DotGridTile: failed to create context")
+      return solidTile(size: 1, colorSpace: colorSpace)
     }
 
     context.clear(CGRect(x: 0, y: 0, width: spacing, height: spacing))
@@ -77,10 +77,37 @@ private enum DotGridTile {
     let dot = CanvasConstants.dotSize
     context.fillEllipse(in: CGRect(x: 0, y: 0, width: dot, height: dot))
 
-    guard let cgImage = context.makeImage() else {
-      fatalError("DotGridTile: failed to make image")
+    return context.makeImage() ?? solidTile(size: spacing, colorSpace: colorSpace)
+  }
+
+  private static func solidTile(size: Int, colorSpace: CGColorSpace) -> CGImage {
+    let context = CGContext(
+      data: nil,
+      width: size,
+      height: size,
+      bitsPerComponent: 8,
+      bytesPerRow: size * 4,
+      space: colorSpace,
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )
+    context?.clear(CGRect(x: 0, y: 0, width: size, height: size))
+    if let image = context?.makeImage() {
+      return image
     }
-    return cgImage
+    let data = Data(count: 4) as CFData
+    return CGImage(
+      width: 1,
+      height: 1,
+      bitsPerComponent: 8,
+      bitsPerPixel: 32,
+      bytesPerRow: 4,
+      space: colorSpace,
+      bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+      provider: CGDataProvider(data: data)!,
+      decode: nil,
+      shouldInterpolate: false,
+      intent: .defaultIntent
+    )!
   }
 }
 

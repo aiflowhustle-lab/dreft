@@ -28,9 +28,13 @@ struct CanvasEdgeHitOverlay: View {
                         .onContinuousHover { phase in
                             switch phase {
                             case .active:
-                                onHoverEdge(edge.id)
+                                Task { @MainActor in
+                                    onHoverEdge(edge.id)
+                                }
                             case .ended:
-                                onHoverEdge(nil)
+                                Task { @MainActor in
+                                    onHoverEdge(nil)
+                                }
                             }
                         }
                         #endif

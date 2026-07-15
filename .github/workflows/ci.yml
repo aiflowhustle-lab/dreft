@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  macos-build-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build for macOS
+        run: |
+          xcodebuild build \
+            -scheme Dreft \
+            -project Dreft.xcodeproj \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Test on macOS
+        run: |
+          xcodebuild test \
+            -scheme Dreft \
+            -project Dreft.xcodeproj \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+  ipad-simulator-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build for iPad simulator
+        run: |
+          xcodebuild build \
+            -scheme Dreft \
+            -project Dreft.xcodeproj \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO

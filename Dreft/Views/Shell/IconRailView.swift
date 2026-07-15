@@ -104,7 +104,11 @@ struct IconRailButton: View {
         }
         .buttonStyle(.plain)
         #if os(macOS)
-        .onHover { isHovered = $0 }
+        .onHover { hovering in
+            DispatchQueue.main.async {
+                isHovered = hovering
+            }
+        }
         #endif
         .overlay(alignment: .leading) {
             if isHovered {
@@ -131,9 +135,25 @@ struct IconRailView: View {
         workspace.activeTab?.kind == .canvas
     }
 
+    private var railSurfaceColor: Color {
+        #if os(macOS)
+        sidebarVisible ? AppColors.railBackground : AppColors.canvasBackground
+        #else
+        AppColors.railBackground
+        #endif
+    }
+
+    private var railHeaderColor: Color {
+        #if os(macOS)
+        sidebarVisible ? AppColors.tabBarBackground : AppColors.canvasBackground
+        #else
+        AppColors.tabBarBackground
+        #endif
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            AppColors.tabBarBackground
+            railHeaderColor
                 .frame(height: AppColors.chromeRowHeight)
 
             VStack(spacing: 4) {
@@ -158,7 +178,9 @@ struct IconRailView: View {
                     workspace.createNote()
                 }
                 IconRailButton(systemName: "square.stack.3d.up", tooltip: "Manage vaults") {
-                    workspace.isVaultManagerOpen = true
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        workspace.isVaultManagerOpen = true
+                    }
                 }
             }
             .padding(.top, max(0, contentTopInset - AppColors.chromeRowHeight))
@@ -167,7 +189,7 @@ struct IconRailView: View {
         }
         .frame(width: 40)
         .frame(maxHeight: .infinity)
-        .background(AppColors.railBackground)
+        .background(railSurfaceColor)
         .zIndex(2)
     }
 }

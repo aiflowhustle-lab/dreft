@@ -519,7 +519,6 @@ struct WorkspaceShellView: View {
             },
             onClose: closeSplitPaneTab,
             onAddTab: addSplitPaneTab,
-            showsPaneGroupIcon: true,
             showsTrailingChrome: showsSplitPaneTrailingChrome,
             leading: { EmptyView() }
         )
@@ -639,6 +638,10 @@ struct WorkspaceShellView: View {
     private var macShell: some View {
         ZStack {
             shellLayout
+                .animation(nil, value: workspace.isVaultManagerOpen)
+                .animation(nil, value: workspace.isHelpOpen)
+                .animation(nil, value: workspace.bookmarkEditorFileID != nil)
+                .animation(nil, value: showGoToFile)
 
             if workspace.isVaultManagerOpen {
                 VaultManagerView(workspace: workspace)
@@ -670,10 +673,6 @@ struct WorkspaceShellView: View {
                 .onDisappear { goToFileTargetsSplitPane = false }
             }
         }
-        .animation(.easeOut(duration: 0.15), value: workspace.isVaultManagerOpen)
-        .animation(.easeOut(duration: 0.15), value: workspace.isHelpOpen)
-        .animation(.easeOut(duration: 0.15), value: workspace.bookmarkEditorFileID != nil)
-        .animation(.easeOut(duration: 0.12), value: showGoToFile)
         .background(MacWindowChromeConfigurator())
         .background(AppColors.canvasBackground)
         .foregroundStyle(AppColors.textPrimary)
@@ -707,6 +706,10 @@ struct WorkspaceShellView: View {
     private var iosShell: some View {
         ZStack {
             shellLayout
+                .animation(nil, value: workspace.isVaultManagerOpen)
+                .animation(nil, value: workspace.isHelpOpen)
+                .animation(nil, value: workspace.bookmarkEditorFileID != nil)
+                .animation(nil, value: showGoToFile)
 
             if workspace.isVaultManagerOpen {
                 VaultManagerView(workspace: workspace)
@@ -744,12 +747,20 @@ struct WorkspaceShellView: View {
         .background {
             GeometryReader { geo in
                 Color.clear
-                    .onAppear { updateStageManagerInset(from: geo) }
+                    .onAppear {
+                        Task { @MainActor in
+                            updateStageManagerInset(from: geo)
+                        }
+                    }
                     .onChange(of: geo.size) { _, _ in
-                        updateStageManagerInset(from: geo)
+                        Task { @MainActor in
+                            updateStageManagerInset(from: geo)
+                        }
                     }
                     .onChange(of: geo.frame(in: .global).minX) { _, _ in
-                        updateStageManagerInset(from: geo)
+                        Task { @MainActor in
+                            updateStageManagerInset(from: geo)
+                        }
                     }
             }
         }
@@ -777,10 +788,6 @@ struct WorkspaceShellView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.15), value: workspace.isVaultManagerOpen)
-        .animation(.easeOut(duration: 0.15), value: workspace.isHelpOpen)
-        .animation(.easeOut(duration: 0.15), value: workspace.bookmarkEditorFileID != nil)
-        .animation(.easeOut(duration: 0.12), value: showGoToFile)
         .background {
             Button("") { showGoToFile = true }
                 .keyboardShortcut("o", modifiers: .command)
@@ -806,7 +813,6 @@ struct WorkspaceShellView: View {
             },
             onClose: { workspace.closeTab($0) },
             onAddTab: workspace.addTab,
-            showsPaneGroupIcon: true,
             showsTrailingChrome: showsMainPaneTrailingChrome,
             leading: { tabBarLeading }
         )
@@ -828,20 +834,11 @@ struct WorkspaceShellView: View {
         onSelect: @escaping (WorkspaceTab) -> Void,
         onClose: @escaping (String) -> Void,
         onAddTab: @escaping () -> Void,
-        showsPaneGroupIcon: Bool,
         showsTrailingChrome: Bool,
         @ViewBuilder leading: () -> Leading
     ) -> some View {
         HStack(spacing: 0) {
             leading()
-
-            if showsPaneGroupIcon {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .frame(width: 28, height: 28)
-                    .padding(.trailing, 2)
-            }
 
             GeometryReader { geo in
                 let trailingSlot: CGFloat = showsTrailingChrome ? 56 : 28

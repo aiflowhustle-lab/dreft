@@ -3,6 +3,7 @@ import SwiftUI
 struct GraphCanvasLink: Identifiable, Hashable {
     let fromID: String
     let toID: String
+    var isDimmed: Bool = false
 
     var id: String { "\(fromID)->\(toID)" }
 }
@@ -62,17 +63,24 @@ struct GraphCanvasLayer: View {
             let start = edgePoint(from: fromCenter, toward: toCenter, radius: fromRadius)
             let end = edgePoint(from: toCenter, toward: fromCenter, radius: toRadius)
 
+            let strokeColor: Color
+            if link.isDimmed {
+                strokeColor = linkColor.opacity(0.12)
+            } else {
+                strokeColor = linkColor
+            }
+
             var path = Path()
             path.move(to: start)
             path.addLine(to: end)
             context.stroke(
                 path,
-                with: .color(linkColor),
+                with: .color(strokeColor),
                 style: StrokeStyle(lineWidth: linkStrokeWidth, lineCap: .round)
             )
 
             if showArrows {
-                drawArrow(in: &context, from: start, to: end, color: linkColor)
+                drawArrow(in: &context, from: start, to: end, color: strokeColor)
             }
         }
     }
@@ -220,16 +228,31 @@ struct GraphNodeLabelsLayer: View {
 
 enum GraphCanvasHitTesting {
     /// Matches the combined dot + label hit area from the previous GraphNodeView layout.
-    static func nodeID(at point: CGPoint, in nodes: [GraphCanvasDrawNode]) -> String? {
+    static func nodeID(
+        at point: CGPoint,
+        in nodes: [GraphCanvasDrawNode],
+        dotOnly: Bool = false
+    ) -> String? {
         for node in nodes.reversed() {
             let layout = nodeLayout(for: node.position)
-            let hitRect = layout.labelRect
-                .union(CGRect(
-                    x: layout.dotCenter.x - 16,
-                    y: layout.dotCenter.y - 16,
-                    width: 32,
-                    height: 32
-                ))
+            let hitRect: CGRect
+            if dotOnly {
+                let pad: CGFloat = 14
+                hitRect = CGRect(
+                    x: layout.dotCenter.x - pad,
+                    y: layout.dotCenter.y - pad,
+                    width: pad * 2,
+                    height: pad * 2
+                )
+            } else {
+                hitRect = layout.labelRect
+                    .union(CGRect(
+                        x: layout.dotCenter.x - 16,
+                        y: layout.dotCenter.y - 16,
+                        width: 32,
+                        height: 32
+                    ))
+            }
             if hitRect.contains(point) {
                 return node.id
             }

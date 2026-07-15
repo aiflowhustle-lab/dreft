@@ -69,7 +69,9 @@ struct IPadIconRail: View {
                 workspace.createNote()
             }
             IPadRailButton(systemName: "square.stack.3d.up", label: "Manage vaults") {
-                workspace.isVaultManagerOpen = true
+                withAnimation(.easeOut(duration: 0.15)) {
+                    workspace.isVaultManagerOpen = true
+                }
             }
             Spacer(minLength: 0)
         }
@@ -177,7 +179,7 @@ struct IPadFloatingSidebar: View {
         .menuIndicator(.hidden)
     }
 
-    // MARK: Footer — vault info + settings / pin
+    // MARK: Footer — vault info + settings / help
 
     private var footer: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -195,7 +197,9 @@ struct IPadFloatingSidebar: View {
                 }
                 Divider()
                 Button("Manage vaults...") {
-                    workspace.isVaultManagerOpen = true
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        workspace.isVaultManagerOpen = true
+                    }
                 }
             } label: {
                 VStack(alignment: .leading, spacing: 3) {
@@ -221,13 +225,14 @@ struct IPadFloatingSidebar: View {
             Spacer(minLength: 0)
 
             footerCircleButton(systemName: "gearshape", label: "Settings") {
-                workspace.isVaultManagerOpen = true
+                withAnimation(.easeOut(duration: 0.15)) {
+                    workspace.isVaultManagerOpen = true
+                }
             }
-            footerCircleButton(
-                systemName: isPinned ? "pin.fill" : "pin",
-                label: isPinned ? "Unpin sidebar" : "Pin sidebar"
-            ) {
-                isPinned.toggle()
+            footerCircleButton(systemName: "questionmark.circle", label: "Help") {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    workspace.isHelpOpen = true
+                }
             }
         }
     }
