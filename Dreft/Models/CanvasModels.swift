@@ -39,6 +39,7 @@ struct CanvasCard: Identifiable, Codable, Equatable {
     var content: String
     var title: String?
     var colorHex: String?
+    var createdAt: Date?
 
     static func make(kind: CardKind, at center: CGPoint) -> CanvasCard {
         let size: (CGFloat, CGFloat, String) = switch kind {
@@ -53,7 +54,8 @@ struct CanvasCard: Identifiable, Codable, Equatable {
             y: center.y - size.1 / 2,
             width: size.0,
             height: size.1,
-            content: size.2
+            content: size.2,
+            createdAt: Date()
         )
     }
 
@@ -66,7 +68,8 @@ struct CanvasCard: Identifiable, Codable, Equatable {
             y: center.y - CanvasConstants.compactNoteHeight / 2,
             width: CanvasConstants.compactNoteWidth,
             height: CanvasConstants.compactNoteHeight,
-            content: ""
+            content: "",
+            createdAt: Date()
         )
     }
 
@@ -125,9 +128,10 @@ struct CanvasEdge: Identifiable, Codable, Equatable {
     var direction: CanvasEdgeDirection
     var label: String?
     var colorHex: String?
+    var createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, fromID, fromSide, toID, toSide, toPoint, direction, label, colorHex
+        case id, fromID, fromSide, toID, toSide, toPoint, direction, label, colorHex, createdAt
     }
 
     init(
@@ -138,7 +142,8 @@ struct CanvasEdge: Identifiable, Codable, Equatable {
         toPoint: CGPoint? = nil,
         direction: CanvasEdgeDirection = .unidirectional,
         label: String? = nil,
-        colorHex: String? = nil
+        colorHex: String? = nil,
+        createdAt: Date? = nil
     ) {
         self.id = UUID().uuidString
         self.fromID = fromID
@@ -149,6 +154,7 @@ struct CanvasEdge: Identifiable, Codable, Equatable {
         self.direction = direction
         self.label = label
         self.colorHex = colorHex
+        self.createdAt = createdAt ?? Date()
     }
 
     init(from decoder: Decoder) throws {
@@ -162,6 +168,7 @@ struct CanvasEdge: Identifiable, Codable, Equatable {
         direction = try container.decodeIfPresent(CanvasEdgeDirection.self, forKey: .direction) ?? .unidirectional
         label = try container.decodeIfPresent(String.self, forKey: .label)
         colorHex = try container.decodeIfPresent(String.self, forKey: .colorHex)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -175,6 +182,7 @@ struct CanvasEdge: Identifiable, Codable, Equatable {
         try container.encode(direction, forKey: .direction)
         try container.encodeIfPresent(label, forKey: .label)
         try container.encodeIfPresent(colorHex, forKey: .colorHex)
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
     }
 }
 

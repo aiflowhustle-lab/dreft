@@ -1,84 +1,105 @@
 // !$*UTF8*$!
 {
 	archiveVersion = 1;
-	classes = {};
+	classes = {
+	};
 	objectVersion = 56;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		SM000001 /* DreftApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100001; };
-		SM000002 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100002; };
-		SM000003 /* CanvasModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100003; };
-		SM000004 /* WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100004; };
-		SM000005 /* CanvasStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100005; };
-		SM000006 /* CanvasEdgesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100006; };
-		SM000007 /* CanvasCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100007; };
-		SM000008 /* InfiniteCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100008; };
-		SM000009 /* VaultSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100009; };
-		SM000010 /* IconRailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100010; };
-		SM000011 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100011; };
-		SM000012 /* WorkspaceShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100012; };
-		SM000013 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = SM200001; };
-		SM000052 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = SM200002; };
-		SM000014 /* ImagePixelSize.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100014; };
-		SM000015 /* CanvasImageCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100015; };
-		SM000016 /* DotGridBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100016; };
-		SM000017 /* CachedCardImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100017; };
-		SM000018 /* CanvasViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100018; };
-		SM000019 /* CanvasMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100019; };
-		SM000020 /* CanvasLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100020; };
-		SM000021 /* CanvasEdgesScreenOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100021; };
-		SM000022 /* WorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100022; };
-		SM000023 /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100023; };
-		SM000024 /* GraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100024; };
-		SM000025 /* VaultManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100025; };
-		SM000026 /* CanvasDocumentRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100026; };
-		SM000027 /* WorkspacePersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100027; };
-		SM000028 /* VaultFilesystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100028; };
-		SM000029 /* WikilinkParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100029; };
-		SM000030 /* GoToFileSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100030; };
-		SM000031 /* AdvancedColorPickerPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100031; };
-		SM000032 /* GraphLinkIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100032; };
-		SM000033 /* GraphCanvasLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100033; };
-		SM000034 /* VaultSecurityAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100034; };
-		SM000035 /* VaultErrors.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100035; };
-		SM000036 /* NoteMarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100036; };
-		SM000038 /* CanvasCardFloatingToolbarLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100038; };
-		SM000039 /* CanvasCardColorSwatchRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100039; };
-		SM000040 /* NoteDocumentOptionsMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100040; };
-		SM000041 /* NoteLinkedLinksSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100041; };
-		SM000042 /* ShellSidebarResizeHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100042; };
-		SM000043 /* CanvasImageCardContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100043; };
-		SM000044 /* GraphLayoutPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100044; };
-		SM000045 /* GraphLinkIndexPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100045; };
-		SM000046 /* GraphBarnesHut.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100046; };
-		SM000047 /* CanvasSpatialIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100047; };
-		SM000048 /* GoToFileSearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100048; };
-		SM000049 /* VaultFilesystemWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100049; };
-		SM000050 /* CanvasDocumentPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100050; };
-		SM000051 /* DataSafetyUpgradeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100051; };
-		SM000053 /* DreftBrandMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100052; };
-		SM000054 /* DreftHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100053; };
-		SM000055 /* WikilinkEditorSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100054; };
-		SM000056 /* NoteBodyTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100055; };
-		SM000057 /* WikilinkSuggestPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100056; };
-		SM000058 /* AddBookmarkSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100057; };
-		SM000059 /* CanvasDocumentOptionsMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100058; };
-		SM000060 /* CanvasExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100059; };
-		SM000061 /* CanvasVersionHistorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100060; };
-		SM000062 /* CanvasImageExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100061; };
-		SM000063 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100062; };
-		SM000064 /* AppearanceMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100063; };
-		SM000065 /* CanvasFloatingToolbarChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100064; };
-		SM000066 /* AppearanceSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100065; };
-		SM000067 /* CanvasIPadRightToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100066; };
-		SM000068 /* CanvasIPadBottomToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100067; };
-		SM000069 /* IPadSidebarOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100068; };
-		SM000070 /* IOSShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100069; };
-		SM000071 /* CanvasEdgeFloatingToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100070; };
-		SM000072 /* CanvasEdgeLabelLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100071; };
-		SM000073 /* CanvasEdgeHitOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100072; };
+		SM000001 /* DreftApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100001 /* DreftApp.swift */; };
+		SM000002 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100002 /* AppColors.swift */; };
+		SM000003 /* CanvasModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100003 /* CanvasModels.swift */; };
+		SM000004 /* WorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100004 /* WorkspaceModels.swift */; };
+		SM000005 /* CanvasStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100005 /* CanvasStore.swift */; };
+		SM000006 /* CanvasEdgesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100006 /* CanvasEdgesView.swift */; };
+		SM000007 /* CanvasCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100007 /* CanvasCardView.swift */; };
+		SM000008 /* InfiniteCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100008 /* InfiniteCanvasView.swift */; };
+		SM000009 /* VaultSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100009 /* VaultSearchSheet.swift */; };
+		SM000010 /* IconRailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100010 /* IconRailView.swift */; };
+		SM000011 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100011 /* SidebarView.swift */; };
+		SM000012 /* WorkspaceShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100012 /* WorkspaceShellView.swift */; };
+		SM000013 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = SM200001 /* Assets.xcassets */; };
+		SM000014 /* ImagePixelSize.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100014 /* ImagePixelSize.swift */; };
+		SM000015 /* CanvasImageCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100015 /* CanvasImageCache.swift */; };
+		SM000016 /* DotGridBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100016 /* DotGridBackground.swift */; };
+		SM000017 /* CachedCardImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100017 /* CachedCardImage.swift */; };
+		SM000018 /* CanvasViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100018 /* CanvasViewport.swift */; };
+		SM000019 /* CanvasMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100019 /* CanvasMath.swift */; };
+		SM000020 /* CanvasLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100020 /* CanvasLayout.swift */; };
+		SM000021 /* CanvasEdgesScreenOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100021 /* CanvasEdgesScreenOverlay.swift */; };
+		SM000022 /* WorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100022 /* WorkspaceStore.swift */; };
+		SM000023 /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100023 /* NoteEditorView.swift */; };
+		SM000024 /* GraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100024 /* GraphView.swift */; };
+		SM000025 /* VaultManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100025 /* VaultManagerView.swift */; };
+		SM000026 /* CanvasDocumentRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100026 /* CanvasDocumentRegistry.swift */; };
+		SM000027 /* WorkspacePersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100027 /* WorkspacePersistence.swift */; };
+		SM000028 /* VaultFilesystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100028 /* VaultFilesystem.swift */; };
+		SM000029 /* WikilinkParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100029 /* WikilinkParser.swift */; };
+		SM000030 /* GoToFileSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100030 /* GoToFileSheet.swift */; };
+		SM000031 /* AdvancedColorPickerPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100031 /* AdvancedColorPickerPopover.swift */; };
+		SM000032 /* GraphLinkIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100032 /* GraphLinkIndex.swift */; };
+		SM000033 /* GraphCanvasLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100033 /* GraphCanvasLayer.swift */; };
+		SM000034 /* VaultSecurityAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100034 /* VaultSecurityAccess.swift */; };
+		SM000035 /* VaultErrors.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100035 /* VaultErrors.swift */; };
+		SM000036 /* NoteMarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100036 /* NoteMarkdownRenderer.swift */; };
+		SM000038 /* CanvasCardFloatingToolbarLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100038 /* CanvasCardFloatingToolbarLayer.swift */; };
+		SM000039 /* CanvasCardColorSwatchRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100039 /* CanvasCardColorSwatchRow.swift */; };
+		SM000040 /* NoteDocumentOptionsMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100040 /* NoteDocumentOptionsMenu.swift */; };
+		SM000041 /* NoteLinkedLinksSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100041 /* NoteLinkedLinksSheet.swift */; };
+		SM000042 /* ShellSidebarResizeHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100042 /* ShellSidebarResizeHandle.swift */; };
+		SM000043 /* CanvasImageCardContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100043 /* CanvasImageCardContextMenu.swift */; };
+		SM000044 /* GraphLayoutPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100044 /* GraphLayoutPersistence.swift */; };
+		SM000045 /* GraphLinkIndexPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100045 /* GraphLinkIndexPersistence.swift */; };
+		SM000046 /* GraphBarnesHut.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100046 /* GraphBarnesHut.swift */; };
+		SM000047 /* CanvasSpatialIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100047 /* CanvasSpatialIndex.swift */; };
+		SM000048 /* GoToFileSearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100048 /* GoToFileSearchIndex.swift */; };
+		SM000049 /* VaultFilesystemWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100049 /* VaultFilesystemWatcher.swift */; };
+		SM000050 /* CanvasDocumentPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100050 /* CanvasDocumentPersistence.swift */; };
+		SM000051 /* DataSafetyUpgradeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100051 /* DataSafetyUpgradeTests.swift */; };
+		SM000052 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = SM200002 /* PrivacyInfo.xcprivacy */; };
+		SM000053 /* DreftBrandMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100052 /* DreftBrandMark.swift */; };
+		SM000054 /* DreftHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100053 /* DreftHelpView.swift */; };
+		SM000055 /* WikilinkEditorSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100054 /* WikilinkEditorSupport.swift */; };
+		SM000056 /* NoteBodyTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100055 /* NoteBodyTextView.swift */; };
+		SM000057 /* WikilinkSuggestPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100056 /* WikilinkSuggestPopover.swift */; };
+		SM000058 /* AddBookmarkSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100057 /* AddBookmarkSheet.swift */; };
+		SM000059 /* CanvasDocumentOptionsMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100058 /* CanvasDocumentOptionsMenu.swift */; };
+		SM000060 /* CanvasExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100059 /* CanvasExportView.swift */; };
+		SM000061 /* CanvasVersionHistorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100060 /* CanvasVersionHistorySheet.swift */; };
+		SM000062 /* CanvasImageExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100061 /* CanvasImageExportSheet.swift */; };
+		SM000063 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100062 /* AppTheme.swift */; };
+		SM000064 /* AppearanceMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100063 /* AppearanceMode.swift */; };
+		SM000065 /* CanvasFloatingToolbarChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100064 /* CanvasFloatingToolbarChrome.swift */; };
+		SM000066 /* AppearanceSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100065 /* AppearanceSettingsSection.swift */; };
+		SM000067 /* CanvasIPadRightToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100066 /* CanvasIPadRightToolbar.swift */; };
+		SM000068 /* CanvasIPadBottomToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100067 /* CanvasIPadBottomToolbar.swift */; };
+		SM000069 /* IPadSidebarOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100068 /* IPadSidebarOverlay.swift */; };
+		SM000070 /* IOSShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100069 /* IOSShareSheet.swift */; };
+		SM000071 /* CanvasEdgeFloatingToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100070 /* CanvasEdgeFloatingToolbar.swift */; };
+		SM000072 /* CanvasEdgeLabelLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100071 /* CanvasEdgeLabelLayer.swift */; };
+		SM000073 /* CanvasEdgeHitOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100072 /* CanvasEdgeHitOverlay.swift */; };
+		SM000074 /* MarkdownEditingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100073 /* MarkdownEditingSupport.swift */; };
+		SM000075 /* NoteEditingMenuBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100074 /* NoteEditingMenuBuilder.swift */; };
+		SM000076 /* CanvasNoteEditOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100075 /* CanvasNoteEditOverlay.swift */; };
+		SM000077 /* NotePreviewCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100076 /* NotePreviewCache.swift */; };
+		SM000078 /* CanvasCardContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100077 /* CanvasCardContent.swift */; };
+		SM000079 /* VaultDirtyTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100078 /* VaultDirtyTracker.swift */; };
+		SM000080 /* GraphTimelapse.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100079 /* GraphTimelapse.swift */; };
+		SM000081 /* ObsidianTooltip.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100080 /* ObsidianTooltip.swift */; };
+		SM000082 /* CanvasTimelapse.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100082 /* CanvasTimelapse.swift */; };
+		SM000083 /* TimelapseWandButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100083 /* TimelapseWandButton.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		SM610001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = SM600000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = SM600001;
+			remoteInfo = Dreft;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		SM100001 /* DreftApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DreftApp.swift; sourceTree = "<group>"; };
@@ -116,6 +137,7 @@
 		SM100034 /* VaultSecurityAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultSecurityAccess.swift; sourceTree = "<group>"; };
 		SM100035 /* VaultErrors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultErrors.swift; sourceTree = "<group>"; };
 		SM100036 /* NoteMarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteMarkdownRenderer.swift; sourceTree = "<group>"; };
+		SM100037 /* Dreft.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dreft.entitlements; sourceTree = "<group>"; };
 		SM100038 /* CanvasCardFloatingToolbarLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardFloatingToolbarLayer.swift; sourceTree = "<group>"; };
 		SM100039 /* CanvasCardColorSwatchRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardColorSwatchRow.swift; sourceTree = "<group>"; };
 		SM100040 /* NoteDocumentOptionsMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteDocumentOptionsMenu.swift; sourceTree = "<group>"; };
@@ -151,7 +173,16 @@
 		SM100070 /* CanvasEdgeFloatingToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasEdgeFloatingToolbar.swift; sourceTree = "<group>"; };
 		SM100071 /* CanvasEdgeLabelLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasEdgeLabelLayer.swift; sourceTree = "<group>"; };
 		SM100072 /* CanvasEdgeHitOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasEdgeHitOverlay.swift; sourceTree = "<group>"; };
-		SM100037 /* Dreft.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dreft.entitlements; sourceTree = "<group>"; };
+		SM100073 /* MarkdownEditingSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditingSupport.swift; sourceTree = "<group>"; };
+		SM100074 /* NoteEditingMenuBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditingMenuBuilder.swift; sourceTree = "<group>"; };
+		SM100075 /* CanvasNoteEditOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteEditOverlay.swift; sourceTree = "<group>"; };
+		SM100076 /* NotePreviewCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotePreviewCache.swift; sourceTree = "<group>"; };
+		SM100077 /* CanvasCardContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardContent.swift; sourceTree = "<group>"; };
+		SM100078 /* VaultDirtyTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultDirtyTracker.swift; sourceTree = "<group>"; };
+		SM100079 /* GraphTimelapse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphTimelapse.swift; sourceTree = "<group>"; };
+		SM100080 /* ObsidianTooltip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObsidianTooltip.swift; sourceTree = "<group>"; };
+		SM100082 /* CanvasTimelapse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTimelapse.swift; sourceTree = "<group>"; };
+		SM100083 /* TimelapseWandButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelapseWandButton.swift; sourceTree = "<group>"; };
 		SM200001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		SM200002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		SM300001 /* Dreft.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dreft.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -162,13 +193,15 @@
 		SM400001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		SM400002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -176,7 +209,11 @@
 /* Begin PBXGroup section */
 		SM500001 = {
 			isa = PBXGroup;
-			children = (SM500002 /* Dreft */, SM500012 /* DreftTests */, SM500003 /* Products */);
+			children = (
+				SM500002 /* Dreft */,
+				SM500012 /* DreftTests */,
+				SM500003 /* Products */,
+			);
 			sourceTree = "<group>";
 		};
 		SM500002 /* Dreft */ = {
@@ -197,56 +234,148 @@
 		};
 		SM500003 /* Products */ = {
 			isa = PBXGroup;
-			children = (SM300001 /* Dreft.app */, SM300002 /* DreftTests.xctest */);
+			children = (
+				SM300001 /* Dreft.app */,
+				SM300002 /* DreftTests.xctest */,
+			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		SM500012 /* DreftTests */ = {
-			isa = PBXGroup;
-			children = (SM100051 /* DataSafetyUpgradeTests.swift */);
-			path = DreftTests;
 			sourceTree = "<group>";
 		};
 		SM500004 /* Theme */ = {
 			isa = PBXGroup;
-			children = (SM100002 /* AppColors.swift */, SM100062 /* AppTheme.swift */, SM100063 /* AppearanceMode.swift */);
+			children = (
+				SM100002 /* AppColors.swift */,
+				SM100062 /* AppTheme.swift */,
+				SM100063 /* AppearanceMode.swift */,
+			);
 			path = Theme;
 			sourceTree = "<group>";
 		};
 		SM500005 /* Models */ = {
 			isa = PBXGroup;
-			children = (SM100003 /* CanvasModels.swift */, SM100004 /* WorkspaceModels.swift */);
+			children = (
+				SM100003 /* CanvasModels.swift */,
+				SM100004 /* WorkspaceModels.swift */,
+			);
 			path = Models;
 			sourceTree = "<group>";
 		};
 		SM500006 /* Store */ = {
 			isa = PBXGroup;
-			children = (SM100005 /* CanvasStore.swift */, SM100022 /* WorkspaceStore.swift */, SM100026 /* CanvasDocumentRegistry.swift */, SM100027 /* WorkspacePersistence.swift */, SM100028 /* VaultFilesystem.swift */, SM100050 /* CanvasDocumentPersistence.swift */);
+			children = (
+				SM100005 /* CanvasStore.swift */,
+				SM100022 /* WorkspaceStore.swift */,
+				SM100026 /* CanvasDocumentRegistry.swift */,
+				SM100027 /* WorkspacePersistence.swift */,
+				SM100078 /* VaultDirtyTracker.swift */,
+				SM100028 /* VaultFilesystem.swift */,
+				SM100050 /* CanvasDocumentPersistence.swift */,
+			);
 			path = Store;
-			sourceTree = "<group>";
-		};
-		SM500011 /* Helpers */ = {
-			isa = PBXGroup;
-			children = (SM100014 /* ImagePixelSize.swift */, SM100015 /* CanvasImageCache.swift */, SM100018 /* CanvasViewport.swift */, SM100019 /* CanvasMath.swift */, SM100020 /* CanvasLayout.swift */, SM100029 /* WikilinkParser.swift */, SM100054 /* WikilinkEditorSupport.swift */, SM100031 /* AdvancedColorPickerPopover.swift */, SM100032 /* GraphLinkIndex.swift */, SM100044 /* GraphLayoutPersistence.swift */, SM100045 /* GraphLinkIndexPersistence.swift */, SM100046 /* GraphBarnesHut.swift */, SM100047 /* CanvasSpatialIndex.swift */, SM100048 /* GoToFileSearchIndex.swift */, SM100049 /* VaultFilesystemWatcher.swift */, SM100034 /* VaultSecurityAccess.swift */, SM100035 /* VaultErrors.swift */, SM100036 /* NoteMarkdownRenderer.swift */, SM100069 /* IOSShareSheet.swift */);
-			path = Helpers;
 			sourceTree = "<group>";
 		};
 		SM500008 /* Views */ = {
 			isa = PBXGroup;
-			children = (SM500009 /* Canvas */, SM500010 /* Shell */);
+			children = (
+				SM500009 /* Canvas */,
+				SM500010 /* Shell */,
+			);
 			path = Views;
 			sourceTree = "<group>";
 		};
 		SM500009 /* Canvas */ = {
 			isa = PBXGroup;
-			children = (SM100006, SM100007, SM100008, SM100009, SM100016, SM100017, SM100021, SM100038, SM100039, SM100043, SM100059, SM100064, SM100066, SM100067, SM100070, SM100071, SM100072);
+			children = (
+				SM100006 /* CanvasEdgesView.swift */,
+				SM100007 /* CanvasCardView.swift */,
+				SM100008 /* InfiniteCanvasView.swift */,
+				SM100009 /* VaultSearchSheet.swift */,
+				SM100016 /* DotGridBackground.swift */,
+				SM100017 /* CachedCardImage.swift */,
+				SM100021 /* CanvasEdgesScreenOverlay.swift */,
+				SM100038 /* CanvasCardFloatingToolbarLayer.swift */,
+				SM100039 /* CanvasCardColorSwatchRow.swift */,
+				SM100043 /* CanvasImageCardContextMenu.swift */,
+				SM100059 /* CanvasExportView.swift */,
+				SM100064 /* CanvasFloatingToolbarChrome.swift */,
+				SM100066 /* CanvasIPadRightToolbar.swift */,
+				SM100067 /* CanvasIPadBottomToolbar.swift */,
+				SM100070 /* CanvasEdgeFloatingToolbar.swift */,
+				SM100071 /* CanvasEdgeLabelLayer.swift */,
+				SM100072 /* CanvasEdgeHitOverlay.swift */,
+				SM100075 /* CanvasNoteEditOverlay.swift */,
+			);
 			path = Canvas;
 			sourceTree = "<group>";
 		};
 		SM500010 /* Shell */ = {
 			isa = PBXGroup;
-			children = (SM100010, SM100011, SM100012, SM100023, SM100024, SM100025, SM100030, SM100033, SM100040, SM100041, SM100042, SM100052, SM100053, SM100055, SM100056, SM100057, SM100058, SM100060, SM100061, SM100065, SM100068);
+			children = (
+				SM100010 /* IconRailView.swift */,
+				SM100011 /* SidebarView.swift */,
+				SM100012 /* WorkspaceShellView.swift */,
+				SM100023 /* NoteEditorView.swift */,
+				SM100024 /* GraphView.swift */,
+				SM100083 /* TimelapseWandButton.swift */,
+				SM100025 /* VaultManagerView.swift */,
+				SM100030 /* GoToFileSheet.swift */,
+				SM100033 /* GraphCanvasLayer.swift */,
+				SM100040 /* NoteDocumentOptionsMenu.swift */,
+				SM100041 /* NoteLinkedLinksSheet.swift */,
+				SM100042 /* ShellSidebarResizeHandle.swift */,
+				SM100052 /* DreftBrandMark.swift */,
+				SM100053 /* DreftHelpView.swift */,
+				SM100055 /* NoteBodyTextView.swift */,
+				SM100056 /* WikilinkSuggestPopover.swift */,
+				SM100057 /* AddBookmarkSheet.swift */,
+				SM100058 /* CanvasDocumentOptionsMenu.swift */,
+				SM100060 /* CanvasVersionHistorySheet.swift */,
+				SM100061 /* CanvasImageExportSheet.swift */,
+				SM100065 /* AppearanceSettingsSection.swift */,
+				SM100068 /* IPadSidebarOverlay.swift */,
+			);
 			path = Shell;
+			sourceTree = "<group>";
+		};
+		SM500011 /* Helpers */ = {
+			isa = PBXGroup;
+			children = (
+				SM100014 /* ImagePixelSize.swift */,
+				SM100015 /* CanvasImageCache.swift */,
+				SM100018 /* CanvasViewport.swift */,
+				SM100019 /* CanvasMath.swift */,
+				SM100020 /* CanvasLayout.swift */,
+				SM100029 /* WikilinkParser.swift */,
+				SM100054 /* WikilinkEditorSupport.swift */,
+				SM100031 /* AdvancedColorPickerPopover.swift */,
+				SM100032 /* GraphLinkIndex.swift */,
+				SM100044 /* GraphLayoutPersistence.swift */,
+				SM100045 /* GraphLinkIndexPersistence.swift */,
+				SM100046 /* GraphBarnesHut.swift */,
+				SM100047 /* CanvasSpatialIndex.swift */,
+				SM100048 /* GoToFileSearchIndex.swift */,
+				SM100049 /* VaultFilesystemWatcher.swift */,
+				SM100034 /* VaultSecurityAccess.swift */,
+				SM100035 /* VaultErrors.swift */,
+				SM100036 /* NoteMarkdownRenderer.swift */,
+				SM100073 /* MarkdownEditingSupport.swift */,
+				SM100074 /* NoteEditingMenuBuilder.swift */,
+				SM100076 /* NotePreviewCache.swift */,
+				SM100077 /* CanvasCardContent.swift */,
+				SM100079 /* GraphTimelapse.swift */,
+				SM100080 /* ObsidianTooltip.swift */,
+				SM100082 /* CanvasTimelapse.swift */,
+				SM100069 /* IOSShareSheet.swift */,
+			);
+			path = Helpers;
+			sourceTree = "<group>";
+		};
+		SM500012 /* DreftTests */ = {
+			isa = PBXGroup;
+			children = (
+				SM100051 /* DataSafetyUpgradeTests.swift */,
+			);
+			path = DreftTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -254,10 +383,16 @@
 /* Begin PBXNativeTarget section */
 		SM600001 /* Dreft */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = SM800003;
-			buildPhases = (SM700001 /* Sources */, SM400001 /* Frameworks */, SM700002 /* Resources */);
-			buildRules = ();
-			dependencies = ();
+			buildConfigurationList = SM800003 /* Build configuration list for PBXNativeTarget "Dreft" */;
+			buildPhases = (
+				SM700001 /* Sources */,
+				SM400001 /* Frameworks */,
+				SM700002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
 			name = Dreft;
 			productName = Dreft;
 			productReference = SM300001 /* Dreft.app */;
@@ -265,10 +400,17 @@
 		};
 		SM600002 /* DreftTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = SM800004;
-			buildPhases = (SM700003 /* Sources */, SM400002 /* Frameworks */, SM700004 /* Resources */);
-			buildRules = ();
-			dependencies = (SM610002 /* PBXTargetDependency */);
+			buildConfigurationList = SM800004 /* Build configuration list for PBXNativeTarget "DreftTests" */;
+			buildPhases = (
+				SM700003 /* Sources */,
+				SM400002 /* Frameworks */,
+				SM700004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				SM610002 /* PBXTargetDependency */,
+			);
 			name = DreftTests;
 			productName = DreftTests;
 			productReference = SM300002 /* DreftTests.xctest */;
@@ -276,38 +418,30 @@
 		};
 /* End PBXNativeTarget section */
 
-/* Begin PBXContainerItemProxy section */
-		SM610001 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = SM600000 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = SM600001;
-			remoteInfo = Dreft;
-		};
-/* End PBXContainerItemProxy section */
-
-/* Begin PBXTargetDependency section */
-		SM610002 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = SM600001 /* Dreft */;
-			targetProxy = SM610001 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin PBXProject section */
 		SM600000 /* Project object */ = {
 			isa = PBXProject;
-			attributes = { BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2650; LastUpgradeCheck = 2650; };
-			buildConfigurationList = SM800001;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2650;
+				LastUpgradeCheck = 2650;
+			};
+			buildConfigurationList = SM800001 /* Build configuration list for PBXProject "Dreft" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
-			knownRegions = (en, Base);
+			knownRegions = (
+				en,
+				Base,
+			);
 			mainGroup = SM500001;
 			productRefGroup = SM500003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (SM600001 /* Dreft */, SM600002 /* DreftTests */);
+			targets = (
+				SM600001 /* Dreft */,
+				SM600002 /* DreftTests */,
+			);
 		};
 /* End PBXProject section */
 
@@ -315,13 +449,17 @@
 		SM700002 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (SM000013 /* Assets.xcassets in Resources */, SM000052 /* PrivacyInfo.xcprivacy in Resources */);
+			files = (
+				SM000013 /* Assets.xcassets in Resources */,
+				SM000052 /* PrivacyInfo.xcprivacy in Resources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		SM700004 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -330,16 +468,106 @@
 		SM700001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (SM000001, SM000002, SM000003, SM000004, SM000005, SM000006, SM000007, SM000008, SM000009, SM000010, SM000011, SM000012, SM000014, SM000015, SM000016, SM000017, SM000018, SM000019, SM000020, SM000021, SM000022, SM000023, SM000024, SM000025, SM000026, SM000027, SM000028, SM000029, SM000030, SM000031, SM000032, SM000033, SM000034, SM000035, SM000036, SM000038, SM000039, SM000040, SM000041, SM000042, SM000043, SM000044, SM000045, SM000046, SM000047, SM000048, SM000049, SM000050, SM000053, SM000054, SM000055, SM000056, SM000057, SM000058, SM000059, SM000060, SM000061, SM000062, SM000063, SM000064, SM000065, SM000066, SM000067, SM000068, SM000069, SM000070, SM000071, SM000072, SM000073);
+			files = (
+				SM000001 /* DreftApp.swift in Sources */,
+				SM000002 /* AppColors.swift in Sources */,
+				SM000003 /* CanvasModels.swift in Sources */,
+				SM000004 /* WorkspaceModels.swift in Sources */,
+				SM000005 /* CanvasStore.swift in Sources */,
+				SM000006 /* CanvasEdgesView.swift in Sources */,
+				SM000007 /* CanvasCardView.swift in Sources */,
+				SM000008 /* InfiniteCanvasView.swift in Sources */,
+				SM000009 /* VaultSearchSheet.swift in Sources */,
+				SM000010 /* IconRailView.swift in Sources */,
+				SM000011 /* SidebarView.swift in Sources */,
+				SM000012 /* WorkspaceShellView.swift in Sources */,
+				SM000014 /* ImagePixelSize.swift in Sources */,
+				SM000015 /* CanvasImageCache.swift in Sources */,
+				SM000016 /* DotGridBackground.swift in Sources */,
+				SM000017 /* CachedCardImage.swift in Sources */,
+				SM000018 /* CanvasViewport.swift in Sources */,
+				SM000019 /* CanvasMath.swift in Sources */,
+				SM000020 /* CanvasLayout.swift in Sources */,
+				SM000021 /* CanvasEdgesScreenOverlay.swift in Sources */,
+				SM000022 /* WorkspaceStore.swift in Sources */,
+				SM000023 /* NoteEditorView.swift in Sources */,
+				SM000024 /* GraphView.swift in Sources */,
+				SM000025 /* VaultManagerView.swift in Sources */,
+				SM000026 /* CanvasDocumentRegistry.swift in Sources */,
+				SM000027 /* WorkspacePersistence.swift in Sources */,
+				SM000028 /* VaultFilesystem.swift in Sources */,
+				SM000029 /* WikilinkParser.swift in Sources */,
+				SM000030 /* GoToFileSheet.swift in Sources */,
+				SM000031 /* AdvancedColorPickerPopover.swift in Sources */,
+				SM000032 /* GraphLinkIndex.swift in Sources */,
+				SM000033 /* GraphCanvasLayer.swift in Sources */,
+				SM000034 /* VaultSecurityAccess.swift in Sources */,
+				SM000035 /* VaultErrors.swift in Sources */,
+				SM000036 /* NoteMarkdownRenderer.swift in Sources */,
+				SM000038 /* CanvasCardFloatingToolbarLayer.swift in Sources */,
+				SM000039 /* CanvasCardColorSwatchRow.swift in Sources */,
+				SM000040 /* NoteDocumentOptionsMenu.swift in Sources */,
+				SM000041 /* NoteLinkedLinksSheet.swift in Sources */,
+				SM000042 /* ShellSidebarResizeHandle.swift in Sources */,
+				SM000043 /* CanvasImageCardContextMenu.swift in Sources */,
+				SM000044 /* GraphLayoutPersistence.swift in Sources */,
+				SM000045 /* GraphLinkIndexPersistence.swift in Sources */,
+				SM000046 /* GraphBarnesHut.swift in Sources */,
+				SM000047 /* CanvasSpatialIndex.swift in Sources */,
+				SM000048 /* GoToFileSearchIndex.swift in Sources */,
+				SM000049 /* VaultFilesystemWatcher.swift in Sources */,
+				SM000050 /* CanvasDocumentPersistence.swift in Sources */,
+				SM000053 /* DreftBrandMark.swift in Sources */,
+				SM000054 /* DreftHelpView.swift in Sources */,
+				SM000055 /* WikilinkEditorSupport.swift in Sources */,
+				SM000056 /* NoteBodyTextView.swift in Sources */,
+				SM000057 /* WikilinkSuggestPopover.swift in Sources */,
+				SM000058 /* AddBookmarkSheet.swift in Sources */,
+				SM000059 /* CanvasDocumentOptionsMenu.swift in Sources */,
+				SM000060 /* CanvasExportView.swift in Sources */,
+				SM000061 /* CanvasVersionHistorySheet.swift in Sources */,
+				SM000062 /* CanvasImageExportSheet.swift in Sources */,
+				SM000063 /* AppTheme.swift in Sources */,
+				SM000064 /* AppearanceMode.swift in Sources */,
+				SM000065 /* CanvasFloatingToolbarChrome.swift in Sources */,
+				SM000066 /* AppearanceSettingsSection.swift in Sources */,
+				SM000067 /* CanvasIPadRightToolbar.swift in Sources */,
+				SM000068 /* CanvasIPadBottomToolbar.swift in Sources */,
+				SM000069 /* IPadSidebarOverlay.swift in Sources */,
+				SM000070 /* IOSShareSheet.swift in Sources */,
+				SM000071 /* CanvasEdgeFloatingToolbar.swift in Sources */,
+				SM000072 /* CanvasEdgeLabelLayer.swift in Sources */,
+				SM000073 /* CanvasEdgeHitOverlay.swift in Sources */,
+				SM000074 /* MarkdownEditingSupport.swift in Sources */,
+				SM000075 /* NoteEditingMenuBuilder.swift in Sources */,
+				SM000076 /* CanvasNoteEditOverlay.swift in Sources */,
+				SM000077 /* NotePreviewCache.swift in Sources */,
+				SM000078 /* CanvasCardContent.swift in Sources */,
+				SM000079 /* VaultDirtyTracker.swift in Sources */,
+				SM000080 /* GraphTimelapse.swift in Sources */,
+				SM000081 /* ObsidianTooltip.swift in Sources */,
+				SM000082 /* CanvasTimelapse.swift in Sources */,
+				SM000083 /* TimelapseWandButton.swift in Sources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		SM700003 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (SM000051 /* DataSafetyUpgradeTests.swift in Sources */);
+			files = (
+				SM000051 /* DataSafetyUpgradeTests.swift in Sources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		SM610002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = SM600001 /* Dreft */;
+			targetProxy = SM610001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		SM900001 /* Debug */ = {
@@ -352,8 +580,8 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -392,7 +620,7 @@
 				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = K2Q9PMD826;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -405,7 +633,11 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/Frameworks");
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -426,7 +658,7 @@
 				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = K2Q9PMD826;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -439,7 +671,11 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/Frameworks");
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -501,21 +737,30 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		SM800001 /* Build configuration list for PBXProject */ = {
+		SM800001 /* Build configuration list for PBXProject "Dreft" */ = {
 			isa = XCConfigurationList;
-			buildConfigurations = (SM900001 /* Debug */, SM900002 /* Release */);
+			buildConfigurations = (
+				SM900001 /* Debug */,
+				SM900002 /* Release */,
+			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		SM800003 /* Build configuration list for PBXNativeTarget */ = {
+		SM800003 /* Build configuration list for PBXNativeTarget "Dreft" */ = {
 			isa = XCConfigurationList;
-			buildConfigurations = (SM900003 /* Debug */, SM900004 /* Release */);
+			buildConfigurations = (
+				SM900003 /* Debug */,
+				SM900004 /* Release */,
+			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		SM800004 /* Build configuration list for PBXNativeTarget */ = {
+		SM800004 /* Build configuration list for PBXNativeTarget "DreftTests" */ = {
 			isa = XCConfigurationList;
-			buildConfigurations = (SM900005 /* Debug */, SM900006 /* Release */);
+			buildConfigurations = (
+				SM900005 /* Debug */,
+				SM900006 /* Release */,
+			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};

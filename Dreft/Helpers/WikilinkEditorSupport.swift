@@ -85,21 +85,54 @@ enum WikilinkEditorSupport {
         AttributedString(attributedString(for: content, selectedRange: NSRange(location: NSNotFound, length: 0)))
     }
 
-    static func attributedString(for content: String, selectedRange: NSRange) -> NSAttributedString {
+    static func attributedString(
+        for content: String,
+        selectedRange: NSRange,
+        fontSize: CGFloat = bodyFontSize,
+        hiddenDelimiterOn: Color = AppColors.canvasBackground
+    ) -> NSAttributedString {
         let storage = NSMutableAttributedString(
             string: content,
-            attributes: baseBodyAttributes()
+            attributes: baseBodyAttributes(fontSize: fontSize)
         )
-        applyWikilinkStyling(to: storage, selectedRange: selectedRange)
+        restyleInPlace(
+            storage,
+            selectedRange: selectedRange,
+            fontSize: fontSize,
+            hiddenDelimiterOn: hiddenDelimiterOn
+        )
         return storage
     }
 
-    private static func baseBodyAttributes() -> [NSAttributedString.Key: Any] {
+    /// Updates markdown/wikilink attributes without replacing plain text — preserves NSTextView undo.
+    static func restyleInPlace(
+        _ storage: NSMutableAttributedString,
+        selectedRange: NSRange,
+        fontSize: CGFloat = bodyFontSize,
+        hiddenDelimiterOn: Color = AppColors.canvasBackground
+    ) {
+        guard storage.length > 0 else { return }
+        let fullRange = NSRange(location: 0, length: storage.length)
+        storage.setAttributes(baseBodyAttributes(fontSize: fontSize), range: fullRange)
+        storage.removeAttribute(.strikethroughStyle, range: fullRange)
+        storage.removeAttribute(.backgroundColor, range: fullRange)
+        storage.removeAttribute(.underlineStyle, range: fullRange)
+        storage.removeAttribute(.underlineColor, range: fullRange)
+        applyInlineMarkdownStyling(
+            to: storage,
+            selectedRange: selectedRange,
+            fontSize: fontSize,
+            hiddenDelimiterOn: hiddenDelimiterOn
+        )
+        applyWikilinkStyling(to: storage, selectedRange: selectedRange, hiddenDelimiterOn: hiddenDelimiterOn)
+    }
+
+    private static func baseBodyAttributes(fontSize: CGFloat = bodyFontSize) -> [NSAttributedString.Key: Any] {
         #if canImport(AppKit)
-        let font = NSFont.systemFont(ofSize: bodyFontSize)
+        let font = NSFont.systemFont(ofSize: fontSize)
         let color = NSColor(textColorForPlatform)
         #else
-        let font = UIFont.systemFont(ofSize: bodyFontSize)
+        let font = UIFont.systemFont(ofSize: fontSize)
         let color = UIColor(textColorForPlatform)
         #endif
         return [
@@ -120,15 +153,156 @@ enum WikilinkEditorSupport {
         #endif
     }
 
+    private static func applyInlineMarkdownStyling(
+        to storage: NSMutableAttributedString,
+        selectedRange: NSRange,
+        fontSize: CGFloat,
+        hiddenDelimiterOn: Color
+    ) {
+        let content = storage.string as NSString
+        guard content.length > 0 else { return }
+
+        let highlight = platformColor(Color.yellow.opacity(0.35))
+
+        applyWrappedMarkdown(
+            to: storage,
+            content: content,
+            selectedRange: selectedRange,
+            open: "**",
+            close: "**",
+            hiddenDelimiterOn: hiddenDelimiterOn,
+            styleInner: { range in
+                storage.addAttribute(.font, value: boldFont(size: fontSize), range: range)
+            }
+        )
+        applyWrappedMarkdown(
+            to: storage,
+            content: content,
+            selectedRange: selectedRange,
+            open: "~~",
+            close: "~~",
+            hiddenDelimiterOn: hiddenDelimiterOn,
+            styleInner: { range in
+                storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+            }
+        )
+        applyWrappedMarkdown(
+            to: storage,
+            content: content,
+            selectedRange: selectedRange,
+            open: "==",
+            close: "==",
+            hiddenDelimiterOn: hiddenDelimiterOn,
+            styleInner: { range in
+                storage.addAttribute(.backgroundColor, value: highlight, range: range)
+            }
+        )
+        applyWrappedMarkdown(
+            to: storage,
+            content: content,
+            selectedRange: selectedRange,
+            open: "`",
+            close: "`",
+            hiddenDelimiterOn: hiddenDelimiterOn,
+            styleInner: { range in
+                storage.addAttribute(.font, value: monoFont(size: fontSize), range: range)
+            }
+        )
+        applyWrappedMarkdown(
+            to: storage,
+            content: content,
+            selectedRange: selectedRange,
+            open: "*",
+            close: "*",
+            hiddenDelimiterOn: hiddenDelimiterOn,
+            styleInner: { range in
+                storage.addAttribute(.font, value: italicFont(size: fontSize), range: range)
+            },
+            skipIfPrefixedBy: "*"
+        )
+    }
+
+    private static func applyWrappedMarkdown(
+        to storage: NSMutableAttributedString,
+        content: NSString,
+        selectedRange: NSRange,
+        open: String,
+        close: String,
+        hiddenDelimiterOn: Color,
+        styleInner: (NSRange) -> Void,
+        skipIfPrefixedBy: String? = nil
+    ) {
+        let hidden = platformColor(hiddenDelimiterOn)
+        let muted = platformColor(bracketColor)
+        var searchStart = 0
+
+        while searchStart < content.length {
+            let tail = NSRange(location: searchStart, length: content.length - searchStart)
+            let openRange = content.range(of: open, options: [], range: tail)
+            guard openRange.location != NSNotFound else { break }
+
+            if let prefix = skipIfPrefixedBy, openRange.location > 0 {
+                let prefixIndex = openRange.location - 1
+                if content.substring(with: NSRange(location: prefixIndex, length: 1)) == prefix {
+                    searchStart = openRange.location + open.count
+                    continue
+                }
+            }
+
+            let afterOpen = NSRange(location: openRange.location + open.count, length: content.length - openRange.location - open.count)
+            let closeRange = content.range(of: close, options: [], range: afterOpen)
+            guard closeRange.location != NSNotFound else { break }
+
+            let inner = NSRange(location: openRange.location + open.count, length: closeRange.location - openRange.location - open.count)
+            let full = NSRange(location: openRange.location, length: closeRange.location + close.count - openRange.location)
+            let isEditing = selectedRange.location != NSNotFound && NSIntersectionRange(full, selectedRange).length > 0
+            let delimiterPaint = isEditing ? muted : hidden
+
+            storage.addAttribute(.foregroundColor, value: delimiterPaint, range: openRange)
+            storage.addAttribute(.foregroundColor, value: delimiterPaint, range: closeRange)
+            if inner.length > 0 {
+                styleInner(inner)
+            }
+            searchStart = closeRange.location + close.count
+        }
+    }
+
+    #if canImport(AppKit)
+    private static func boldFont(size: CGFloat) -> NSFont {
+        NSFont.boldSystemFont(ofSize: size)
+    }
+
+    private static func italicFont(size: CGFloat) -> NSFont {
+        NSFontManager.shared.convert(NSFont.systemFont(ofSize: size), toHaveTrait: .italicFontMask)
+    }
+
+    private static func monoFont(size: CGFloat) -> NSFont {
+        NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+    #else
+    private static func boldFont(size: CGFloat) -> UIFont {
+        UIFont.boldSystemFont(ofSize: size)
+    }
+
+    private static func italicFont(size: CGFloat) -> UIFont {
+        UIFont.italicSystemFont(ofSize: size)
+    }
+
+    private static func monoFont(size: CGFloat) -> UIFont {
+        UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+    #endif
+
     private static func applyWikilinkStyling(
         to storage: NSMutableAttributedString,
-        selectedRange: NSRange
+        selectedRange: NSRange,
+        hiddenDelimiterOn: Color = AppColors.canvasBackground
     ) {
         let content = storage.string as NSString
         guard content.length > 0 else { return }
 
         let bracket = platformColor(bracketColor)
-        let hiddenBracket = platformColor(hiddenBracketColor)
+        let hiddenBracket = platformColor(hiddenDelimiterOn)
         let link = platformColor(linkColor)
         var index = 0
 

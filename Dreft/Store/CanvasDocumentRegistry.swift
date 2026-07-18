@@ -15,34 +15,43 @@ final class CanvasDocumentRegistry {
     /// Bumped when any canvas document mutates — drives autosave observation.
     private(set) var mutationGeneration = 0
     var onCanvasMutated: (() -> Void)?
+    var onCanvasDirty: ((String) -> Void)?
+    var onLinkedNoteBodyChanged: ((String, String) -> Void)?
     var vaultURL: URL?
 
     func store(for documentID: String) -> CanvasStore {
         if let existing = stores[documentID] {
             existing.vaultURL = vaultURL
+            existing.documentRelativePath = documentID
             return existing
         }
         let store = CanvasStore()
-        store.onDidMutate = { [weak self] in
-            guard let self else { return }
-            self.mutationGeneration += 1
-            self.onCanvasMutated?()
-        }
-        store.vaultURL = vaultURL
+        configure(store, documentID: documentID)
         stores[documentID] = store
         return store
+    }
+
+    private func configure(_ store: CanvasStore, documentID: String) {
+        store.documentRelativePath = documentID
+        store.vaultURL = vaultURL
+        store.onDidMutate = { [weak self, weak store] in
+            guard let self, let store else { return }
+            self.mutationGeneration += 1
+            if let path = store.documentRelativePath {
+                self.onCanvasDirty?(path)
+            }
+            self.onCanvasMutated?()
+        }
+        store.onLinkedNoteBodyChanged = { [weak self] path, body in
+            self?.onLinkedNoteBodyChanged?(path, body)
+        }
     }
 
     func load(from snapshots: [String: CanvasDocumentSnapshot]) {
         stores.removeAll()
         for (documentID, snapshot) in snapshots {
             let store = CanvasStore()
-            store.onDidMutate = { [weak self] in
-                guard let self else { return }
-                self.mutationGeneration += 1
-                self.onCanvasMutated?()
-            }
-            store.vaultURL = vaultURL
+            configure(store, documentID: documentID)
             store.applyDocumentSnapshot(snapshot)
             stores[documentID] = store
         }
@@ -54,6 +63,7 @@ final class CanvasDocumentRegistry {
 
     func rekey(documentID oldID: String, to newID: String) {
         guard oldID != newID, let store = stores.removeValue(forKey: oldID) else { return }
+        store.documentRelativePath = newID
         stores[newID] = store
     }
 

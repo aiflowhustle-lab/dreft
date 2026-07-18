@@ -9,7 +9,7 @@ enum CanvasDocumentReadOutcome {
 /// On-disk `.canvas` JSON envelope with versioned migration.
 enum CanvasDocumentFormat {
     /// Bump when the on-disk schema changes and add a migration step in `migrate`.
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     private struct OnDiskCanvasDocument: Codable {
         var version: Int?
@@ -72,7 +72,7 @@ enum CanvasDocumentFormat {
 
     private static func migrate(document: OnDiskCanvasDocument, from version: Int) -> CanvasDocumentSnapshot? {
         switch version {
-        case 0, 1:
+        case 0, 1, 2:
             return CanvasDocumentSnapshot(
                 cards: document.cards,
                 edges: document.edges,

@@ -134,6 +134,7 @@ final class WorkspacePersistenceCoordinator {
     private var saveTask: Task<Void, Never>?
     private var terminationObserver: NSObjectProtocol?
     private let vaultWatcher = VaultFilesystemWatcher()
+    private var dirtyTracker = VaultDirtyTracker()
 
     init(workspace: WorkspaceStore, documents: CanvasDocumentRegistry) {
         self.workspace = workspace
@@ -143,6 +144,7 @@ final class WorkspacePersistenceCoordinator {
 
     func start() {
         workspace.onFlushActiveVaultToDisk = { [weak self] in
+            self?.markEntireActiveVaultDirty()
             self?.flushVaultContentsToDisk(for: self?.workspace.activeVault?.id)
         }
         workspace.onVaultCanvasLoaded = { [weak self] snapshots in
@@ -156,30 +158,49 @@ final class WorkspacePersistenceCoordinator {
         workspace.onExternalVaultSynced = { [weak self] sync in
             self?.applyExternalVaultSync(sync)
         }
+        workspace.onNoteContentDirty = { [weak self] relativePath in
+            self?.dirtyTracker.markNote(relativePath)
+            self?.scheduleSave()
+        }
+        workspace.onWorkspaceStateDirty = { [weak self] in
+            self?.dirtyTracker.markWorkspaceState()
+            self?.scheduleSave()
+        }
         documents.onCanvasMutated = { [weak self] in
             self?.scheduleSave()
         }
+        documents.onCanvasDirty = { [weak self] relativePath in
+            self?.dirtyTracker.markCanvas(relativePath)
+        }
+        documents.onLinkedNoteBodyChanged = { [weak self] relativePath, body in
+            self?.workspace.updateNoteContent(forRelativePath: relativePath, content: body)
+        }
 
-        observeChanges()
+        observeWorkspaceUI()
         restartVaultWatcher()
-        flushToDisk()
         #if os(macOS)
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
         ) { _ in
-            MainActor.assumeIsolated { self.flushToDisk() }
+            MainActor.assumeIsolated {
+                self.markEntireActiveVaultDirty()
+                self.flushToDisk()
+            }
         }
         #endif
     }
 
-    private func observeChanges() {
+    private func observeWorkspaceUI() {
         withObservationTracking {
             _ = self.workspace.activeVault?.id
-            _ = self.workspace.files
             _ = self.workspace.tabs
-            _ = self.documents.mutationGeneration
+            _ = self.workspace.activeTabID
+            _ = self.workspace.selectedFileID
+            _ = self.workspace.expandedFolderIDs
+            _ = self.workspace.sortOrder
+            _ = self.workspace.bookmarks
         } onChange: {
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -189,8 +210,9 @@ final class WorkspacePersistenceCoordinator {
                 if vaultChanged {
                     self.restartVaultWatcher()
                 }
+                self.dirtyTracker.markWorkspaceState()
                 self.scheduleSave()
-                self.observeChanges()
+                self.observeWorkspaceUI()
             }
         }
     }
@@ -199,8 +221,8 @@ final class WorkspacePersistenceCoordinator {
         syncVaultFromDisk()
     }
 
-    /// Cancels any pending debounced save and writes vault contents plus `workspace.json` immediately.
     func flushPendingChanges() {
+        markEntireActiveVaultDirty()
         flushToDisk()
     }
 
@@ -234,33 +256,72 @@ final class WorkspacePersistenceCoordinator {
     private func flushToDisk() {
         saveTask?.cancel()
         flushVaultContentsToDisk(for: workspace.activeVault?.id)
-        do {
-            try WorkspacePersistence.save(workspace.persistedState())
-        } catch {
-            workspace.reportVaultError(
-                title: "Couldn't save workspace",
-                message: error.localizedDescription
-            )
+        if dirtyTracker.consumeWorkspaceState() {
+            do {
+                try WorkspacePersistence.save(workspace.persistedState())
+            } catch {
+                workspace.reportVaultError(
+                    title: "Couldn't save workspace",
+                    message: error.localizedDescription
+                )
+            }
         }
     }
 
     private func flushVaultContentsToDisk(for vaultID: String?) {
         guard let vaultID,
               let vault = workspace.vaults.first(where: { $0.id == vaultID }) else { return }
+
+        let dirtyNotes = dirtyTracker.consumeNotes()
+        let dirtyCanvases = dirtyTracker.consumeCanvases()
+        guard !dirtyNotes.isEmpty || !dirtyCanvases.isEmpty else { return }
+
         workspace.suppressFilesystemWatch()
         let vaultURL = VaultSecurityAccess.resolvedURL(for: vault)
         documents.setVaultURL(vaultURL)
         documents.migrateEmbeddedImages(vaultURL: vaultURL)
-        let noteResult = VaultFilesystem.writeNotes(workspace.files, vaultURL: vaultURL)
-        let snapshots = documents.snapshotAll(validIDs: workspace.allKnownFileIDs())
-        let canvasResult = VaultFilesystem.writeCanvases(snapshots, vaultURL: vaultURL)
-        let combined = VaultBatchWriteResult.combined(noteResult, canvasResult)
-        if combined.hasFailures {
-            workspace.reportVaultError(
-                title: "Couldn't save to vault",
-                message: combined.summaryMessage
-            )
+
+        if !dirtyNotes.isEmpty {
+            let noteResult = writeDirtyNotes(dirtyNotes, vaultURL: vaultURL)
+            if noteResult.hasFailures {
+                workspace.reportVaultError(
+                    title: "Couldn't save to vault",
+                    message: noteResult.summaryMessage
+                )
+            }
         }
+
+        if !dirtyCanvases.isEmpty {
+            let snapshots = documents.snapshotAll(validIDs: workspace.allKnownFileIDs())
+            let pending = snapshots.filter { dirtyCanvases.contains($0.key) }
+            let canvasResult = VaultFilesystem.writeCanvases(pending, vaultURL: vaultURL)
+            if canvasResult.hasFailures {
+                workspace.reportVaultError(
+                    title: "Couldn't save to vault",
+                    message: canvasResult.summaryMessage
+                )
+            }
+        }
+    }
+
+    private func writeDirtyNotes(_ paths: Set<String>, vaultURL: URL) -> VaultBatchWriteResult {
+        var result = VaultBatchWriteResult()
+        for file in workspace.files where file.kind == .note && paths.contains(file.relativePath) {
+            do {
+                try VaultFilesystem.writeNote(file, vaultURL: vaultURL)
+            } catch {
+                result.failures.append((file.relativePath, error))
+            }
+        }
+        return result
+    }
+
+    private func markEntireActiveVaultDirty() {
+        let notePaths = workspace.files.filter { $0.kind == .note }.map(\.relativePath)
+        let canvasPaths = workspace.files.filter { $0.kind == .canvas }.map(\.relativePath)
+        dirtyTracker.markAllNotes(notePaths)
+        dirtyTracker.markAllCanvases(canvasPaths)
+        dirtyTracker.markWorkspaceState()
     }
 
     private func scheduleSave() {

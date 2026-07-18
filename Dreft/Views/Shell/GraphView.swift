@@ -120,6 +120,13 @@ struct GraphView: View {
     @State private var didApplyDefaultScope = false
     @State private var lastLocalCenterID: String?
 
+    @State private var timelapsePlaying = false
+    @State private var timelapseVisibleNodeIDs: Set<String>?
+    @State private var timelapseVisibleLinkIDs: Set<String>?
+    @State private var timelapseCurrentDate: Date?
+    @State private var timelapseTask: Task<Void, Never>?
+    @State private var timelapseRevision = 0
+
     var body: some View {
         ZStack {
             AppColors.canvasBackground
@@ -187,6 +194,10 @@ struct GraphView: View {
                 }
             }
         }
+        .overlay(alignment: .topLeading) {
+            graphTimelapseChrome
+                .padding(14)
+        }
         .overlay(alignment: .topTrailing) {
             graphControlsChrome
                 .padding(14)
@@ -194,11 +205,18 @@ struct GraphView: View {
         }
         .overlay(alignment: .bottomLeading) {
             if !nodes.isEmpty {
-                Text(graphStatusText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .padding(.leading, 14)
-                    .padding(.bottom, 10)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let timelapseCurrentDate {
+                        Text(timelapseCurrentDate.formatted(date: .abbreviated, time: .shortened))
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(AppColors.textPrimary)
+                    }
+                    Text(graphStatusText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+                .padding(.leading, 14)
+                .padding(.bottom, 10)
             }
         }
         .background(AppColors.canvasBackground)
@@ -206,7 +224,108 @@ struct GraphView: View {
             simulationTask?.cancel()
             graphSyncTask?.cancel()
             layoutSaveTask?.cancel()
+            stopTimelapse(showAll: true)
             persistGraphLayout()
+        }
+    }
+
+    @ViewBuilder
+    private var graphTimelapseChrome: some View {
+        TimelapseWandButton(
+            isPlaying: timelapsePlaying,
+            isDisabled: nodes.isEmpty && !timelapsePlaying,
+            onToggle: {
+                if timelapsePlaying {
+                    stopTimelapse(showAll: true)
+                } else {
+                    startTimelapse()
+                }
+            }
+        )
+    }
+
+    private var timelapseActive: Bool {
+        timelapseVisibleNodeIDs != nil
+    }
+
+    private var graphNodesForDisplay: [GraphNode] {
+        guard let visible = timelapseVisibleNodeIDs else { return nodes }
+        return nodes.filter { visible.contains($0.id) }
+    }
+
+    private var graphLinksForDisplay: [GraphLink] {
+        guard let visible = timelapseVisibleLinkIDs else { return links }
+        return links.filter { visible.contains($0.id) }
+    }
+
+    private func startTimelapse() {
+        stopTimelapse(showAll: false)
+        let visibleNodeScope = Set(nodes.map(\.id))
+        guard !visibleNodeScope.isEmpty else { return }
+
+        let timeline = GraphTimelapseTimeline.build(
+            files: workspace.files,
+            edges: workspace.graphEdges,
+            scopeIDs: visibleNodeScope
+        )
+        guard !timeline.isEmpty else { return }
+
+        timelapsePlaying = true
+        timelapseVisibleNodeIDs = []
+        timelapseVisibleLinkIDs = []
+        timelapseCurrentDate = timeline.start
+        timelapseRevision &+= 1
+        draggedNodeID = nil
+        hoveredNodeID = nil
+        simulationTask?.cancel()
+        simulationTask = nil
+        alpha = 0.85
+        kickSimulation(to: 0.85)
+
+        let delayMs = timeline.stepDelayMs
+        timelapseTask = Task { @MainActor in
+            for event in timeline.events {
+                guard !Task.isCancelled else { return }
+                switch event {
+                case .node(let id, let at):
+                    revealTimelapseNode(id: id, at: at)
+                case .link(let fromID, let toID, let at):
+                    revealTimelapseLink(fromID: fromID, toID: toID, at: at)
+                }
+                kickSimulation(to: 0.45)
+                try? await Task.sleep(for: .milliseconds(delayMs))
+            }
+            guard !Task.isCancelled else { return }
+            stopTimelapse(showAll: true)
+        }
+    }
+
+    private func revealTimelapseNode(id: String, at: Date) {
+        var visible = timelapseVisibleNodeIDs ?? []
+        visible.insert(id)
+        timelapseVisibleNodeIDs = visible
+        timelapseCurrentDate = at
+        timelapseRevision &+= 1
+    }
+
+    private func revealTimelapseLink(fromID: String, toID: String, at: Date) {
+        var visible = timelapseVisibleLinkIDs ?? []
+        visible.insert("\(fromID)->\(toID)")
+        timelapseVisibleLinkIDs = visible
+        timelapseCurrentDate = at
+        timelapseRevision &+= 1
+    }
+
+    private func stopTimelapse(showAll: Bool) {
+        timelapseTask?.cancel()
+        timelapseTask = nil
+        timelapsePlaying = false
+        if showAll {
+            timelapseVisibleNodeIDs = nil
+            timelapseVisibleLinkIDs = nil
+            timelapseCurrentDate = nil
+            timelapseRevision &+= 1
+            kickSimulation(to: 0.35)
         }
     }
 
@@ -220,6 +339,7 @@ struct GraphView: View {
     }
 
     private func scheduleGraphSync(in size: CGSize, simulationEnergy: CGFloat) {
+        guard !timelapsePlaying else { return }
         graphSyncTask?.cancel()
         graphSyncTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(200))
@@ -230,6 +350,10 @@ struct GraphView: View {
     }
 
     private var graphStatusText: String {
+        if timelapsePlaying {
+            let visibleCount = timelapseVisibleNodeIDs?.count ?? 0
+            return "Timelapse · \(visibleCount)/\(nodes.count) nodes"
+        }
         let nodeLabel = "\(nodes.count) node\(nodes.count == 1 ? "" : "s")"
         let linkLabel = "\(links.count) link\(links.count == 1 ? "" : "s")"
         var parts = [nodeLabel, linkLabel]
@@ -360,12 +484,13 @@ struct GraphView: View {
 
     /// While the force simulation runs, render every node so culling doesn't pop them at edges.
     private var isLayoutAnimating: Bool {
-        alpha > 0.008 || draggedNodeID != nil || simulationTask != nil
+        alpha > 0.008 || draggedNodeID != nil || simulationTask != nil || timelapsePlaying
     }
 
     private var renderedLinks: [GraphLink] {
+        let sourceLinks = graphLinksForDisplay
         let visibleIDs = Set(renderedNodes.map(\.id))
-        return links.filter { visibleIDs.contains($0.fromID) && visibleIDs.contains($0.toID) }
+        return sourceLinks.filter { visibleIDs.contains($0.fromID) && visibleIDs.contains($0.toID) }
     }
 
     private var effectiveLabelOpacity: CGFloat {
@@ -425,11 +550,12 @@ struct GraphView: View {
     }
 
     private var displayedNodes: [GraphNode] {
-        guard filterOrphans else {
-            let connected = Set(links.flatMap { [$0.fromID, $0.toID] })
-            return nodes.filter { connected.contains($0.id) }
+        let base = timelapseActive ? graphNodesForDisplay : nodes
+        if timelapseActive || filterOrphans {
+            return base
         }
-        return nodes
+        let connected = Set(graphLinksForDisplay.flatMap { [$0.fromID, $0.toID] })
+        return base.filter { connected.contains($0.id) }
     }
 
     private var linkStrokeWidth: CGFloat {
@@ -560,8 +686,9 @@ struct GraphView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    @ViewBuilder
     private var graphCanvasStack: some View {
-        ZStack {
+        let stack = ZStack {
             GraphCanvasLayer(
                 nodes: canvasDrawNodes,
                 links: canvasDrawLinks,
@@ -574,14 +701,22 @@ struct GraphView: View {
                 linksDimmed: !searchText.isEmpty,
                 linkRenderOpacity: graphLinkRenderOpacity
             )
+            .id(timelapseRevision)
+
             if !isLayoutAnimating {
                 GraphNodeLabelsLayer(
                     nodes: canvasDrawNodes,
                     labelOpacity: effectiveLabelOpacity
                 )
+                .id(timelapseRevision)
             }
         }
-        .drawingGroup()
+
+        if timelapseActive {
+            stack
+        } else {
+            stack.drawingGroup()
+        }
     }
 
     private var graphNodeInteractionLayer: some View {
@@ -760,14 +895,17 @@ struct GraphView: View {
 
     private func applyNaiveRepulsion(
         forces: inout [CGPoint],
-        repulsionStrength: CGFloat
+        repulsionStrength: CGFloat,
+        activeIDs: Set<String>? = nil
     ) {
         for index in nodes.indices {
             if nodes[index].id == draggedNodeID { continue }
+            if let activeIDs, !activeIDs.contains(nodes[index].id) { continue }
 
             let position = nodes[index].position
 
             for otherIndex in nodes.indices where otherIndex != index {
+                if let activeIDs, !activeIDs.contains(nodes[otherIndex].id) { continue }
                 let other = nodes[otherIndex].position
                 let delta = CGPoint(x: position.x - other.x, y: position.y - other.y)
                 let distance = max(hypot(delta.x, delta.y), 10)
@@ -778,8 +916,25 @@ struct GraphView: View {
         }
     }
 
+    private var activeSimulationLinks: [GraphLink] {
+        timelapseActive ? graphLinksForDisplay : links
+    }
+
+    private var activeSimulationNodeIDs: Set<String> {
+        if timelapseActive {
+            return timelapseVisibleNodeIDs ?? []
+        }
+        return Set(nodes.map(\.id))
+    }
+
     private func stepPhysics() {
-        guard nodes.count > 1, canvasSize.width > 0, canvasSize.height > 0 else { return }
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return }
+        let simulationIDs = activeSimulationNodeIDs
+        if timelapseActive {
+            guard !simulationIDs.isEmpty else { return }
+        } else {
+            guard nodes.count > 1 else { return }
+        }
 
         let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
         let repulsionStrength: CGFloat = 20000 + CGFloat(repelForce) * 80000
@@ -791,31 +946,40 @@ struct GraphView: View {
         let maxSpeed: CGFloat = 22
         let settleSpeed: CGFloat = 0.15
         let settleAlpha: CGFloat = 0.1
+        let activeIDs = timelapseActive ? simulationIDs : nil
 
         var forces = Array(repeating: CGPoint.zero, count: nodes.count)
 
         if nodes.count <= GraphPerformance.naivePhysicsNodeCap {
-            applyNaiveRepulsion(forces: &forces, repulsionStrength: repulsionStrength)
+            applyNaiveRepulsion(
+                forces: &forces,
+                repulsionStrength: repulsionStrength,
+                activeIDs: activeIDs
+            )
         } else {
-            let snapshots = nodes.map { GraphNodeSnapshot(id: $0.id, position: $0.position) }
+            let snapshots = nodes
+                .filter { activeIDs == nil || activeIDs!.contains($0.id) }
+                .map { GraphNodeSnapshot(id: $0.id, position: $0.position) }
             let repulsionForces = GraphBarnesHut.repulsionForces(
                 nodes: snapshots,
                 draggedNodeID: draggedNodeID,
                 strength: repulsionStrength
             )
             for index in nodes.indices where nodes[index].id != draggedNodeID {
+                if let activeIDs, !activeIDs.contains(nodes[index].id) { continue }
                 forces[index].x += repulsionForces[index].x
                 forces[index].y += repulsionForces[index].y
             }
         }
 
         for index in nodes.indices where nodes[index].id != draggedNodeID {
+            if let activeIDs, !activeIDs.contains(nodes[index].id) { continue }
             let position = nodes[index].position
             forces[index].x += (center.x - position.x) * gravityStrength
             forces[index].y += (center.y - position.y) * gravityStrength
         }
 
-        for link in links {
+        for link in activeSimulationLinks {
             guard let fromIndex = nodeIndexByID[link.fromID],
                   let toIndex = nodeIndexByID[link.toID] else { continue }
 
@@ -841,6 +1005,7 @@ struct GraphView: View {
         mutateGraphNodesWithoutAnimation {
             for index in nodes.indices {
                 if nodes[index].id == draggedNodeID { continue }
+                if let activeIDs, !activeIDs.contains(nodes[index].id) { continue }
 
                 nodes[index].velocity.x = (nodes[index].velocity.x + forces[index].x * alpha) * velocityDecay
                 nodes[index].velocity.y = (nodes[index].velocity.y + forces[index].y * alpha) * velocityDecay

@@ -46,6 +46,12 @@ struct InfiniteCanvasView: View {
   #if canImport(PhotosUI)
   @State private var photoItems: [PhotosPickerItem] = []
   #endif
+  @State private var timelapsePlaying = false
+  @State private var timelapseVisibleCardIDs: Set<String>?
+  @State private var timelapseVisibleEdgeIDs: Set<String>?
+  @State private var timelapseCurrentDate: Date?
+  @State private var timelapseTask: Task<Void, Never>?
+  @State private var timelapseRevision = 0
 
   var body: some View {
     GeometryReader { geo in
@@ -68,7 +74,7 @@ struct InfiniteCanvasView: View {
         CanvasEdgeHitOverlay(
           transform: displayTransform,
           cardIndex: cardIndex,
-          edges: store.edges,
+          edges: activeCanvasEdges,
           positionOverrides: cardDragOverrides,
           resizeOverrides: cardResizeOverrides,
           edgeEndpoint: { edge in
@@ -85,6 +91,7 @@ struct InfiniteCanvasView: View {
           }
         )
         .zIndex(4)
+        .allowsHitTesting(!timelapsePlaying)
         #if os(macOS)
         .canvasEdgeHandCursor(
           isActive: hoverEdgeID != nil
@@ -101,7 +108,7 @@ struct InfiniteCanvasView: View {
         CanvasEdgesScreenOverlay(
           transform: displayTransform,
           cardIndex: cardIndex,
-          edges: store.edges,
+          edges: activeCanvasEdges,
           connectingFrom: store.connectingFrom,
           positionOverrides: cardDragOverrides,
           resizeOverrides: cardResizeOverrides,
@@ -114,7 +121,7 @@ struct InfiniteCanvasView: View {
         CanvasEdgeLabelLayer(
           transform: displayTransform,
           cardIndex: cardIndex,
-          edges: store.edges,
+          edges: activeCanvasEdges,
           positionOverrides: cardDragOverrides,
           resizeOverrides: cardResizeOverrides,
           editingEdgeID: editingEdgeLabelID,
@@ -166,6 +173,10 @@ struct InfiniteCanvasView: View {
           edgeToolbarCustomColorOpen = false
         }
       }
+      .onChange(of: store.historyRevision) { _, _ in
+        cardDragOverrides.removeAll()
+        cardResizeOverrides.removeAll()
+      }
       #if os(iOS)
       .overlay {
         CanvasTouchCaptureView(
@@ -197,19 +208,31 @@ struct InfiniteCanvasView: View {
         )
       }
       #endif
+      .overlay(alignment: .topLeading) {
+        canvasTimelapseChrome(canvasSize: size)
+          .zIndex(300)
+      }
       .overlay(alignment: .topTrailing) {
         canvasRightToolbar(canvasSize: size)
           .zIndex(300)
+          .opacity(timelapsePlaying ? 0.45 : 1)
+          .allowsHitTesting(!timelapsePlaying)
       }
       .overlay(alignment: .bottom) {
         canvasBottomToolbar(canvasSize: size)
           .zIndex(300)
+          .opacity(timelapsePlaying ? 0.45 : 1)
+          .allowsHitTesting(!timelapsePlaying)
       }
       .overlay(alignment: .bottomLeading) {
         zoomIndicator
       }
       .overlay(alignment: .bottomTrailing) {
         backlinkBadge
+      }
+      .overlay {
+        canvasNoteEditOverlay(canvasSize: size)
+          .zIndex(250)
       }
       .overlay {
         if store.isVaultOpen {
@@ -223,7 +246,7 @@ struct InfiniteCanvasView: View {
       .background(AppColors.canvasBackground)
       #if os(macOS)
       .onCanvasScroll { delta, location, zoomRequested, phaseEnded in
-        if store.contextMenu != nil || store.isVaultOpen { return }
+        if timelapsePlaying || store.contextMenu != nil || store.isVaultOpen || store.focusCardID != nil { return }
         isCanvasInteracting = true
         if zoomRequested {
           applyZoom(at: location, factor: exp(-delta.height * 0.0015))
@@ -244,6 +267,9 @@ struct InfiniteCanvasView: View {
         displayTransform = store.transform
         store.vaultURL = vaultURL
         store.viewportSize = size
+      }
+      .onDisappear {
+        stopCanvasTimelapse(showAll: true)
       }
       .onChange(of: size) { _, newSize in
         store.viewportSize = newSize
@@ -304,14 +330,40 @@ struct InfiniteCanvasView: View {
     Dictionary(uniqueKeysWithValues: store.cards.map { ($0.id, $0) })
   }
 
+  private var timelapseActive: Bool {
+    timelapseVisibleCardIDs != nil
+  }
+
+  private var timelapseFilteredCards: [CanvasCard] {
+    guard let visible = timelapseVisibleCardIDs else { return store.cards }
+    return store.cards.filter { visible.contains($0.id) }
+  }
+
+  private var activeCanvasEdges: [CanvasEdge] {
+    guard timelapseActive else { return store.edges }
+    let visibleEdges = timelapseVisibleEdgeIDs ?? []
+    let visibleCards = timelapseVisibleCardIDs ?? []
+    return store.edges.filter { edge in
+      guard visibleEdges.contains(edge.id), visibleCards.contains(edge.fromID) else { return false }
+      if let toID = edge.toID {
+        return visibleCards.contains(toID)
+      }
+      return true
+    }
+  }
+
   private func visibleCards(for canvasSize: CGSize) -> [CanvasCard] {
+    let sourceCards = timelapseActive ? timelapseFilteredCards : store.cards
+    if timelapseActive {
+      return sourceCards
+    }
     let viewport = CanvasViewport.worldRect(
       canvasSize: canvasSize,
       transform: displayTransform,
       padding: isCanvasInteracting ? 4_000 : CanvasConstants.viewportPadding
     )
     let visibleIDs = CanvasViewport.visibleCardIDs(
-      cards: store.cards,
+      cards: sourceCards,
       viewport: viewport,
       positionOverrides: cardDragOverrides,
       resizeOverrides: cardResizeOverrides,
@@ -320,9 +372,9 @@ struct InfiniteCanvasView: View {
       spatialIndex: store.spatialIndexForCulling()
     )
     if isCanvasInteracting || isCardDragging || isCardResizing {
-      return store.cards
+      return sourceCards
     }
-    return store.cards.filter { visibleIDs.contains($0.id) }
+    return sourceCards.filter { visibleIDs.contains($0.id) }
   }
 
   /// Pan / tap target behind cards — screen space so iOS hit-testing stays accurate.
@@ -331,7 +383,7 @@ struct InfiniteCanvasView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .contentShape(Rectangle())
       .gesture(
-        store.isConnectingLine || isCardDragging || isCardResizing || store.contextMenu != nil
+        store.isConnectingLine || isCardDragging || isCardResizing || store.contextMenu != nil || store.focusCardID != nil
           ? nil
           : canvasPanGesture
       )
@@ -347,13 +399,19 @@ struct InfiniteCanvasView: View {
         }
         store.selectedCardID = nil
         store.selectedEdgeID = nil
+        store.endContentEdit()
         store.focusCardID = nil
         editingEdgeLabelID = nil
       }
   }
 
   private var canvasNavigationEnabled: Bool {
-    store.contextMenu == nil && !isCardDragging && !isCardResizing && !store.isConnectingLine
+    !timelapsePlaying
+      && store.contextMenu == nil
+      && !isCardDragging
+      && !isCardResizing
+      && !store.isConnectingLine
+      && store.focusCardID == nil
   }
 
   /// Double-click empty canvas → place a new note card at the click location.
@@ -382,6 +440,7 @@ struct InfiniteCanvasView: View {
     let transform = displayTransform
     let cards = visibleCards(for: canvasSize)
     let _ = store.imageCacheRevision
+    let _ = store.historyRevision
 
     return ZStack(alignment: .topLeading) {
       ForEach(cards) { card in
@@ -395,12 +454,14 @@ struct InfiniteCanvasView: View {
         )
 
         canvasCardView(card: card, displayFrame: worldFrame, canvasSize: canvasSize)
+          .id("\(card.id)-\(store.historyRevision)-\(timelapseRevision)")
           .frame(width: worldFrame.width, height: worldFrame.height)
           .scaleEffect(zoom, anchor: .center)
           .offset(x: dragOffset.width * zoom, y: dragOffset.height * zoom)
           .position(screenCenter)
       }
     }
+    .allowsHitTesting(!timelapsePlaying)
     .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
   }
 
@@ -414,9 +475,9 @@ struct InfiniteCanvasView: View {
       isConnectingLine: store.isConnectingLine,
       zoom: displayTransform.zoom,
       vaultURL: vaultURL,
+      vaultFiles: VaultFile.openableFiles(from: workspace.files),
       onSelect: {
-        store.selectedCardID = card.id
-        store.selectedEdgeID = nil
+        store.selectCard(card.id)
       },
       onDragBegan: { isCardDragging = true },
       onMove: { preview in
@@ -480,10 +541,17 @@ struct InfiniteCanvasView: View {
       onUpdateTitle: { store.updateTitle(for: card.id, title: $0) },
       onSetColor: { store.setCardColor(card.id, hex: $0) },
       shouldAutoFocus: store.focusCardID == card.id,
-      onDidFocus: { store.focusCardID = nil },
+      onDidFocus: {},
       onBeginContentEdit: { store.beginContentEdit(for: card.id) },
       onEndContentEdit: { store.endContentEdit() },
       beginTitleRenameToken: imageTitleRenameTokens[card.id] ?? 0,
+      isEditing: store.focusCardID == card.id,
+      onRequestEdit: {
+        store.selectedCardID = card.id
+        store.selectedEdgeID = nil
+        store.focusCardID = card.id
+        store.beginContentEdit(for: card.id)
+      },
       cardColors: store.cardColors,
       showColorRow: $cardToolbarColorRowOpen,
       showCustomColorPicker: $cardToolbarCustomColorOpen
@@ -519,6 +587,43 @@ struct InfiniteCanvasView: View {
       }
     } else {
       cardView
+    }
+  }
+
+  @ViewBuilder
+  private func canvasNoteEditOverlay(canvasSize: CGSize) -> some View {
+    if let focusID = store.focusCardID,
+       let card = cardIndex[focusID],
+       card.kind != .image {
+      let worldFrame = cardDisplayFrame(card)
+      let zoom = displayTransform.zoom
+      let dragOffset = cardDragWorldOffset(card)
+      let screenOrigin = store.worldToScreen(cardPositionOrigin(card), transform: displayTransform)
+      let screenW = worldFrame.width * zoom
+      let screenH = worldFrame.height * zoom
+      let screenCenter = CGPoint(
+        x: screenOrigin.x + (worldFrame.width * zoom) / 2 + dragOffset.width * zoom,
+        y: screenOrigin.y + (worldFrame.height * zoom) / 2 + dragOffset.height * zoom
+      )
+
+      CanvasNoteEditOverlay(
+        initialText: CanvasCardContent.markdownBody(
+          for: card,
+          vaultURL: vaultURL,
+          vaultFiles: VaultFile.openableFiles(from: workspace.files)
+        ),
+        cardSize: CGSize(width: screenW, height: screenH),
+        colorHex: card.colorHex,
+        files: workspace.files,
+        onTextEdited: { store.updateContent(for: focusID, content: $0, fromTextUndo: $1) },
+        onDismiss: {
+          store.endContentEdit()
+          store.focusCardID = nil
+        }
+      )
+      .frame(width: screenW, height: screenH)
+      .position(screenCenter)
+      .zIndex(250)
     }
   }
 
@@ -811,6 +916,105 @@ struct InfiniteCanvasView: View {
     defer { url.stopAccessingSecurityScopedResource() }
     guard let data = try? Data(contentsOf: url) else { return }
     store.swapImageCard(cardID, data: data, suggestedTitle: url.lastPathComponent)
+  }
+
+  // MARK: - Timelapse
+
+  private func canvasTimelapseChrome(canvasSize: CGSize) -> some View {
+    TimelapseWandButton(
+      isPlaying: timelapsePlaying,
+      isDisabled: store.cards.isEmpty && !timelapsePlaying,
+      onToggle: {
+        if timelapsePlaying {
+          stopCanvasTimelapse(showAll: true, canvasSize: canvasSize)
+        } else {
+          startCanvasTimelapse(canvasSize: canvasSize)
+        }
+      }
+    )
+    .padding(14)
+  }
+
+  private var activeCanvasFile: WorkspaceFileEntry? {
+    if let path = store.documentRelativePath {
+      return workspace.files.first { $0.relativePath == path && $0.kind == .canvas }
+    }
+    if let fileID = workspace.activeTab?.fileID {
+      return workspace.files.first { $0.id == fileID && $0.kind == .canvas }
+    }
+    return nil
+  }
+
+  private func startCanvasTimelapse(canvasSize: CGSize) {
+    stopCanvasTimelapse(showAll: false)
+    let timeline = CanvasTimelapseTimeline.build(
+      cards: store.cards,
+      edges: store.edges,
+      files: workspace.files,
+      vaultURL: vaultURL,
+      canvasRelativePath: store.documentRelativePath,
+      canvasCreatedAt: activeCanvasFile?.createdAt
+    )
+    guard !timeline.isEmpty else { return }
+
+    store.selectedCardID = nil
+    store.selectedEdgeID = nil
+    store.focusCardID = nil
+    store.endContentEdit()
+    editingEdgeLabelID = nil
+
+    timelapsePlaying = true
+    timelapseVisibleCardIDs = []
+    timelapseVisibleEdgeIDs = []
+    timelapseCurrentDate = timeline.start
+    timelapseRevision &+= 1
+
+    let delayMs = timeline.stepDelayMs
+    timelapseTask = Task { @MainActor in
+      for event in timeline.events {
+        guard !Task.isCancelled else { return }
+        switch event {
+        case .card(let id, let at):
+          revealTimelapseCard(id: id, at: at)
+        case .edge(let id, let at):
+          revealTimelapseEdge(id: id, at: at)
+        }
+        try? await Task.sleep(for: .milliseconds(delayMs))
+      }
+      guard !Task.isCancelled else { return }
+      stopCanvasTimelapse(showAll: true, canvasSize: canvasSize)
+    }
+  }
+
+  private func revealTimelapseCard(id: String, at: Date) {
+    var visible = timelapseVisibleCardIDs ?? []
+    visible.insert(id)
+    timelapseVisibleCardIDs = visible
+    timelapseCurrentDate = at
+    timelapseRevision &+= 1
+  }
+
+  private func revealTimelapseEdge(id: String, at: Date) {
+    var visible = timelapseVisibleEdgeIDs ?? []
+    visible.insert(id)
+    timelapseVisibleEdgeIDs = visible
+    timelapseCurrentDate = at
+    timelapseRevision &+= 1
+  }
+
+  private func stopCanvasTimelapse(showAll: Bool, canvasSize: CGSize? = nil) {
+    timelapseTask?.cancel()
+    timelapseTask = nil
+    timelapsePlaying = false
+    if showAll {
+      timelapseVisibleCardIDs = nil
+      timelapseVisibleEdgeIDs = nil
+      timelapseCurrentDate = nil
+      timelapseRevision &+= 1
+      if let canvasSize {
+        zoomToFitAll(canvasSize: canvasSize)
+      }
+    }
   }
 
   // MARK: - Chrome
@@ -1112,12 +1316,25 @@ struct InfiniteCanvasView: View {
   }
 
   private var zoomIndicator: some View {
-    Text("\(Int(displayTransform.zoom * 100))%")
-      .font(.system(size: 11))
-      .foregroundStyle(AppColors.textSecondary)
-      .padding(.leading, 14)
-      .padding(.bottom, 10)
-      .allowsHitTesting(false)
+    VStack(alignment: .leading, spacing: 4) {
+      if let timelapseCurrentDate {
+        Text(timelapseCurrentDate.formatted(date: .abbreviated, time: .shortened))
+          .font(.system(size: 11, weight: .medium, design: .monospaced))
+          .foregroundStyle(AppColors.textPrimary)
+      }
+      if timelapsePlaying {
+        Text("Timelapse · \(timelapseVisibleCardIDs?.count ?? 0)/\(store.cards.count) cards")
+          .font(.system(size: 11))
+          .foregroundStyle(AppColors.textSecondary)
+      } else {
+        Text("\(Int(displayTransform.zoom * 100))%")
+          .font(.system(size: 11))
+          .foregroundStyle(AppColors.textSecondary)
+      }
+    }
+    .padding(.leading, 14)
+    .padding(.bottom, 10)
+    .allowsHitTesting(false)
   }
 
   private var backlinkBadge: some View {

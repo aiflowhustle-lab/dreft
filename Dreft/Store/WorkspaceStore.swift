@@ -56,6 +56,10 @@ final class WorkspaceStore {
     var onExternalVaultSynced: ((ExternalVaultSync) -> Void)?
     /// Flush the active vault's notes and canvases to disk before switching away.
     var onFlushActiveVaultToDisk: (() -> Void)?
+    /// Relative path of a note whose body changed — drives per-file vault saves.
+    var onNoteContentDirty: ((String) -> Void)?
+    /// Tabs, selection, or vault UI changed — drives workspace.json saves.
+    var onWorkspaceStateDirty: (() -> Void)?
 
     private var vaultSnapshots: [String: VaultWorkspaceSnapshot] = [:]
     private var graphLinkIndex = GraphLinkIndex()
@@ -978,6 +982,12 @@ final class WorkspaceStore {
         guard files[index].noteContent != content else { return }
         files[index].noteContent = content
         updateGraphLinksForNote(fileID)
+        onNoteContentDirty?(files[index].relativePath)
+    }
+
+    func updateNoteContent(forRelativePath relativePath: String, content: String) {
+        guard let index = files.firstIndex(where: { $0.relativePath == relativePath && $0.kind == .note }) else { return }
+        updateNoteContent(for: files[index].id, content: content)
     }
 
     /// Ensures in-memory note bodies are written before the graph reads wikilinks.

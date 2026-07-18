@@ -11,6 +11,7 @@ struct CanvasCardView: View {
     let isConnectingLine: Bool
     let zoom: CGFloat
     var vaultURL: URL?
+    var vaultFiles: [VaultFile] = []
 
     var onSelect: () -> Void
     var onDragBegan: () -> Void
@@ -32,6 +33,8 @@ struct CanvasCardView: View {
     var onBeginContentEdit: () -> Void = {}
     var onEndContentEdit: () -> Void = {}
     var beginTitleRenameToken: Int = 0
+    var isEditing: Bool = false
+    var onRequestEdit: () -> Void = {}
 
     let cardColors: [(name: String, hex: String)]
     @Binding var showColorRow: Bool
@@ -48,7 +51,6 @@ struct CanvasCardView: View {
     @State private var connectingSide: CanvasSide?
     @State private var isRenamingTitle = false
     @State private var titleDraft = ""
-    @FocusState private var isContentFocused: Bool
     @FocusState private var isTitleFocused: Bool
 
     private var isImage: Bool { card.kind == .image }
@@ -312,48 +314,30 @@ struct CanvasCardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         case .note, .text:
-            ZStack {
-                TextEditor(text: Binding(get: { card.content }, set: onUpdateContent))
-                    .font(.system(size: 13))
-                    .foregroundStyle(AppColors.textPrimary)
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
-                    .padding(.top, showColorRow ? noteColorRowReservedHeight : 8)
-                    .focused($isContentFocused)
-                    .allowsHitTesting(isContentFocused)
-                    .onAppear {
-                        guard shouldAutoFocus else { return }
-                        DispatchQueue.main.async {
-                            isContentFocused = true
-                            onDidFocus()
-                        }
-                    }
-                    .onChange(of: shouldAutoFocus) { _, shouldFocus in
-                        guard shouldFocus else { return }
-                        DispatchQueue.main.async {
-                            isContentFocused = true
-                            onDidFocus()
-                        }
-                    }
-                    .onChange(of: isContentFocused) { _, focused in
-                        if focused {
-                            onBeginContentEdit()
-                        } else {
-                            onEndContentEdit()
-                        }
-                    }
-
-                if !isContentFocused {
-                    Color.clear
-                        .contentShape(Rectangle())
+            let displayMarkdown = CanvasCardContent.markdownBody(
+                for: card,
+                vaultURL: vaultURL,
+                vaultFiles: vaultFiles
+            )
+            Group {
+                if displayMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(" ")
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppColors.textPrimary)
+                } else {
+                    Text(NotePreviewCache.canvasCardPreview(for: displayMarkdown))
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppColors.textPrimary)
+                        .tint(AppColors.noteLink)
                 }
             }
-            .onChange(of: isSelected) { _, selected in
-                if !selected {
-                    isContentFocused = false
-                }
-            }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
+            .padding(.top, showColorRow ? noteColorRowReservedHeight : 8)
+            .allowsHitTesting(false)
+            .opacity(isEditing ? 0 : 1)
         }
     }
 
@@ -362,9 +346,7 @@ struct CanvasCardView: View {
         return DragGesture(minimumDistance: 0, coordinateSpace: .named("canvasScreen"))
             .onChanged { value in
                 guard !isResizing else { return }
-                if isContentFocused {
-                    isContentFocused = false
-                }
+                if isEditing { return }
                 isPressingCard = true
                 if dragOrigin == nil {
                     dragOrigin = displayOrigin
@@ -382,7 +364,11 @@ struct CanvasCardView: View {
             .onEnded { value in
                 let moved = hypot(value.translation.width, value.translation.height) > dragThreshold
                 if !moved {
-                    if isSelected && !isImage && !isContentFocused {
+                    if isImage {
+                        onSelect()
+                    } else if isEditing {
+                        return
+                    } else if isSelected {
                         beginEditingNote()
                     } else {
                         onSelect()
@@ -397,9 +383,7 @@ struct CanvasCardView: View {
 
     private func beginEditingNote() {
         guard !isImage else { return }
-        DispatchQueue.main.async {
-            isContentFocused = true
-        }
+        onRequestEdit()
     }
 
     @ViewBuilder
@@ -602,9 +586,19 @@ struct CanvasCardView: View {
         Color.clear
             .frame(width: frameWidth, height: frameHeight)
             .contentShape(Rectangle())
-            .allowsHitTesting(!isResizing && !isContentFocused)
+            .allowsHitTesting(!isResizing && !isEditing)
             .highPriorityGesture(cardDragGesture)
+            .simultaneousGesture(noteEditDoubleTapGesture)
             .canvasCardCursor(isGrabbing: isPressingCard)
+    }
+
+    /// Double-click / double-tap a note card → select and edit immediately (premium 2-click flow).
+    private var noteEditDoubleTapGesture: some Gesture {
+        TapGesture(count: 2).onEnded {
+            guard !isImage, !isEditing else { return }
+            onSelect()
+            beginEditingNote()
+        }
     }
 
     private func resizeDragGesture(handle: String) -> some Gesture {

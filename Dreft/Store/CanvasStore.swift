@@ -51,6 +51,10 @@ final class CanvasStore {
     var focusCardID: String?
     /// Fired after any document mutation (cards, edges, transform).
     var onDidMutate: (() -> Void)?
+    /// When a linked note card (Obsidian `file` node) is edited, write body to the vault `.md` file.
+    var onLinkedNoteBodyChanged: ((String, String) -> Void)?
+    /// Relative path of the open `.canvas` file — used for per-file saves.
+    var documentRelativePath: String?
     /// Vault folder used to store canvas image assets on disk.
     var vaultURL: URL?
 
@@ -59,13 +63,16 @@ final class CanvasStore {
         var edges: [CanvasEdge]
         var transform: CanvasViewTransform
         var selectedCardID: String?
+        var selectedEdgeID: String?
     }
 
     @ObservationIgnored private var undoStack: [CanvasDocumentState] = []
     @ObservationIgnored private var redoStack: [CanvasDocumentState] = []
     @ObservationIgnored private var isRestoringHistory = false
+    @ObservationIgnored private var suppressOverlayContentCommit = false
     @ObservationIgnored private var contentEditSessionCardID: String?
-    @ObservationIgnored private var contentEditCheckpointRecorded = false
+    @ObservationIgnored private var contentEditLastChange: Date?
+    @ObservationIgnored private var contentEditPersistTask: Task<Void, Never>?
     @ObservationIgnored private var vaultFiles: [VaultFile] = []
     private(set) var historyRevision = 0
 
@@ -85,7 +92,8 @@ final class CanvasStore {
         return cachedSpatialIndex
     }
 
-    private func notifyMutated() {
+    private func notifyMutated(persistToDisk: Bool = true) {
+        guard persistToDisk else { return }
         onDidMutate?()
     }
 
@@ -94,7 +102,8 @@ final class CanvasStore {
             cards: cards,
             edges: edges,
             transform: transform,
-            selectedCardID: selectedCardID
+            selectedCardID: selectedCardID,
+            selectedEdgeID: selectedEdgeID
         )
     }
 
@@ -103,6 +112,7 @@ final class CanvasStore {
         edges = state.edges
         transform = state.transform
         selectedCardID = state.selectedCardID
+        selectedEdgeID = state.selectedEdgeID
     }
 
     private func recordUndoCheckpoint() {
@@ -134,12 +144,29 @@ final class CanvasStore {
         if contentEditSessionCardID == id { return }
         endContentEdit()
         contentEditSessionCardID = id
-        contentEditCheckpointRecorded = false
+        contentEditLastChange = nil
     }
 
-    func endContentEdit() {
+    func endContentEdit(skipPersist: Bool = false) {
+        let hadSession = contentEditSessionCardID != nil
+        contentEditPersistTask?.cancel()
         contentEditSessionCardID = nil
-        contentEditCheckpointRecorded = false
+        contentEditLastChange = nil
+        if hadSession, !skipPersist {
+            notifyMutated()
+        }
+    }
+
+    /// Ends an open note edit when the user selects a different card.
+    func selectCard(_ id: String?) {
+        if let id, focusCardID != nil, focusCardID != id {
+            endContentEdit()
+            focusCardID = nil
+        }
+        selectedCardID = id
+        if id != nil {
+            selectedEdgeID = nil
+        }
     }
 
     /// Replace the whole document (version-history restore) as an undoable step,
@@ -152,29 +179,53 @@ final class CanvasStore {
         }
         selectedCardID = nil
         selectedEdgeID = nil
+        focusCardID = nil
+        endContentEdit()
         notifyMutated()
     }
 
     func undo() {
         guard let previous = undoStack.popLast() else { return }
-        endContentEdit()
+        suppressOverlayContentCommit = true
+        endContentEdit(skipPersist: true)
+        focusCardID = nil
         redoStack.append(captureState())
         isRestoringHistory = true
         restoreState(previous)
         isRestoringHistory = false
         historyRevision += 1
-        notifyMutated()
+        NotePreviewCache.invalidateAll()
+        schedulePersistenceAfterHistoryStep()
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.suppressOverlayContentCommit = false
+        }
     }
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
-        endContentEdit()
+        suppressOverlayContentCommit = true
+        endContentEdit(skipPersist: true)
+        focusCardID = nil
         undoStack.append(captureState())
         isRestoringHistory = true
         restoreState(next)
         isRestoringHistory = false
         historyRevision += 1
-        notifyMutated()
+        NotePreviewCache.invalidateAll()
+        schedulePersistenceAfterHistoryStep()
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.suppressOverlayContentCommit = false
+        }
+    }
+
+    /// Updates the canvas immediately, then saves on the next run loop so undo/redo feels instant.
+    private func schedulePersistenceAfterHistoryStep() {
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.onDidMutate?()
+        }
     }
 
     let cardColors: [(name: String, hex: String)] = [
@@ -444,7 +495,8 @@ final class CanvasStore {
                 width: displaySize.width,
                 height: displaySize.height,
                 content: content,
-                title: Self.resolvedImageTitle(title)
+                title: Self.resolvedImageTitle(title),
+                createdAt: Date()
             ))
             selectedCardID = id
 
@@ -555,17 +607,40 @@ final class CanvasStore {
         if changed { notifyMutated() }
     }
 
-    func updateContent(for id: String, content: String) {
+    func updateContent(for id: String, content: String, fromTextUndo: Bool = false) {
+        guard !isRestoringHistory, !suppressOverlayContentCommit else { return }
         guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
         if contentEditSessionCardID != id {
             beginContentEdit(for: id)
         }
-        if !contentEditCheckpointRecorded {
+        if !fromTextUndo, shouldRecordContentCheckpoint() {
             recordUndoCheckpoint()
-            contentEditCheckpointRecorded = true
         }
-        cards[index].content = content
-        notifyMutated()
+        contentEditLastChange = Date()
+
+        if let linkedPath = CanvasCardContent.linkedNotePath(for: cards[index]) {
+            onLinkedNoteBodyChanged?(linkedPath, content)
+        } else {
+            cards[index].content = content
+            notifyMutated(persistToDisk: false)
+            scheduleDebouncedContentPersist()
+        }
+    }
+
+    /// Groups typing into undo steps separated by ~400ms pauses.
+    private func shouldRecordContentCheckpoint() -> Bool {
+        guard let last = contentEditLastChange else { return true }
+        return Date().timeIntervalSince(last) > 0.4
+    }
+
+    /// Saves in-progress note edits without spamming the vault pipeline on every keystroke.
+    private func scheduleDebouncedContentPersist() {
+        contentEditPersistTask?.cancel()
+        contentEditPersistTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled, self?.contentEditSessionCardID != nil else { return }
+            self?.notifyMutated()
+        }
     }
 
     func updateTitle(for id: String, title: String) {
@@ -601,8 +676,10 @@ final class CanvasStore {
     }
 
     func moveCard(_ id: String, to origin: CGPoint) {
+        guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+        let card = cards[index]
+        guard card.x != origin.x || card.y != origin.y else { return }
         withUndo {
-            guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
             cards[index].x = origin.x
             cards[index].y = origin.y
         }
@@ -610,12 +687,23 @@ final class CanvasStore {
     }
 
     func resizeCard(_ id: String, frame: CGRect) {
+        guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+        let card = cards[index]
+        let resolved = CGRect(
+            x: frame.origin.x,
+            y: frame.origin.y,
+            width: max(48, frame.width),
+            height: max(48, frame.height)
+        )
+        guard card.x != resolved.origin.x
+            || card.y != resolved.origin.y
+            || card.width != resolved.width
+            || card.height != resolved.height else { return }
         withUndo {
-            guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
-            cards[index].x = frame.origin.x
-            cards[index].y = frame.origin.y
-            cards[index].width = max(48, frame.width)
-            cards[index].height = max(48, frame.height)
+            cards[index].x = resolved.origin.x
+            cards[index].y = resolved.origin.y
+            cards[index].width = resolved.width
+            cards[index].height = resolved.height
         }
         notifyMutated()
     }
@@ -728,24 +816,30 @@ final class CanvasStore {
             )?.id ?? hoverCardID,
                let target = cards.first(where: { $0.id == targetID }) {
                 let rect = CanvasGeometry.cardRect(target, overrides: positionOverrides, resizeOverrides: resizeOverrides)
-                edges[index].toID = targetID
-                edges[index].toSide = CanvasGeometry.nearestSide(for: point, in: rect)
-                edges[index].toPoint = nil
+                withUndo {
+                    edges[index].toID = targetID
+                    edges[index].toSide = CanvasGeometry.nearestSide(for: point, in: rect)
+                    edges[index].toPoint = nil
+                }
                 notifyMutated()
                 return
             }
 
             if !moved, let restore = editingEdgeRestoreLink {
-                edges[index].toID = restore.toID
-                edges[index].toSide = restore.toSide
-                edges[index].toPoint = nil
+                withUndo {
+                    edges[index].toID = restore.toID
+                    edges[index].toSide = restore.toSide
+                    edges[index].toPoint = nil
+                }
                 notifyMutated()
                 return
             }
 
-            edges[index].toID = nil
-            edges[index].toSide = nil
-            edges[index].toPoint = point
+            withUndo {
+                edges[index].toID = nil
+                edges[index].toSide = nil
+                edges[index].toPoint = point
+            }
             if moved {
                 showEndpointMenu(
                     edgeID: editingID,
@@ -893,15 +987,21 @@ final class CanvasStore {
             return
         }
 
-        withUndo {
-            if shouldDetachLink, let restoreLink {
+        if shouldDetachLink, let restoreLink {
+            withUndo {
                 editingEdgeRestoreLink = restoreLink
                 edges[index].toID = nil
                 edges[index].toSide = nil
                 edges[index].toPoint = tip
-            } else {
-                editingEdgeRestoreLink = nil
+                editingEdgeID = edgeID
+                connectOrigin = (edges[index].fromID, edges[index].fromSide)
+                isConnectingLine = true
+                connectingFrom = (edges[index].fromID, edges[index].fromSide, tip.x, tip.y)
+                hoverCardID = nil
+                selectedCardID = nil
             }
+        } else {
+            editingEdgeRestoreLink = nil
             editingEdgeID = edgeID
             connectOrigin = (edges[index].fromID, edges[index].fromSide)
             isConnectingLine = true
@@ -975,7 +1075,7 @@ final class CanvasStore {
             case .top: origin = CGPoint(x: from.x + from.width / 2 - width / 2, y: from.y - height - gap)
             }
 
-            let card = CanvasCard(id: UUID().uuidString, kind: .note, x: origin.x, y: origin.y, width: width, height: height, content: "")
+            let card = CanvasCard(id: UUID().uuidString, kind: .note, x: origin.x, y: origin.y, width: width, height: height, content: "", createdAt: Date())
             cards.append(card)
             edges.append(CanvasEdge(fromID: fromID, fromSide: fromSide, toID: card.id, toSide: fromSide.opposite))
             selectedCardID = card.id
@@ -1007,7 +1107,8 @@ final class CanvasStore {
                 y: placement.origin.y,
                 width: placement.width,
                 height: placement.height,
-                content: ""
+                content: "",
+                createdAt: Date()
             )
             cards.append(card)
             attachCardToEndpoint(edgeID: edgeID, cardID: card.id, toSide: placement.toSide)
@@ -1124,7 +1225,8 @@ final class CanvasStore {
                 width: displaySize.width,
                 height: displaySize.height,
                 content: file.relativePath,
-                title: vaultDisplayName(for: file)
+                title: vaultDisplayName(for: file),
+                createdAt: Date()
             ))
             selectedCardID = id
 
@@ -1157,7 +1259,8 @@ final class CanvasStore {
             width: size.width,
             height: size.height,
             content: noteCardContent(for: file),
-            title: vaultDisplayName(for: file)
+            title: vaultDisplayName(for: file),
+            createdAt: Date()
         )
     }
 
