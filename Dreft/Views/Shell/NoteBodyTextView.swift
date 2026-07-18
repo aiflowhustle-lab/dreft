@@ -203,7 +203,8 @@ enum NoteTextEditingCoordinatorSupport {
 
     #if os(macOS)
     static func restyleInPlace(textView: NSTextView, fontSize: CGFloat, editorBackground: Color) {
-        guard let storage = textView.textStorage else { return }
+        if textView.textStorage == nil { return }
+        let storage = textView.textStorage!
         let selected = textView.selectedRange()
         textView.undoManager?.disableUndoRegistration()
         storage.beginEditing()
@@ -221,7 +222,7 @@ enum NoteTextEditingCoordinatorSupport {
     }
     #else
     static func restyleInPlace(textView: UITextView, fontSize: CGFloat, editorBackground: Color) {
-        guard let storage = textView.textStorage else { return }
+        let storage = textView.textStorage
         let selected = textView.selectedRange
         textView.undoManager?.disableUndoRegistration()
         storage.beginEditing()
@@ -498,7 +499,9 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
             rect.origin.x += textView.textContainerInset.width
             rect.origin.y += textView.textContainerInset.height
-            parent.caretRect = rect
+            Task { @MainActor in
+                parent.caretRect = rect
+            }
         }
 
         private func clampedRange(_ range: NSRange, in content: String) -> NSRange {
@@ -672,7 +675,10 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
 
         private func updateCaretRect(for textView: UITextView) {
             guard let range = textView.selectedTextRange else { return }
-            parent.caretRect = textView.caretRect(for: range.end)
+            let rect = textView.caretRect(for: range.end)
+            Task { @MainActor in
+                parent.caretRect = rect
+            }
         }
 
         private func clampedRange(_ range: NSRange, in content: String) -> NSRange {

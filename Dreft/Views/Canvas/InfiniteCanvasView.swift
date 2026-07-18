@@ -208,10 +208,6 @@ struct InfiniteCanvasView: View {
         )
       }
       #endif
-      .overlay(alignment: .topLeading) {
-        canvasTimelapseChrome(canvasSize: size)
-          .zIndex(300)
-      }
       .overlay(alignment: .topTrailing) {
         canvasRightToolbar(canvasSize: size)
           .zIndex(300)
@@ -243,6 +239,10 @@ struct InfiniteCanvasView: View {
       .contentShape(Rectangle())
       .clipped()
       .coordinateSpace(name: "canvasScreen")
+      .overlay(alignment: .topLeading) {
+        canvasTimelapseChrome(canvasSize: size)
+          .zIndex(400)
+      }
       .background(AppColors.canvasBackground)
       #if os(macOS)
       .onCanvasScroll { delta, location, zoomRequested, phaseEnded in
@@ -930,7 +930,8 @@ struct InfiniteCanvasView: View {
         } else {
           startCanvasTimelapse(canvasSize: canvasSize)
         }
-      }
+      },
+      tooltipAnchor: .leading(caretCenterX: 15)
     )
     .padding(14)
   }

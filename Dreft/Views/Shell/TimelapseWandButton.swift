@@ -4,6 +4,7 @@ struct TimelapseWandButton: View {
     let isPlaying: Bool
     let isDisabled: Bool
     let onToggle: () -> Void
+    var tooltipAnchor: ObsidianTooltipAnchor = .center
 
     @State private var isHovered = false
 
@@ -38,7 +39,12 @@ struct TimelapseWandButton: View {
         .background {
             Color.clear
                 .frame(width: 30, height: 30)
-                .obsidianTooltipBelow(tooltipText, isVisible: isHovered, gap: 34)
+                .obsidianTooltipBelow(
+                    tooltipText,
+                    isVisible: isHovered,
+                    gap: 34,
+                    anchor: tooltipAnchor
+                )
         }
         .animation(.easeOut(duration: 0.12), value: isHovered)
     }
