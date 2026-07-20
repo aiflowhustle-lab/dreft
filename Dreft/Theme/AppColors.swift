@@ -54,9 +54,17 @@ enum AppColors {
     static var usesMaterialChrome: Bool { theme.usesMaterialChrome }
 
     /// Shared height for sidebar toolbar row and tab bar — keeps dividers aligned.
-    static let chromeRowHeight: CGFloat = 38
+    static let chromeRowHeight: CGFloat = 30
+    /// iPad tab row — taller to fit 2× sidebar toggle targets.
+    static let iPadTabBarRowHeight: CGFloat = 35
     /// Top inset so icon-rail controls clear macOS traffic lights (hidden title bar).
     static let macTrafficLightInset: CGFloat = 36
+    /// Horizontal clearance before tab-bar controls when sidebar is collapsed (hidden title bar).
+    static let macTabBarTrafficLightClearance: CGFloat = 78
+    /// iPad Stage Manager windowed mode — top band height for system traffic lights.
+    static let iPadStageManagerTopBandHeight: CGFloat = 22
+    /// Apple HIG minimum touch target (iOS/iPadOS).
+    static let minimumTouchTarget: CGFloat = 44
     static let noteLink = Color(hex: 0xA78BFA)
     static let noteReadableWidth: CGFloat = 700
     static let accentBlue = Color(red: 0.23, green: 0.51, blue: 0.96)

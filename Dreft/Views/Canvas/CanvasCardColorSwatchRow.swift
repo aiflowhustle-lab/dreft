@@ -19,9 +19,7 @@ struct CanvasCardColorSwatchRow: View {
         return 1 / clampedZoom
     }
 
-    private var colorRowLayoutWidth: CGFloat {
-        min(max(frameWidth / toolbarWorldScale, 200), 420)
-    }
+    private var colorRowLayoutWidth: CGFloat { 280 }
 
     private var isCustomPresetColor: Bool {
         guard let hex = activeColorHex, !hex.isEmpty else { return false }
@@ -45,7 +43,7 @@ struct CanvasCardColorSwatchRow: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 8)
         .frame(width: colorRowLayoutWidth)
-        .background(AppColors.canvasBackground.opacity(0.98))
+        .background(AppColors.canvasBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 14, y: 4)
@@ -72,6 +70,10 @@ struct CanvasCardColorSwatchRow: View {
                 }
         }
         .buttonStyle(.plain)
+        #if os(iOS)
+        .frame(maxWidth: .infinity, minHeight: CanvasPencilInteraction.colorSwatchHitSize)
+        .contentShape(Rectangle())
+        #endif
         .help("Custom color")
         .popover(isPresented: $showCustomColorPicker, arrowEdge: .bottom) {
             AdvancedColorPickerPopover(
@@ -111,6 +113,10 @@ struct CanvasCardColorSwatchRow: View {
                     .animation(.easeOut(duration: 0.12), value: hovered)
             }
             .buttonStyle(.plain)
+            #if os(iOS)
+            .frame(maxWidth: .infinity, minHeight: CanvasPencilInteraction.colorSwatchHitSize)
+            .contentShape(Rectangle())
+            #endif
             .help(name)
             .onHover { hovered = $0 }
         }

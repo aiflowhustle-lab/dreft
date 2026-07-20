@@ -18,9 +18,50 @@ struct GraphCanvasDrawNode: Identifiable {
     var showsLabel: Bool = true
 }
 
-/// Single-pass Canvas renderer for graph links and node dots.
-/// Labels render in Canvas while the layout animates, and as native Text once settled.
+enum GraphNodeLayoutMetrics {
+    /// Dot center sits this many points above the layout anchor.
+    static let dotLift: CGFloat = 7
+    /// Label center sits this many points below the layout anchor.
+    static let labelDrop: CGFloat = 7
+    static let labelWidth: CGFloat = 120
+    static let labelLineHeight: CGFloat = 13
+
+    static func dotCenter(for anchor: CGPoint, zoom: CGFloat = 1) -> CGPoint {
+        CGPoint(x: anchor.x, y: anchor.y - dotLift * zoom)
+    }
+
+    static func labelCenter(for anchor: CGPoint, zoom: CGFloat = 1) -> CGPoint {
+        CGPoint(x: anchor.x, y: anchor.y + labelDrop * zoom)
+    }
+
+    static func labelRect(for anchor: CGPoint, zoom: CGFloat = 1) -> CGRect {
+        let center = labelCenter(for: anchor, zoom: zoom)
+        let width = labelWidth * zoom
+        let height = labelLineHeight * zoom
+        return CGRect(
+            x: center.x - width / 2,
+            y: center.y - height / 2,
+            width: width,
+            height: height
+        )
+    }
+}
+
+enum GraphScreenTransform {
+    static func worldToScreen(_ world: CGPoint, zoom: CGFloat, pan: CGSize) -> CGPoint {
+        CGPoint(x: world.x * zoom + pan.width, y: world.y * zoom + pan.height)
+    }
+
+    static func screenToWorld(_ screen: CGPoint, zoom: CGFloat, pan: CGSize) -> CGPoint {
+        let z = max(zoom, 0.01)
+        return CGPoint(x: (screen.x - pan.width) / z, y: (screen.y - pan.height) / z)
+    }
+}
+
+/// Renders graph links and node dots in screen space at native resolution for the current zoom.
 struct GraphCanvasLayer: View {
+    @Environment(\.displayScale) private var displayScale
+
     let nodes: [GraphCanvasDrawNode]
     let links: [GraphCanvasLink]
     let positions: [String: CGPoint]
@@ -31,44 +72,74 @@ struct GraphCanvasLayer: View {
     let drawLabelsInCanvas: Bool
     let linksDimmed: Bool
     var linkRenderOpacity: CGFloat = 1
+    var zoom: CGFloat = 1
+    var pan: CGSize = .zero
+
+    private var layoutZoom: CGFloat { max(zoom, 0.01) }
 
     var body: some View {
         Canvas { context, _ in
-            drawLinks(in: &context)
-            drawNodes(in: &context)
+            let pixelScale = displayScale
+            drawLinks(in: &context, pixelScale: pixelScale)
+            drawNodes(in: &context, pixelScale: pixelScale)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(false)
     }
 
-    private func drawLinks(in context: inout GraphicsContext) {
+    private func snapToPixel(_ point: CGPoint, pixelScale: CGFloat) -> CGPoint {
+        CGPoint(
+            x: (point.x * pixelScale).rounded() / pixelScale,
+            y: (point.y * pixelScale).rounded() / pixelScale
+        )
+    }
+
+    private func snapDotDiameter(_ diameter: CGFloat, pixelScale: CGFloat) -> CGFloat {
+        let diameterPx = max((diameter * pixelScale).rounded(), 2)
+        let evenDiameterPx = Int(diameterPx) % 2 == 0 ? diameterPx : diameterPx + 1
+        return max(evenDiameterPx / pixelScale, 1 / pixelScale)
+    }
+
+    private func screenDotCenter(for world: CGPoint) -> CGPoint {
+        let anchor = GraphScreenTransform.worldToScreen(world, zoom: layoutZoom, pan: pan)
+        return GraphNodeLayoutMetrics.dotCenter(for: anchor, zoom: layoutZoom)
+    }
+
+    private func screenLabelCenter(for world: CGPoint) -> CGPoint {
+        let anchor = GraphScreenTransform.worldToScreen(world, zoom: layoutZoom, pan: pan)
+        return GraphNodeLayoutMetrics.labelCenter(for: anchor, zoom: layoutZoom)
+    }
+
+    private func drawLinks(in context: inout GraphicsContext, pixelScale: CGFloat) {
         guard linkRenderOpacity > 0.01 else { return }
         let linkColor = (linksDimmed ? AppColors.graphLinkDimmedColor : AppColors.graphLinkColor)
             .opacity(linkRenderOpacity)
+        let strokeWidth = linkStrokeWidth * layoutZoom
 
         let radiusByID = Dictionary(uniqueKeysWithValues: nodes.map { node in
-            let radius = (node.isActive ? nodeDotSize + 2 : nodeDotSize) / 2
-            return (node.id, radius)
+            let diameter = node.isActive ? nodeDotSize + 2 : nodeDotSize
+            return (node.id, snapDotDiameter(diameter * layoutZoom, pixelScale: pixelScale) / 2)
         })
 
         for link in links {
             guard let fromPos = positions[link.fromID],
                   let toPos = positions[link.toID] else { continue }
 
-            // Links attach to the visual dots (labels live below the stored layout point).
-            let fromCenter = visualDotCenter(for: fromPos)
-            let toCenter = visualDotCenter(for: toPos)
-            let fromRadius = radiusByID[link.fromID] ?? (nodeDotSize / 2)
-            let toRadius = radiusByID[link.toID] ?? (nodeDotSize / 2)
+            let fromCenter = snapToPixel(screenDotCenter(for: fromPos), pixelScale: pixelScale)
+            let toCenter = snapToPixel(screenDotCenter(for: toPos), pixelScale: pixelScale)
+            let fromRadius = radiusByID[link.fromID] ?? snapDotDiameter(nodeDotSize * layoutZoom, pixelScale: pixelScale) / 2
+            let toRadius = radiusByID[link.toID] ?? snapDotDiameter(nodeDotSize * layoutZoom, pixelScale: pixelScale) / 2
 
-            let start = edgePoint(from: fromCenter, toward: toCenter, radius: fromRadius)
-            let end = edgePoint(from: toCenter, toward: fromCenter, radius: toRadius)
+            let start = snapToPixel(
+                edgePoint(from: fromCenter, toward: toCenter, radius: fromRadius),
+                pixelScale: pixelScale
+            )
+            let end = snapToPixel(
+                edgePoint(from: toCenter, toward: fromCenter, radius: toRadius),
+                pixelScale: pixelScale
+            )
 
-            let strokeColor: Color
-            if link.isDimmed {
-                strokeColor = linkColor.opacity(0.12)
-            } else {
-                strokeColor = linkColor
-            }
+            let strokeColor = link.isDimmed ? linkColor.opacity(0.12) : linkColor
 
             var path = Path()
             path.move(to: start)
@@ -76,65 +147,71 @@ struct GraphCanvasLayer: View {
             context.stroke(
                 path,
                 with: .color(strokeColor),
-                style: StrokeStyle(lineWidth: linkStrokeWidth, lineCap: .round)
+                style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
             )
 
             if showArrows {
-                drawArrow(in: &context, from: start, to: end, color: strokeColor)
+                drawArrow(in: &context, from: start, to: end, color: strokeColor, strokeWidth: strokeWidth)
             }
         }
     }
 
-    private func drawArrow(in context: inout GraphicsContext, from: CGPoint, to: CGPoint, color: Color) {
+    private func drawArrow(
+        in context: inout GraphicsContext,
+        from: CGPoint,
+        to: CGPoint,
+        color: Color,
+        strokeWidth: CGFloat
+    ) {
         let delta = CGPoint(x: to.x - from.x, y: to.y - from.y)
         let length = max(hypot(delta.x, delta.y), 1)
         let direction = CGPoint(x: delta.x / length, y: delta.y / length)
         let tip = to
         let wing = CGPoint(x: -direction.y, y: direction.x)
-        let base = CGPoint(x: tip.x - direction.x * 10, y: tip.y - direction.y * 10)
+        let arrowLength = 10 * layoutZoom
+        let wingSpread = 4 * layoutZoom
+        let base = CGPoint(x: tip.x - direction.x * arrowLength, y: tip.y - direction.y * arrowLength)
 
         var path = Path()
         path.move(to: tip)
-        path.addLine(to: CGPoint(x: base.x + wing.x * 4, y: base.y + wing.y * 4))
+        path.addLine(to: CGPoint(x: base.x + wing.x * wingSpread, y: base.y + wing.y * wingSpread))
         path.move(to: tip)
-        path.addLine(to: CGPoint(x: base.x - wing.x * 4, y: base.y - wing.y * 4))
+        path.addLine(to: CGPoint(x: base.x - wing.x * wingSpread, y: base.y - wing.y * wingSpread))
         context.stroke(
             path,
             with: .color(color),
-            style: StrokeStyle(lineWidth: linkStrokeWidth, lineCap: .round)
+            style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
         )
     }
 
-    /// Dot sits above the layout point; labels live below. Links must use the dot.
-    private func visualDotCenter(for position: CGPoint) -> CGPoint {
-        CGPoint(x: position.x, y: position.y - 12)
-    }
-
-    /// Stop the stroke at the circle rim so lines meet the nodes cleanly.
     private func edgePoint(from center: CGPoint, toward other: CGPoint, radius: CGFloat) -> CGPoint {
         let dx = other.x - center.x
         let dy = other.y - center.y
         let length = hypot(dx, dy)
         guard length > 0.001 else { return center }
-        let inset = min(radius + 0.75, length * 0.42)
+        let inset = min(radius + (0.75 * layoutZoom), length * 0.42)
         let t = inset / length
         return CGPoint(x: center.x + dx * t, y: center.y + dy * t)
     }
 
-    private func drawNodes(in context: inout GraphicsContext) {
+    private func drawNodes(in context: inout GraphicsContext, pixelScale: CGFloat) {
         for node in nodes {
             let nodeOpacity = node.isDimmed ? 0.22 : 1.0
-            let layout = nodeLayout(for: node.position, dotSize: nodeDotSize, isActive: node.isActive)
+            let baseDiameter = (node.isActive ? nodeDotSize + 2 : nodeDotSize) * layoutZoom
+            let diameter = snapDotDiameter(baseDiameter, pixelScale: pixelScale)
+            let radius = diameter / 2
+            let dotCenter = snapToPixel(screenDotCenter(for: node.position), pixelScale: pixelScale)
             let dotColor = node.isActive
                 ? AppColors.selectionStroke
                 : (node.groupColor ?? AppColors.graphNodeColor)
 
             if node.isActive {
+                let haloPad = 5.5 * layoutZoom
                 let haloRect = CGRect(
-                    x: layout.dotCenter.x - layout.activeDotRadius - 5.5,
-                    y: layout.dotCenter.y - layout.activeDotRadius - 5.5,
-                    width: (layout.activeDotRadius + 5.5) * 2,
-                    height: (layout.activeDotRadius + 5.5) * 2
+                    x: dotCenter.x - radius - haloPad,
+                    y: dotCenter.y - radius - haloPad,
+                    width: (radius + haloPad) * 2,
+                    height: (radius + haloPad) * 2
                 )
                 context.fill(
                     Path(ellipseIn: haloRect),
@@ -143,66 +220,54 @@ struct GraphCanvasLayer: View {
             }
 
             let dotRect = CGRect(
-                x: layout.dotCenter.x - layout.activeDotRadius,
-                y: layout.dotCenter.y - layout.activeDotRadius,
-                width: layout.activeDotRadius * 2,
-                height: layout.activeDotRadius * 2
+                x: dotCenter.x - radius,
+                y: dotCenter.y - radius,
+                width: diameter,
+                height: diameter
             )
             context.fill(Path(ellipseIn: dotRect), with: .color(dotColor.opacity(nodeOpacity)))
 
             guard drawLabelsInCanvas, labelOpacity > 0.01, node.showsLabel else { continue }
 
+            let labelCenter = snapToPixel(screenLabelCenter(for: node.position), pixelScale: pixelScale)
             let labelColor = node.isActive
                 ? AppColors.selectionStroke.opacity(0.95 * labelOpacity * nodeOpacity)
                 : AppColors.graphLabelColor.opacity(labelOpacity * nodeOpacity)
             let labelText = Text(node.label)
-                .font(.system(size: 11, weight: node.isActive ? .semibold : .regular))
+                .font(.system(size: 11 * layoutZoom, weight: node.isActive ? .semibold : .regular))
                 .foregroundStyle(labelColor)
             let resolved = context.resolve(labelText)
-            context.draw(
-                resolved,
-                at: CGPoint(x: layout.labelCenter.x, y: layout.labelCenter.y),
-                anchor: .center
-            )
+            context.draw(resolved, at: labelCenter, anchor: .center)
         }
-    }
-
-    private struct NodeLayout {
-        let dotCenter: CGPoint
-        let activeDotRadius: CGFloat
-        let labelCenter: CGPoint
-    }
-
-    private func nodeLayout(for position: CGPoint, dotSize: CGFloat, isActive: Bool) -> NodeLayout {
-        let dotRadius = (isActive ? dotSize + 2 : dotSize) / 2
-        // Match the old SwiftUI stack: dot above label, combined view centered on `position`.
-        let dotCenter = CGPoint(x: position.x, y: position.y - 12)
-        let labelCenter = CGPoint(x: position.x, y: position.y + 18)
-        return NodeLayout(dotCenter: dotCenter, activeDotRadius: dotRadius, labelCenter: labelCenter)
     }
 }
 
-/// Native SwiftUI labels — crisp subpixel text like Obsidian, unlike Canvas rasterization.
+/// Native SwiftUI labels rendered in screen space — crisp at every zoom level.
 struct GraphNodeLabelsLayer: View {
     @Environment(\.displayScale) private var displayScale
 
     let nodes: [GraphCanvasDrawNode]
     let labelOpacity: CGFloat
+    var zoom: CGFloat = 1
+    var pan: CGSize = .zero
+
+    private var layoutZoom: CGFloat { max(zoom, 0.01) }
 
     var body: some View {
         ZStack {
             ForEach(nodes) { node in
                 if labelOpacity > 0.01, node.showsLabel {
                     Text(node.label)
-                        .font(.system(size: 11, weight: node.isActive ? .semibold : .regular))
+                        .font(.system(size: 11 * layoutZoom, weight: node.isActive ? .semibold : .regular))
                         .foregroundStyle(labelColor(for: node))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .frame(width: 120)
+                        .frame(width: GraphNodeLayoutMetrics.labelWidth * layoutZoom)
                         .position(labelCenter(for: node.position))
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(false)
     }
 
@@ -215,21 +280,24 @@ struct GraphNodeLabelsLayer: View {
     }
 
     private func labelCenter(for position: CGPoint) -> CGPoint {
-        snapToPixel(CGPoint(x: position.x, y: position.y + 18), scale: displayScale)
+        let anchor = GraphScreenTransform.worldToScreen(position, zoom: layoutZoom, pan: pan)
+        return snapToPixel(
+            GraphNodeLayoutMetrics.labelCenter(for: anchor, zoom: layoutZoom),
+            pixelScale: displayScale
+        )
     }
 
-    private func snapToPixel(_ point: CGPoint, scale: CGFloat) -> CGPoint {
+    private func snapToPixel(_ point: CGPoint, pixelScale: CGFloat) -> CGPoint {
         CGPoint(
-            x: (point.x * scale).rounded() / scale,
-            y: (point.y * scale).rounded() / scale
+            x: (point.x * pixelScale).rounded() / pixelScale,
+            y: (point.y * pixelScale).rounded() / pixelScale
         )
     }
 }
 
 enum GraphCanvasHitTesting {
-    /// Matches the combined dot + label hit area from the previous GraphNodeView layout.
     static func nodeID(
-        at point: CGPoint,
+        at worldPoint: CGPoint,
         in nodes: [GraphCanvasDrawNode],
         dotOnly: Bool = false
     ) -> String? {
@@ -253,7 +321,7 @@ enum GraphCanvasHitTesting {
                         height: 32
                     ))
             }
-            if hitRect.contains(point) {
+            if hitRect.contains(worldPoint) {
                 return node.id
             }
         }
@@ -266,8 +334,8 @@ enum GraphCanvasHitTesting {
     }
 
     private static func nodeLayout(for position: CGPoint) -> NodeLayout {
-        let dotCenter = CGPoint(x: position.x, y: position.y - 12)
-        let labelRect = CGRect(x: position.x - 60, y: position.y + 2, width: 120, height: 32)
+        let dotCenter = GraphNodeLayoutMetrics.dotCenter(for: position)
+        let labelRect = GraphNodeLayoutMetrics.labelRect(for: position)
         return NodeLayout(dotCenter: dotCenter, labelRect: labelRect)
     }
 }

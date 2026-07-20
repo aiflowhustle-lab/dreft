@@ -81,7 +81,7 @@ struct AppTheme: Equatable {
         canvasBackground: Color(hex: 0xFFFFFF),
         shellBackground: Color(hex: 0xF3F3F3),
         railBackground: Color(hex: 0xF3F3F3),
-        // Slightly cooler than canvas white so the active tab reads as elevated.
+        // Subtle strip behind tabs; active tab uses canvas white so selection reads clearly.
         tabBarBackground: Color(hex: 0xF0F0F0),
         toolbarBackground: Color.white.opacity(0.92),
         floatingChrome: Color.white,
@@ -110,8 +110,8 @@ struct AppTheme: Equatable {
         handleFill: Color(red: 0.35, green: 0.35, blue: 0.35),
         handleStroke: Color.black.opacity(0.35),
         connectHandle: Color(red: 0.45, green: 0.45, blue: 0.45),
-        graphLinkColor: Color(hex: 0x2A2A2A).opacity(0.72),
-        graphLinkDimmedColor: Color(hex: 0x666666).opacity(0.28),
+        graphLinkColor: Color(hex: 0xD0D0D0),
+        graphLinkDimmedColor: Color(hex: 0xE0E0E0).opacity(0.55),
         graphNodeColor: Color(hex: 0x2A2A2A),
         graphLabelColor: Color(hex: 0x222222),
         usesMaterialChrome: false

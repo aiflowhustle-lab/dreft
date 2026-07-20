@@ -904,6 +904,11 @@ final class CanvasStore {
         contextMenu = (screenPoint, .edge(edgeID: edgeID))
     }
 
+    func showCanvasMenu(at screenPoint: CGPoint, worldPoint: CGPoint) {
+        dismissPendingEndpoint()
+        contextMenu = (screenPoint, .canvas(worldX: worldPoint.x, worldY: worldPoint.y))
+    }
+
     func selectEdge(_ edgeID: String) {
         selectedEdgeID = edgeID
         selectedCardID = nil

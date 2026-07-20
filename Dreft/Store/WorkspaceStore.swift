@@ -1156,7 +1156,10 @@ final class WorkspaceStore {
 
         vaultSyncTask?.cancel()
         let ui = currentWorkspaceSnapshot()
-        let existingByPath = Dictionary(uniqueKeysWithValues: files.map { ($0.relativePath, $0) })
+        let existingByPath = Dictionary(
+            files.map { ($0.relativePath, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let canvasIDsBefore = Set(files.filter { $0.kind == .canvas }.map(\.id))
         let canvasSignatureBefore = canvasFileSignature(files)
 

@@ -6,10 +6,13 @@ struct CanvasCardFloatingToolbarLayer: View {
     let frameWidth: CGFloat
     let frameHeight: CGFloat
     let zoom: CGFloat
+    let cardColors: [(name: String, hex: String)]
     @Binding var showColorRow: Bool
+    @Binding var showCustomColorPicker: Bool
 
     var onDelete: () -> Void
     var onZoomToCard: () -> Void
+    var onSetColor: (String) -> Void
     var onBeginEditingNote: () -> Void
     var onRenameImage: () -> Void = {}
 
@@ -17,14 +20,30 @@ struct CanvasCardFloatingToolbarLayer: View {
 
     private var toolbarLayoutHeight: CGFloat { 38 }
     private var toolbarGapAboveCard: CGFloat { 12 }
+    private var colorRowLayoutHeight: CGFloat { 40 }
+    /// Visible gap between the icon toolbar and the color palette row.
+    private var colorRowGap: CGFloat { 5 }
 
     private var toolbarWorldScale: CGFloat {
         let clampedZoom = min(max(zoom, 0.45), 1.35)
         return 1 / clampedZoom
     }
 
+    /// World-space spacer so the visible gap stays `colorRowGap` screen points at any zoom.
+    private var colorRowGapWorld: CGFloat {
+        colorRowGap / max(toolbarWorldScale * zoom, 0.001)
+    }
+
+    /// Toolbar top edge — constant so opening the color row doesn't shift the icon bar.
+    private var pinnedToolbarTopY: CGFloat {
+        -(toolbarGapAboveCard + toolbarLayoutHeight) * toolbarWorldScale
+    }
+
+    /// Hit-test band above the card — grows upward when the color row is open.
     private var floatingToolbarSlotHeight: CGFloat {
-        (toolbarLayoutHeight + toolbarGapAboveCard) * toolbarWorldScale
+        let base = (toolbarGapAboveCard + toolbarLayoutHeight) * toolbarWorldScale
+        let colorExtra = showColorRow ? (colorRowLayoutHeight + colorRowGap) * toolbarWorldScale : 0
+        return base + colorExtra
     }
 
     private var floatingToolbarOffsetY: CGFloat {
@@ -35,10 +54,12 @@ struct CanvasCardFloatingToolbarLayer: View {
     static func screenHitRect(
         worldFrame: CGRect,
         zoom: CGFloat,
+        showColorRow: Bool,
         worldToScreen: (CGPoint) -> CGPoint
     ) -> CGRect {
         let toolbarWorldScale = 1 / min(max(zoom, 0.45), 1.35)
-        let slotHeight = (38 + 12) * toolbarWorldScale
+        let colorExtra: CGFloat = showColorRow ? 45 : 0
+        let slotHeight = (CGFloat(38 + 12) + colorExtra) * toolbarWorldScale
         let screenOrigin = worldToScreen(worldFrame.origin)
         let screenWidth = worldFrame.width * zoom
         let top = screenOrigin.y + (-slotHeight) * zoom
@@ -50,13 +71,32 @@ struct CanvasCardFloatingToolbarLayer: View {
         ZStack(alignment: .topLeading) {
             Color.clear
                 .frame(width: frameWidth, height: floatingToolbarSlotHeight)
-                .overlay(alignment: .bottom) {
-                    floatingToolbar
-                        .scaleEffect(toolbarWorldScale, anchor: .bottom)
-                        .padding(.bottom, toolbarGapAboveCard * toolbarWorldScale)
-                        .frame(width: frameWidth, alignment: .center)
+                .overlay(alignment: .top) {
+                    VStack(spacing: 0) {
+                        floatingToolbar
+
+                        if showColorRow {
+                            Color.clear
+                                .frame(height: colorRowGapWorld)
+
+                            CanvasCardColorSwatchRow(
+                                activeColorHex: card.colorHex,
+                                frameWidth: 280,
+                                zoom: zoom,
+                                cardColors: cardColors,
+                                showCustomColorPicker: $showCustomColorPicker,
+                                onSetColor: onSetColor
+                            )
+                            .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
+                        }
+                    }
+                    .scaleEffect(toolbarWorldScale, anchor: .top)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: frameWidth, alignment: .center)
+                    .offset(y: pinnedToolbarTopY - floatingToolbarOffsetY)
                 }
                 .offset(y: floatingToolbarOffsetY)
+                .animation(nil, value: showColorRow)
         }
         .frame(width: frameWidth, height: frameHeight, alignment: .topLeading)
         .allowsHitTesting(true)
@@ -116,6 +156,9 @@ struct CanvasCardFloatingToolbarLayer: View {
                     .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .buttonStyle(.plain)
+            #if os(iOS)
+            .canvasPencilToolbarHitTarget()
+            #endif
             #if os(macOS)
             .onHover { hovered = $0 }
             #endif

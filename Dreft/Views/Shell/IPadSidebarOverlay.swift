@@ -37,6 +37,8 @@ private struct IPadRailButton: View {
         }
         .buttonStyle(.plain)
         .help(label)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 
@@ -45,6 +47,7 @@ struct IPadIconRail: View {
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
     var onGoToFile: () -> Void = {}
+    var onSwipeToDismiss: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 6) {
@@ -88,16 +91,45 @@ struct IPadIconRail: View {
                 .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
         )
         .shadow(color: AppColors.floatingChromeShadow, radius: 24, y: 8)
+        .modifier(
+            IPadSidebarSwipeDismissModifier(
+                enabled: onSwipeToDismiss != nil,
+                onDismiss: { onSwipeToDismiss?() }
+            )
+        )
     }
 }
 
 // MARK: - Floating overlay sidebar (iPad)
+
+private struct IPadSidebarSwipeDismissModifier: ViewModifier {
+    var enabled: Bool
+    let onDismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.simultaneousGesture(
+                DragGesture(minimumDistance: 20)
+                    .onEnded { value in
+                        if value.translation.width < -40,
+                           abs(value.translation.width) > abs(value.translation.height) * 1.2 {
+                            onDismiss()
+                        }
+                    }
+            )
+        } else {
+            content
+        }
+    }
+}
 
 struct IPadFloatingSidebar: View {
     @Bindable var workspace: WorkspaceStore
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
     @Binding var isPinned: Bool
+    var panelWidth: CGFloat = IPadShellMetrics.sidebarWidth
+    var onSwipeToDismiss: (() -> Void)?
 
     private var fileFolderSummary: String {
         let folders = workspace.files.filter { $0.kind == .folder }.count
@@ -124,7 +156,7 @@ struct IPadFloatingSidebar: View {
                 .padding(.horizontal, IPadShellMetrics.panelPadding + 4)
                 .padding(.vertical, IPadShellMetrics.panelPadding)
         }
-        .frame(width: IPadShellMetrics.sidebarWidth)
+        .frame(width: panelWidth)
         .frame(maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: IPadShellMetrics.panelCornerRadius, style: .continuous)
@@ -136,6 +168,12 @@ struct IPadFloatingSidebar: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: IPadShellMetrics.panelCornerRadius, style: .continuous))
         .shadow(color: AppColors.floatingChromeShadow, radius: 24, y: 8)
+        .modifier(
+            IPadSidebarSwipeDismissModifier(
+                enabled: onSwipeToDismiss != nil && !isPinned,
+                onDismiss: { onSwipeToDismiss?() }
+            )
+        )
     }
 
     // MARK: Header — "Files" pill with panel dropdown

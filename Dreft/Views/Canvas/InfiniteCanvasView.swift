@@ -21,6 +21,8 @@ struct InfiniteCanvasView: View {
   @State private var isCanvasInteracting = false
   @State private var isCardDragging = false
   @State private var isCardResizing = false
+  /// Camera locked while moving/resizing a card so pinch drift can't flash card scale.
+  @State private var cardInteractionFrozenTransform: CanvasViewTransform?
   @State private var cardDragOverrides: [String: CGPoint] = [:]
   @State private var cardResizeOverrides: [String: CGRect] = [:]
   @State private var panActive = false
@@ -56,6 +58,7 @@ struct InfiniteCanvasView: View {
   var body: some View {
     GeometryReader { geo in
       let size = geo.size
+      let safeBottom = geo.safeAreaInsets.bottom
       ZStack {
         AppColors.canvasBackground
 
@@ -137,7 +140,7 @@ struct InfiniteCanvasView: View {
         .zIndex(6)
 
         canvasCardToolbarLayer(canvasSize: size)
-          .zIndex(101)
+          .zIndex(110)
 
         if store.isDragOver { dropOverlay }
 
@@ -180,7 +183,11 @@ struct InfiniteCanvasView: View {
       #if os(iOS)
       .overlay {
         CanvasTouchCaptureView(
+          passesThroughHits: true,
           isEnabled: canvasNavigationEnabled,
+          blocksNavigationAt: { point in
+            blocksCanvasNavigation(at: point, canvasSize: size)
+          },
           onPan: { delta in
             isCanvasInteracting = true
             displayTransform.x += delta.width
@@ -190,10 +197,12 @@ struct InfiniteCanvasView: View {
             finishCanvasInteraction()
           },
           onPinchBegan: { _ in
+            guard !isCardDragging, !isCardResizing else { return }
             isCanvasInteracting = true
             pinchStartZoom = displayTransform.zoom
           },
           onPinchChanged: { scale, anchor in
+            guard !isCardDragging, !isCardResizing else { return }
             let startZoom = pinchStartZoom ?? displayTransform.zoom
             let newZoom = min(
               CanvasViewTransform.maxZoom,
@@ -204,8 +213,13 @@ struct InfiniteCanvasView: View {
           onPinchEnded: {
             pinchStartZoom = nil
             finishCanvasInteraction()
+          },
+          onLongPress: { location in
+            handleCanvasLongPress(at: location, canvasSize: size)
           }
         )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
       }
       #endif
       .overlay(alignment: .topTrailing) {
@@ -215,16 +229,16 @@ struct InfiniteCanvasView: View {
           .allowsHitTesting(!timelapsePlaying)
       }
       .overlay(alignment: .bottom) {
-        canvasBottomToolbar(canvasSize: size)
+        canvasBottomToolbar(canvasSize: size, safeAreaBottom: safeBottom)
           .zIndex(300)
           .opacity(timelapsePlaying ? 0.45 : 1)
           .allowsHitTesting(!timelapsePlaying)
       }
       .overlay(alignment: .bottomLeading) {
-        zoomIndicator
+        zoomIndicator(safeAreaBottom: safeBottom)
       }
       .overlay(alignment: .bottomTrailing) {
-        backlinkBadge
+        backlinkBadge(safeAreaBottom: safeBottom)
       }
       .overlay {
         canvasNoteEditOverlay(canvasSize: size)
@@ -279,7 +293,7 @@ struct InfiniteCanvasView: View {
       }
       .onChange(of: store.transform) { _, newValue in
         // Split panes keep independent cameras; only the primary document owner syncs.
-        guard !independentCamera, !isCanvasInteracting else { return }
+        guard !independentCamera, !isCanvasInteracting, !isCardDragging else { return }
         displayTransform = newValue
       }
       .onDrop(of: [.image, .fileURL], isTargeted: $store.isDragOver) { providers, location in
@@ -327,7 +341,7 @@ struct InfiniteCanvasView: View {
   // MARK: - World
 
   private var cardIndex: [String: CanvasCard] {
-    Dictionary(uniqueKeysWithValues: store.cards.map { ($0.id, $0) })
+    Dictionary(store.cards.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
   }
 
   private var timelapseActive: Bool {
@@ -371,7 +385,7 @@ struct InfiniteCanvasView: View {
       hoverID: store.hoverCardID,
       spatialIndex: store.spatialIndexForCulling()
     )
-    if isCanvasInteracting || isCardDragging || isCardResizing {
+    if isCanvasInteracting || isCardResizing {
       return sourceCards
     }
     return sourceCards.filter { visibleIDs.contains($0.id) }
@@ -383,9 +397,7 @@ struct InfiniteCanvasView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .contentShape(Rectangle())
       .gesture(
-        store.isConnectingLine || isCardDragging || isCardResizing || store.contextMenu != nil || store.focusCardID != nil
-          ? nil
-          : canvasPanGesture
+        canvasPanGestureEnabled ? canvasPanGesture : nil
       )
       .onTapGesture(count: 2, coordinateSpace: .named("canvasScreen")) { location in
         handleCanvasTap(at: location, canvasSize: canvasSize)
@@ -414,6 +426,10 @@ struct InfiniteCanvasView: View {
       && store.focusCardID == nil
   }
 
+  private var canvasPanGestureEnabled: Bool {
+    canvasNavigationEnabled && !store.isVaultOpen
+  }
+
   /// Double-click empty canvas → place a new note card at the click location.
   private func handleCanvasTap(at screenPoint: CGPoint, canvasSize: CGSize) {
     guard canvasNavigationEnabled, !store.isVaultOpen else { return }
@@ -434,31 +450,90 @@ struct InfiniteCanvasView: View {
     store.focusCardID = store.selectedCardID
   }
 
+  #if os(iOS)
+  /// Pencil/finger long-press on empty canvas → add-card menu (Apple Pencil creation flow).
+  private func handleCanvasLongPress(at screenPoint: CGPoint, canvasSize: CGSize) {
+    guard canvasNavigationEnabled, !store.isVaultOpen else { return }
+    if let until = suppressCanvasTapUntil, Date() < until { return }
+
+    let worldPoint = store.screenToWorld(screenPoint, in: canvasSize, transform: displayTransform)
+    if store.card(
+      at: worldPoint,
+      positionOverrides: cardDragOverrides,
+      resizeOverrides: cardResizeOverrides
+    ) != nil {
+      return
+    }
+
+    store.showCanvasMenu(at: screenPoint, worldPoint: worldPoint)
+  }
+  #endif
+
+  private func cardScreenOrigin(for liveFrame: CGRect, transform: CanvasViewTransform) -> CGPoint {
+    store.worldToScreen(liveFrame.origin, transform: transform)
+  }
+
+  private func cardScreenCenter(for liveFrame: CGRect, transform: CanvasViewTransform) -> CGPoint {
+    let origin = cardScreenOrigin(for: liveFrame, transform: transform)
+    let zoom = transform.zoom
+    return CGPoint(
+      x: origin.x + (liveFrame.width * zoom) / 2,
+      y: origin.y + (liveFrame.height * zoom) / 2
+    )
+  }
+
+  private var cardRenderTransform: CanvasViewTransform {
+    if isCardDragging || isCardResizing, let frozen = cardInteractionFrozenTransform {
+      return frozen
+    }
+    return displayTransform
+  }
+
+  private func beginCardInteractionFreeze() {
+    cardInteractionFrozenTransform = displayTransform
+  }
+
+  private func endCardInteractionFreeze() {
+    restoreCameraAfterCardDragIfNeeded()
+    cardInteractionFrozenTransform = nil
+  }
+
+  #if os(iOS)
+  /// Keep canvas pan/pinch off cards so dragging doesn't briefly scale the view.
+  private func blocksCanvasNavigation(at screenPoint: CGPoint, canvasSize: CGSize) -> Bool {
+    if isPointOnCanvasToolbar(screenPoint, canvasSize: canvasSize) { return true }
+    if isPointOnSelectedCardToolbar(screenPoint, ignoringDragState: true) { return true }
+    let world = store.screenToWorld(screenPoint, in: canvasSize, transform: displayTransform)
+    return store.card(
+      at: world,
+      positionOverrides: cardDragOverrides,
+      resizeOverrides: cardResizeOverrides
+    ) != nil
+  }
+  #endif
+
   /// Cards render in screen space (like edges) — avoids transformEffect breaking drag on iOS.
   private func canvasCardsLayer(canvasSize: CGSize) -> some View {
-    let zoom = displayTransform.zoom
-    let transform = displayTransform
+    let transform = cardRenderTransform
+    let zoom = transform.zoom
     let cards = visibleCards(for: canvasSize)
     let _ = store.imageCacheRevision
     let _ = store.historyRevision
 
     return ZStack(alignment: .topLeading) {
       ForEach(cards) { card in
-        let worldFrame = cardDisplayFrame(card)
-        let baseOrigin = cardPositionOrigin(card)
-        let dragOffset = cardDragWorldOffset(card)
-        let screenOrigin = store.worldToScreen(baseOrigin, transform: transform)
-        let screenCenter = CGPoint(
-          x: screenOrigin.x + (worldFrame.width * zoom) / 2,
-          y: screenOrigin.y + (worldFrame.height * zoom) / 2
-        )
+        let layoutFrame = cardLayoutFrame(card)
+        let liveFrame = cardDisplayFrame(card)
+        let screenOrigin = cardScreenOrigin(for: liveFrame, transform: transform)
 
-        canvasCardView(card: card, displayFrame: worldFrame, canvasSize: canvasSize)
-          .id("\(card.id)-\(store.historyRevision)-\(timelapseRevision)")
-          .frame(width: worldFrame.width, height: worldFrame.height)
-          .scaleEffect(zoom, anchor: .center)
-          .offset(x: dragOffset.width * zoom, y: dragOffset.height * zoom)
-          .position(screenCenter)
+        canvasCardView(card: card, displayFrame: layoutFrame, canvasSize: canvasSize)
+          .id(card.id)
+          .frame(width: layoutFrame.width, height: layoutFrame.height)
+          .scaleEffect(zoom, anchor: .topLeading)
+          .offset(x: screenOrigin.x, y: screenOrigin.y)
+          .transaction { transaction in
+            transaction.disablesAnimations = true
+          }
       }
     }
     .allowsHitTesting(!timelapsePlaying)
@@ -473,13 +548,16 @@ struct InfiniteCanvasView: View {
       isSelected: store.selectedCardID == card.id,
       isLinkTarget: store.hoverCardID == card.id,
       isConnectingLine: store.isConnectingLine,
-      zoom: displayTransform.zoom,
+      zoom: cardRenderTransform.zoom,
       vaultURL: vaultURL,
       vaultFiles: VaultFile.openableFiles(from: workspace.files),
       onSelect: {
         store.selectCard(card.id)
       },
-      onDragBegan: { isCardDragging = true },
+      onDragBegan: {
+        isCardDragging = true
+        beginCardInteractionFreeze()
+      },
       onMove: { preview in
         if var frame = cardResizeOverrides[card.id] {
           frame.origin = preview
@@ -498,15 +576,20 @@ struct InfiniteCanvasView: View {
         }
         suppressCanvasTapUntil = Date().addingTimeInterval(0.35)
         isCardDragging = false
+        endCardInteractionFreeze()
       },
       onResize: { cardResizeOverrides[card.id] = $0 },
-      onResizeBegan: { isCardResizing = true },
+      onResizeBegan: {
+        isCardResizing = true
+        beginCardInteractionFreeze()
+      },
       onResizeEnd: {
         if let frame = cardResizeOverrides[card.id] {
           store.resizeCard(card.id, frame: frame)
           cardResizeOverrides.removeValue(forKey: card.id)
         }
         isCardResizing = false
+        endCardInteractionFreeze()
       },
       onDelete: { store.deleteCard(card.id) },
       onZoomToCard: {
@@ -539,22 +622,19 @@ struct InfiniteCanvasView: View {
       },
       onUpdateContent: { store.updateContent(for: card.id, content: $0) },
       onUpdateTitle: { store.updateTitle(for: card.id, title: $0) },
-      onSetColor: { store.setCardColor(card.id, hex: $0) },
       shouldAutoFocus: store.focusCardID == card.id,
       onDidFocus: {},
       onBeginContentEdit: { store.beginContentEdit(for: card.id) },
       onEndContentEdit: { store.endContentEdit() },
       beginTitleRenameToken: imageTitleRenameTokens[card.id] ?? 0,
       isEditing: store.focusCardID == card.id,
+      isColorPickerOpen: store.selectedCardID == card.id && cardToolbarColorRowOpen,
       onRequestEdit: {
         store.selectedCardID = card.id
         store.selectedEdgeID = nil
         store.focusCardID = card.id
         store.beginContentEdit(for: card.id)
-      },
-      cardColors: store.cardColors,
-      showColorRow: $cardToolbarColorRowOpen,
-      showCustomColorPicker: $cardToolbarCustomColorOpen
+      }
     )
 
     if card.kind == .image {
@@ -597,14 +677,10 @@ struct InfiniteCanvasView: View {
        card.kind != .image {
       let worldFrame = cardDisplayFrame(card)
       let zoom = displayTransform.zoom
-      let dragOffset = cardDragWorldOffset(card)
-      let screenOrigin = store.worldToScreen(cardPositionOrigin(card), transform: displayTransform)
+      let screenOrigin = cardScreenOrigin(for: worldFrame, transform: displayTransform)
       let screenW = worldFrame.width * zoom
       let screenH = worldFrame.height * zoom
-      let screenCenter = CGPoint(
-        x: screenOrigin.x + (worldFrame.width * zoom) / 2 + dragOffset.width * zoom,
-        y: screenOrigin.y + (worldFrame.height * zoom) / 2 + dragOffset.height * zoom
-      )
+      let screenCenter = CGPoint(x: screenOrigin.x + screenW / 2, y: screenOrigin.y + screenH / 2)
 
       CanvasNoteEditOverlay(
         initialText: CanvasCardContent.markdownBody(
@@ -633,44 +709,42 @@ struct InfiniteCanvasView: View {
     return CGRect(x: origin.x, y: origin.y, width: card.width, height: card.height)
   }
 
+  /// Persisted card frame for the drag target — origin stays fixed while `cardDragOverrides` moves the view.
+  private func cardLayoutFrame(_ card: CanvasCard) -> CGRect {
+    if let frame = cardResizeOverrides[card.id] { return frame }
+    return CGRect(x: card.x, y: card.y, width: card.width, height: card.height)
+  }
+
   /// Stable layout origin while dragging — avoids re-positioning the gesture target mid-drag.
   private func cardPositionOrigin(_ card: CanvasCard) -> CGPoint {
     if let frame = cardResizeOverrides[card.id] { return frame.origin }
     return CGPoint(x: card.x, y: card.y)
   }
 
-  private func cardDragWorldOffset(_ card: CanvasCard) -> CGSize {
-    guard let draggedOrigin = cardDragOverrides[card.id] else { return .zero }
-    let base = cardPositionOrigin(card)
-    return CGSize(width: draggedOrigin.x - base.x, height: draggedOrigin.y - base.y)
-  }
-
   @ViewBuilder
   private func canvasCardToolbarLayer(canvasSize: CGSize) -> some View {
     if let selectedID = store.selectedCardID,
        let card = cardIndex[selectedID],
-       !isCardDragging,
        !isCardResizing {
       let worldFrame = cardDisplayFrame(card)
-      let transform = displayTransform
+      let transform = cardRenderTransform
       let zoom = transform.zoom
-      let screenOrigin = store.worldToScreen(worldFrame.origin, transform: transform)
-      let screenCenter = CGPoint(
-        x: screenOrigin.x + (worldFrame.width * zoom) / 2,
-        y: screenOrigin.y + (worldFrame.height * zoom) / 2
-      )
+      let screenCenter = cardScreenCenter(for: worldFrame, transform: transform)
 
       CanvasCardFloatingToolbarLayer(
         card: card,
         frameWidth: worldFrame.width,
         frameHeight: worldFrame.height,
         zoom: zoom,
+        cardColors: store.cardColors,
         showColorRow: $cardToolbarColorRowOpen,
+        showCustomColorPicker: $cardToolbarCustomColorOpen,
         onDelete: { store.deleteCard(card.id) },
         onZoomToCard: {
           store.zoomToSelection(canvasSize: canvasSize)
           displayTransform = store.transform
         },
+        onSetColor: { store.setCardColor(card.id, hex: $0) },
         onBeginEditingNote: {
           store.beginContentEdit(for: card.id)
           store.focusCardID = card.id
@@ -679,9 +753,12 @@ struct InfiniteCanvasView: View {
           imageTitleRenameTokens[card.id, default: 0] += 1
         }
       )
-      .frame(width: worldFrame.width, height: worldFrame.height)
       .scaleEffect(zoom, anchor: .center)
       .position(screenCenter)
+      .allowsHitTesting(true)
+      .transaction { transaction in
+        transaction.disablesAnimations = true
+      }
     }
 
     if let edgeID = store.selectedEdgeID,
@@ -801,7 +878,13 @@ struct InfiniteCanvasView: View {
     applyZoom(at: anchor, targetZoom: newZoom)
   }
 
+  private func restoreCameraAfterCardDragIfNeeded() {
+    guard displayTransform != store.transform else { return }
+    displayTransform = store.transform
+  }
+
   private func applyZoom(at anchor: CGPoint, targetZoom: CGFloat) {
+    guard !isCardDragging, !isCardResizing else { return }
     var t = displayTransform
     let newZoom = min(CanvasViewTransform.maxZoom, max(CanvasViewTransform.minZoom, targetZoom))
     let ratio = newZoom / t.zoom
@@ -1045,30 +1128,42 @@ struct InfiniteCanvasView: View {
     .allowsHitTesting(false)
   }
 
-  private func canvasBottomToolbar(canvasSize: CGSize) -> some View {
+  private func canvasBottomToolbar(canvasSize: CGSize, safeAreaBottom: CGFloat = 0) -> some View {
     #if os(iOS)
-    obsidianBottomToolbar(canvasSize: canvasSize)
+    obsidianBottomToolbar(canvasSize: canvasSize, safeAreaBottom: safeAreaBottom)
     #else
-    macBottomToolbar(canvasSize: canvasSize)
+    macBottomToolbar(canvasSize: canvasSize, safeAreaBottom: safeAreaBottom)
     #endif
   }
 
-  private func macBottomToolbar(canvasSize: CGSize) -> some View {
-    HStack(spacing: 2) {
-      bottomToolbarButtons(canvasSize: canvasSize)
-    }
-    .padding(.horizontal, 6)
-    .padding(.vertical, 5)
-    .background(AppColors.floatingChrome)
-    .clipShape(RoundedRectangle(cornerRadius: 10))
-    .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppColors.floatingChromeBorder, lineWidth: 1))
-    .shadow(color: AppColors.floatingChromeShadow, radius: 16, y: 4)
-    .padding(.bottom, 16)
+  private func macBottomToolbar(canvasSize: CGSize, safeAreaBottom: CGFloat = 0) -> some View {
+    CanvasIPadBottomToolbar(
+      imageSystemName: "photo.on.rectangle.angled",
+      safeAreaBottom: safeAreaBottom,
+      onAddCard: {
+        store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
+        store.focusCardID = store.selectedCardID
+      },
+      onVaultNote: {
+        store.setVaultFiles(workspace.files)
+        store.isVaultOpen = true
+        store.vaultSearchQuery = ""
+        store.vaultSelectedIndex = 0
+      },
+      onAddImage: {
+        #if canImport(PhotosUI)
+        showImagePicker = true
+        #else
+        openMacImagePanel(canvasSize: canvasSize)
+        #endif
+      }
+    )
   }
 
   #if os(iOS)
-  private func obsidianBottomToolbar(canvasSize: CGSize) -> some View {
+  private func obsidianBottomToolbar(canvasSize: CGSize, safeAreaBottom: CGFloat = 0) -> some View {
     CanvasIPadBottomToolbar(
+      safeAreaBottom: safeAreaBottom,
       onAddCard: {
         store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
         store.focusCardID = store.selectedCardID
@@ -1087,35 +1182,6 @@ struct InfiniteCanvasView: View {
     )
   }
   #endif
-
-  @ViewBuilder
-  private func bottomToolbarButtons(canvasSize: CGSize) -> some View {
-    canvasToolButton("doc", tip: "Add card") {
-      store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
-      store.focusCardID = store.selectedCardID
-    }
-    canvasToolButton("doc.text", tip: "Vault note") {
-      store.setVaultFiles(workspace.files)
-      store.isVaultOpen = true
-      store.vaultSearchQuery = ""
-      store.vaultSelectedIndex = 0
-    }
-    #if os(iOS)
-    canvasToolButton("doc.circle", tip: "Add image") {
-      #if canImport(PhotosUI)
-      showImagePicker = true
-      #endif
-    }
-    #else
-    canvasToolButton("photo.on.rectangle.angled", tip: "Add image") {
-      #if canImport(PhotosUI)
-      showImagePicker = true
-      #else
-      openMacImagePanel(canvasSize: canvasSize)
-      #endif
-    }
-    #endif
-  }
 
   private func canvasRightToolbar(canvasSize: CGSize) -> some View {
     #if os(iOS)
@@ -1316,7 +1382,7 @@ struct InfiniteCanvasView: View {
     .help(tip)
   }
 
-  private var zoomIndicator: some View {
+  private func zoomIndicator(safeAreaBottom: CGFloat = 0) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       if let timelapseCurrentDate {
         Text(timelapseCurrentDate.formatted(date: .abbreviated, time: .shortened))
@@ -1334,11 +1400,11 @@ struct InfiniteCanvasView: View {
       }
     }
     .padding(.leading, 14)
-    .padding(.bottom, 10)
+    .padding(.bottom, max(10, safeAreaBottom + 4))
     .allowsHitTesting(false)
   }
 
-  private var backlinkBadge: some View {
+  private func backlinkBadge(safeAreaBottom: CGFloat = 0) -> some View {
     HStack(spacing: 6) {
       Text("\(store.backlinkCount) backlink\(store.backlinkCount == 1 ? "" : "s")")
         .font(.system(size: 12))
@@ -1348,7 +1414,7 @@ struct InfiniteCanvasView: View {
     }
     .foregroundStyle(AppColors.textSecondary)
     .padding(.trailing, 14)
-    .padding(.bottom, 10)
+    .padding(.bottom, max(10, safeAreaBottom + 4))
     .allowsHitTesting(false)
   }
 
@@ -1528,16 +1594,16 @@ struct InfiniteCanvasView: View {
     .buttonStyle(.plain)
   }
 
-  private func isPointOnSelectedCardToolbar(_ screenPoint: CGPoint) -> Bool {
+  private func isPointOnSelectedCardToolbar(_ screenPoint: CGPoint, ignoringDragState: Bool = false) -> Bool {
     guard let selectedID = store.selectedCardID,
-          let card = cardIndex[selectedID],
-          !isCardDragging,
-          !isCardResizing else { return false }
+          let card = cardIndex[selectedID] else { return false }
+    if !ignoringDragState, isCardDragging || isCardResizing { return false }
 
     let worldFrame = cardDisplayFrame(card)
     let rect = CanvasCardFloatingToolbarLayer.screenHitRect(
       worldFrame: worldFrame,
       zoom: displayTransform.zoom,
+      showColorRow: cardToolbarColorRowOpen,
       worldToScreen: { store.worldToScreen($0, transform: displayTransform) }
     )
     return rect.insetBy(dx: -6, dy: -6).contains(screenPoint)
@@ -1852,63 +1918,176 @@ private struct CanvasEdgeHandCursorModifier: ViewModifier {
 #if os(iOS)
 import UIKit
 
-/// iPad canvas navigation — two-finger pan + pinch zoom (mac trackpad parity).
-/// Single-finger touches pass through so cards and empty-canvas pan still work.
+/// iPad two-finger pan and pinch zoom. Use `passesThroughHits` when single-finger
+/// content (e.g. graph nodes) must stay draggable above this layer.
 struct CanvasTouchCaptureView: UIViewRepresentable {
+  var passesThroughHits = false
   var isEnabled: Bool
+  var blocksNavigationAt: ((CGPoint) -> Bool)? = nil
   var onPan: (CGSize) -> Void
   var onPanEnded: () -> Void
   var onPinchBegan: (CGPoint) -> Void
   var onPinchChanged: (CGFloat, CGPoint) -> Void
   var onPinchEnded: () -> Void
+  var onLongPress: ((CGPoint) -> Void)? = nil
 
   func makeUIView(context: Context) -> CanvasTouchUIView {
     let view = CanvasTouchUIView()
     view.backgroundColor = .clear
     view.isMultipleTouchEnabled = true
+    view.passesThroughHits = passesThroughHits
     return view
   }
 
   func updateUIView(_ uiView: CanvasTouchUIView, context: Context) {
+    uiView.passesThroughHits = passesThroughHits
     uiView.navigationEnabled = isEnabled
+    uiView.blocksNavigationAt = blocksNavigationAt
     uiView.onPan = onPan
     uiView.onPanEnded = onPanEnded
     uiView.onPinchBegan = onPinchBegan
     uiView.onPinchChanged = onPinchChanged
     uiView.onPinchEnded = onPinchEnded
+    uiView.onLongPress = onLongPress
+    uiView.syncLongPressRecognizer()
   }
 }
 
 final class CanvasTouchUIView: UIView, UIGestureRecognizerDelegate {
-  var navigationEnabled = true
+  var passesThroughHits = false
+  var navigationEnabled = true {
+    didSet {
+      panRecognizer?.isEnabled = navigationEnabled
+      pinchRecognizer?.isEnabled = navigationEnabled
+      longPressRecognizer?.isEnabled = navigationEnabled
+    }
+  }
   var onPan: ((CGSize) -> Void)?
   var onPanEnded: (() -> Void)?
   var onPinchBegan: ((CGPoint) -> Void)?
   var onPinchChanged: ((CGFloat, CGPoint) -> Void)?
   var onPinchEnded: (() -> Void)?
+  var onLongPress: ((CGPoint) -> Void)?
+  var blocksNavigationAt: ((CGPoint) -> Bool)?
 
+  private func installLongPressRecognizerIfNeeded() {
+    guard onLongPress != nil, longPressRecognizer == nil else { return }
+    guard let hostView = passesThroughHits ? window : self else { return }
+
+    let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+    longPress.minimumPressDuration = 0.45
+    longPress.allowableMovement = 14
+    longPress.cancelsTouchesInView = false
+    longPress.delaysTouchesBegan = false
+    longPress.allowedTouchTypes = [
+      NSNumber(value: UITouch.TouchType.direct.rawValue),
+      NSNumber(value: UITouch.TouchType.pencil.rawValue),
+    ]
+    longPress.delegate = self
+    hostView.addGestureRecognizer(longPress)
+    longPressRecognizer = longPress
+  }
+
+  func syncLongPressRecognizer() {
+    if onLongPress != nil {
+      installLongPressRecognizerIfNeeded()
+    } else if let longPress = longPressRecognizer {
+      (passesThroughHits ? window : self)?.removeGestureRecognizer(longPress)
+      longPressRecognizer = nil
+    }
+  }
+
+  private var panRecognizer: UIPanGestureRecognizer?
+  private var pinchRecognizer: UIPinchGestureRecognizer?
+  private var longPressRecognizer: UILongPressGestureRecognizer?
+  private weak var gestureHost: UIView?
   private var didInstallGestures = false
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
-    guard window != nil, !didInstallGestures else { return }
+    if window == nil {
+      uninstallGestures()
+      return
+    }
+    installGesturesIfNeeded()
+  }
+
+  private func installGesturesIfNeeded() {
+    guard !didInstallGestures else { return }
     didInstallGestures = true
 
     let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
     pan.minimumNumberOfTouches = 2
     pan.maximumNumberOfTouches = 2
+    pan.cancelsTouchesInView = false
+    pan.delaysTouchesBegan = false
+    pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
     pan.delegate = self
-    addGestureRecognizer(pan)
 
     let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+    pinch.cancelsTouchesInView = false
+    pinch.delaysTouchesBegan = false
+    pinch.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
     pinch.delegate = self
-    addGestureRecognizer(pinch)
+
+    if passesThroughHits, let window {
+      window.addGestureRecognizer(pan)
+      window.addGestureRecognizer(pinch)
+      gestureHost = window
+    } else {
+      addGestureRecognizer(pan)
+      addGestureRecognizer(pinch)
+      gestureHost = self
+    }
+
+    panRecognizer = pan
+    pinchRecognizer = pinch
+    installLongPressRecognizerIfNeeded()
+  }
+
+  private func uninstallGestures() {
+    guard didInstallGestures else { return }
+    if let pan = panRecognizer {
+      gestureHost?.removeGestureRecognizer(pan)
+    }
+    if let pinch = pinchRecognizer {
+      gestureHost?.removeGestureRecognizer(pinch)
+    }
+    if let longPress = longPressRecognizer {
+      gestureHost?.removeGestureRecognizer(longPress)
+    }
+    panRecognizer = nil
+    pinchRecognizer = nil
+    longPressRecognizer = nil
+    gestureHost = nil
+    didInstallGestures = false
   }
 
   override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    guard !passesThroughHits else { return nil }
     guard navigationEnabled, bounds.contains(point) else { return nil }
-    guard let touches = event?.allTouches, touches.count >= 2 else { return nil }
     return self
+  }
+
+  override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    guard navigationEnabled else { return false }
+    let point = gestureRecognizer.location(in: self)
+    guard bounds.contains(point) else { return false }
+    if gestureRecognizer !== longPressRecognizer, blocksNavigationAt?(point) == true {
+      return false
+    }
+    return true
+  }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if gestureRecognizer === longPressRecognizer {
+      return navigationEnabled
+    }
+    guard navigationEnabled else { return false }
+    let point = touch.location(in: self)
+    if blocksNavigationAt?(point) == true { return false }
+    // Finger navigates the canvas; Apple Pencil selects, connects, and edits.
+    return touch.type == .direct
   }
 
   func gestureRecognizer(
@@ -1944,6 +2123,11 @@ final class CanvasTouchUIView: UIView, UIGestureRecognizerDelegate {
     default:
       break
     }
+  }
+
+  @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+    guard gesture.state == .began else { return }
+    onLongPress?(gesture.location(in: self))
   }
 }
 #endif

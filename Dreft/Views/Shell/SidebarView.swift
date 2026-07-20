@@ -279,14 +279,6 @@ struct SidebarFileToolbar: View {
             HStack(spacing: 6) {
                 ShellToolbarSymbolButton(systemName: "square.and.pencil", label: "New note", action: onNewNote)
                 ShellToolbarSymbolButton(systemName: "folder.badge.plus", label: "New folder", action: onNewFolder)
-                #if os(iOS)
-                ShellToolbarSymbolButton(
-                    systemName: "point.3.connected.trianglepath.dotted",
-                    label: "Graph view",
-                    isActive: workspace.activeTab?.kind == .graph,
-                    action: { workspace.openGraphTab() }
-                )
-                #endif
                 sortOrderMenu
                 expandCollapseAllButton
             }

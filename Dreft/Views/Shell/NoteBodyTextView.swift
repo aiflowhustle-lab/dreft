@@ -158,6 +158,26 @@ enum WikilinkSuggestSearch {
     }
 }
 
+/// Balanced undo-registration guard — nested calls won't double-enable and crash.
+private enum NoteUndoRegistration {
+    static func perform(on undoManager: UndoManager?, _ work: () -> Void) {
+        guard let undoManager else {
+            work()
+            return
+        }
+        let wasEnabled = undoManager.isUndoRegistrationEnabled
+        if wasEnabled {
+            undoManager.disableUndoRegistration()
+        }
+        defer {
+            if wasEnabled, !undoManager.isUndoRegistrationEnabled {
+                undoManager.enableUndoRegistration()
+            }
+        }
+        work()
+    }
+}
+
 enum NoteTextEditingCoordinatorSupport {
     static func applyMarkdownEdit(
         _ action: MarkdownEditAction,
@@ -178,24 +198,24 @@ enum NoteTextEditingCoordinatorSupport {
         let result = MarkdownEditingSupport.apply(action, text: source, selectedRange: range)
 
         #if os(macOS)
-        textView.undoManager?.disableUndoRegistration()
-        if source != result.text {
-            textView.textStorage?.replaceCharacters(
-                in: NSRange(location: 0, length: (source as NSString).length),
-                with: result.text
-            )
+        NoteUndoRegistration.perform(on: textView.undoManager) {
+            if source != result.text {
+                textView.textStorage?.replaceCharacters(
+                    in: NSRange(location: 0, length: (source as NSString).length),
+                    with: result.text
+                )
+            }
+            textView.setSelectedRange(result.selectedRange)
+            restyleInPlace(textView: textView, fontSize: fontSize, editorBackground: editorBackground)
         }
-        textView.setSelectedRange(result.selectedRange)
-        restyleInPlace(textView: textView, fontSize: fontSize, editorBackground: editorBackground)
-        textView.undoManager?.enableUndoRegistration()
         #else
-        textView.undoManager?.disableUndoRegistration()
-        if source != result.text {
-            textView.text = result.text
+        NoteUndoRegistration.perform(on: textView.undoManager) {
+            if source != result.text {
+                textView.text = result.text
+            }
+            textView.selectedRange = result.selectedRange
+            restyleInPlace(textView: textView, fontSize: fontSize, editorBackground: editorBackground)
         }
-        textView.selectedRange = result.selectedRange
-        restyleInPlace(textView: textView, fontSize: fontSize, editorBackground: editorBackground)
-        textView.undoManager?.enableUndoRegistration()
         #endif
 
         return (result.text, result.selectedRange)
@@ -206,36 +226,36 @@ enum NoteTextEditingCoordinatorSupport {
         if textView.textStorage == nil { return }
         let storage = textView.textStorage!
         let selected = textView.selectedRange()
-        textView.undoManager?.disableUndoRegistration()
-        storage.beginEditing()
-        WikilinkEditorSupport.restyleInPlace(
-            storage,
-            selectedRange: selected,
-            fontSize: fontSize,
-            hiddenDelimiterOn: editorBackground
-        )
-        storage.endEditing()
-        textView.undoManager?.enableUndoRegistration()
-        if textView.selectedRange() != selected {
-            textView.setSelectedRange(selected)
+        NoteUndoRegistration.perform(on: textView.undoManager) {
+            storage.beginEditing()
+            WikilinkEditorSupport.restyleInPlace(
+                storage,
+                selectedRange: selected,
+                fontSize: fontSize,
+                hiddenDelimiterOn: editorBackground
+            )
+            storage.endEditing()
+            if textView.selectedRange() != selected {
+                textView.setSelectedRange(selected)
+            }
         }
     }
     #else
     static func restyleInPlace(textView: UITextView, fontSize: CGFloat, editorBackground: Color) {
         let storage = textView.textStorage
         let selected = textView.selectedRange
-        textView.undoManager?.disableUndoRegistration()
-        storage.beginEditing()
-        WikilinkEditorSupport.restyleInPlace(
-            storage,
-            selectedRange: selected,
-            fontSize: fontSize,
-            hiddenDelimiterOn: editorBackground
-        )
-        storage.endEditing()
-        textView.undoManager?.enableUndoRegistration()
-        if textView.selectedRange != selected {
-            textView.selectedRange = selected
+        NoteUndoRegistration.perform(on: textView.undoManager) {
+            storage.beginEditing()
+            WikilinkEditorSupport.restyleInPlace(
+                storage,
+                selectedRange: selected,
+                fontSize: fontSize,
+                hiddenDelimiterOn: editorBackground
+            )
+            storage.endEditing()
+            if textView.selectedRange != selected {
+                textView.selectedRange = selected
+            }
         }
     }
     #endif
@@ -429,16 +449,16 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             isApplyingProgrammaticChange = true
             defer { isApplyingProgrammaticChange = false }
 
-            textView.undoManager?.disableUndoRegistration()
-            let styled = WikilinkEditorSupport.attributedString(
-                for: content,
-                selectedRange: selectedRange,
-                fontSize: parent.fontSize,
-                hiddenDelimiterOn: parent.editorBackground
-            )
-            textView.textStorage?.setAttributedString(styled)
-            textView.setSelectedRange(clampedRange(selectedRange, in: content))
-            textView.undoManager?.enableUndoRegistration()
+            NoteUndoRegistration.perform(on: textView.undoManager) {
+                let styled = WikilinkEditorSupport.attributedString(
+                    for: content,
+                    selectedRange: selectedRange,
+                    fontSize: parent.fontSize,
+                    hiddenDelimiterOn: parent.editorBackground
+                )
+                textView.textStorage?.setAttributedString(styled)
+                textView.setSelectedRange(clampedRange(selectedRange, in: content))
+            }
             updateCaretRect(for: textView)
         }
 
@@ -627,15 +647,15 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             isApplyingProgrammaticChange = true
             defer { isApplyingProgrammaticChange = false }
 
-            textView.undoManager?.disableUndoRegistration()
-            textView.attributedText = WikilinkEditorSupport.attributedString(
-                for: content,
-                selectedRange: selectedRange,
-                fontSize: parent.fontSize,
-                hiddenDelimiterOn: parent.editorBackground
-            )
-            textView.selectedRange = clampedRange(selectedRange, in: content)
-            textView.undoManager?.enableUndoRegistration()
+            NoteUndoRegistration.perform(on: textView.undoManager) {
+                textView.attributedText = WikilinkEditorSupport.attributedString(
+                    for: content,
+                    selectedRange: selectedRange,
+                    fontSize: parent.fontSize,
+                    hiddenDelimiterOn: parent.editorBackground
+                )
+                textView.selectedRange = clampedRange(selectedRange, in: content)
+            }
             updateCaretRect(for: textView)
         }
 

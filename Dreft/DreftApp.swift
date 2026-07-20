@@ -2,12 +2,6 @@ import SwiftUI
 
 @main
 struct DreftApp: App {
-    @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.dark.rawValue
-
-    private var appearanceMode: AppearanceMode {
-        AppearanceMode(rawValue: appearanceModeRaw) ?? .dark
-    }
-
     init() {
         // Apply the saved theme before the first frame renders — otherwise the
         // UI flashes (or sticks with) dark colors when launching in light mode.
@@ -18,12 +12,7 @@ struct DreftApp: App {
 
     var body: some Scene {
         WindowGroup {
-            WorkspaceShellView()
-                .preferredColorScheme(appearanceMode.colorScheme)
-                .onChange(of: appearanceModeRaw) { _, newValue in
-                    let mode = AppearanceMode(rawValue: newValue) ?? .dark
-                    AppColors.setTheme(mode.theme)
-                }
+            AppRootView()
         }
         #if os(macOS)
         .windowStyle(.hiddenTitleBar)

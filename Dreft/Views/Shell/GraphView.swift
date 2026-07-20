@@ -102,7 +102,7 @@ struct GraphView: View {
     @State private var filterOrphans = true
     @State private var displayArrows = false
     @State private var textFadeThreshold = 0.5
-    @State private var nodeSize = 0.3
+    @State private var nodeSize = 0.5
     @State private var linkThickness = 0.25
     @State private var centerForce = 0.5
     @State private var repelForce = 0.5
@@ -134,21 +134,11 @@ struct GraphView: View {
             GeometryReader { geo in
                 ZStack {
                     graphContent
-                        .scaleEffect(zoomScale)
-                        .offset(panOffset)
                 }
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            if zoomGestureStart == nil {
-                                zoomGestureStart = zoomScale
-                            }
-                            zoomScale = min(max((zoomGestureStart ?? 1) * value, 0.3), 3.5)
-                        }
-                        .onEnded { _ in
-                            zoomGestureStart = nil
-                        }
-                )
+                .clipped()
+                #if os(macOS)
+                .simultaneousGesture(graphMagnificationGesture)
+                #endif
                 .onAppear {
                     canvasSize = geo.size
                     loadSavedLayout()
@@ -572,7 +562,7 @@ struct GraphView: View {
     }
 
     private var nodeDotSize: CGFloat {
-        4 + CGFloat(nodeSize) * 10
+        5 + CGFloat(nodeSize) * 10
     }
 
     private func groupColor(for node: GraphNode) -> Color? {
@@ -677,6 +667,9 @@ struct GraphView: View {
     private var graphContent: some View {
         ZStack {
             graphCanvasStack
+            #if os(iOS)
+            graphTouchCaptureLayer
+            #endif
             graphNodeInteractionLayer
         }
         .transaction { transaction in
@@ -686,9 +679,39 @@ struct GraphView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    @ViewBuilder
+    #if os(iOS)
+    private var graphTouchCaptureLayer: some View {
+        CanvasTouchCaptureView(
+            passesThroughHits: true,
+            isEnabled: graphNavigationEnabled,
+            onPan: { delta in
+                panOffset = CGSize(
+                    width: panOffset.width + delta.width,
+                    height: panOffset.height + delta.height
+                )
+            },
+            onPanEnded: {
+                panDragStart = panOffset
+            },
+            onPinchBegan: { _ in
+                zoomGestureStart = zoomScale
+            },
+            onPinchChanged: { scale, anchor in
+                let startZoom = zoomGestureStart ?? zoomScale
+                applyGraphZoom(at: anchor, targetZoom: startZoom * scale)
+            },
+            onPinchEnded: {
+                zoomGestureStart = nil
+                panDragStart = panOffset
+            }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+    }
+    #endif
+
     private var graphCanvasStack: some View {
-        let stack = ZStack {
+        ZStack {
             GraphCanvasLayer(
                 nodes: canvasDrawNodes,
                 links: canvasDrawLinks,
@@ -699,23 +722,21 @@ struct GraphView: View {
                 labelOpacity: effectiveLabelOpacity,
                 drawLabelsInCanvas: isLayoutAnimating,
                 linksDimmed: !searchText.isEmpty,
-                linkRenderOpacity: graphLinkRenderOpacity
+                linkRenderOpacity: graphLinkRenderOpacity,
+                zoom: zoomScale,
+                pan: panOffset
             )
             .id(timelapseRevision)
 
             if !isLayoutAnimating {
                 GraphNodeLabelsLayer(
                     nodes: canvasDrawNodes,
-                    labelOpacity: effectiveLabelOpacity
+                    labelOpacity: effectiveLabelOpacity,
+                    zoom: zoomScale,
+                    pan: panOffset
                 )
                 .id(timelapseRevision)
             }
-        }
-
-        if timelapseActive {
-            stack
-        } else {
-            stack.drawingGroup()
         }
     }
 
@@ -726,6 +747,10 @@ struct GraphView: View {
             .onContinuousHover(coordinateSpace: .named("graphCanvas")) { phase in
                 updateHoveredNode(for: phase)
             }
+    }
+
+    private func worldGraphPoint(_ screenPoint: CGPoint) -> CGPoint {
+        GraphScreenTransform.screenToWorld(screenPoint, zoom: zoomScale, pan: panOffset)
     }
 
     private func updateHoveredNode(for phase: HoverPhase) {
@@ -749,7 +774,7 @@ struct GraphView: View {
         switch phase {
         case .active(let location):
             let nextID = GraphCanvasHitTesting.nodeID(
-                at: location,
+                at: worldGraphPoint(location),
                 in: hoverHitTestNodes,
                 dotOnly: true
             )
@@ -773,22 +798,56 @@ struct GraphView: View {
         }
     }
 
+    private var graphNavigationEnabled: Bool {
+        !timelapsePlaying && draggedNodeID == nil
+    }
+
+    private var graphMagnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                if zoomGestureStart == nil {
+                    zoomGestureStart = zoomScale
+                }
+                let anchor = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+                applyGraphZoom(
+                    at: anchor,
+                    targetZoom: (zoomGestureStart ?? zoomScale) * value
+                )
+            }
+            .onEnded { _ in
+                zoomGestureStart = nil
+                panDragStart = panOffset
+            }
+    }
+
+    private func applyGraphZoom(at anchor: CGPoint, targetZoom: CGFloat) {
+        let newZoom = min(max(targetZoom, 0.3), 3.5)
+        let ratio = newZoom / max(zoomScale, 0.01)
+        panOffset = CGSize(
+            width: anchor.x - (anchor.x - panOffset.width) * ratio,
+            height: anchor.y - (anchor.y - panOffset.height) * ratio
+        )
+        zoomScale = newZoom
+    }
+
     private var graphNodeInteractionGesture: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named("graphCanvas"))
             .onChanged { value in
                 if draggedNodeID == nil, !isPanningGraph {
                     if let nodeID = GraphCanvasHitTesting.nodeID(
-                        at: value.startLocation,
+                        at: worldGraphPoint(value.startLocation),
                         in: hoverHitTestNodes
                     ) {
                         draggedNodeID = nodeID
-                        nodeDragStart = nodes[nodeIndexByID[nodeID]!].position
+                        guard let index = nodeIndexByID[nodeID] else { return }
+                        nodeDragStart = nodes[index].position
                         kickSimulation(to: 0.6)
                         #if os(macOS)
                         NSCursor.closedHand.set()
                         #endif
                     } else if hypot(value.translation.width, value.translation.height) > 4 {
                         isPanningGraph = true
+                        panDragStart = panOffset
                         if hoveredNodeID != nil {
                             hoveredNodeID = nil
                         }
@@ -807,10 +866,11 @@ struct GraphView: View {
                       let index = nodeIndexByID[nodeID],
                       let start = nodeDragStart else { return }
 
+                let zoom = max(zoomScale, 0.01)
                 mutateGraphNodesWithoutAnimation {
                     nodes[index].position = CGPoint(
-                        x: start.x + value.translation.width,
-                        y: start.y + value.translation.height
+                        x: start.x + value.translation.width / zoom,
+                        y: start.y + value.translation.height / zoom
                     )
                     nodes[index].velocity = .zero
                 }
@@ -824,7 +884,10 @@ struct GraphView: View {
 
                 let moved = hypot(value.translation.width, value.translation.height) > 3
                 let tappedID = draggedNodeID
-                    ?? GraphCanvasHitTesting.nodeID(at: value.location, in: hoverHitTestNodes)
+                    ?? GraphCanvasHitTesting.nodeID(
+                        at: worldGraphPoint(value.location),
+                        in: hoverHitTestNodes
+                    )
 
                 if !moved, let nodeID = tappedID,
                    let file = workspace.files.first(where: { $0.id == nodeID }) {

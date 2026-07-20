@@ -27,19 +27,16 @@ struct CanvasCardView: View {
     var onEndConnect: (CGPoint, Bool) -> Void
     var onUpdateContent: (String) -> Void
     var onUpdateTitle: (String) -> Void = { _ in }
-    var onSetColor: (String) -> Void
     var shouldAutoFocus: Bool = false
     var onDidFocus: () -> Void = {}
     var onBeginContentEdit: () -> Void = {}
     var onEndContentEdit: () -> Void = {}
     var beginTitleRenameToken: Int = 0
     var isEditing: Bool = false
+    var isColorPickerOpen: Bool = false
     var onRequestEdit: () -> Void = {}
 
-    let cardColors: [(name: String, hex: String)]
-    @Binding var showColorRow: Bool
-    @Binding var showCustomColorPicker: Bool
-
+    @FocusState private var isTitleFocused: Bool
     @State private var dragOrigin: CGPoint?
     @State private var resizeStart: (frame: CGRect, corner: String)?
     @State private var connectMoved = false
@@ -51,25 +48,29 @@ struct CanvasCardView: View {
     @State private var connectingSide: CanvasSide?
     @State private var isRenamingTitle = false
     @State private var titleDraft = ""
-    @FocusState private var isTitleFocused: Bool
 
     private var isImage: Bool { card.kind == .image }
     private var frameWidth: CGFloat { displayFrame.width }
     private var frameHeight: CGFloat { displayFrame.height }
     private var displayOrigin: CGPoint { displayFrame.origin }
 
-    /// Purple chrome only when selected and not mid-drag.
+    /// Purple chrome only when selected and not mid-drag (resize/connect handles).
     private var showsSelectionChrome: Bool {
         isSelected && !isDragging
     }
 
-    /// Selected notes use the interior drag surface; don't attach a second drag gesture to the frame.
+    /// Selection border stays visible while dragging so the card doesn't appear to jump/zoom.
+    private var showsSelectionBorder: Bool {
+        isSelected && !isResizing
+    }
+
+    /// Selected cards use the interior drag surface; don't attach a second drag gesture to the frame.
     private var usesExteriorDragGesture: Bool {
-        !isSelected || isImage
+        !isSelected
     }
 
     private var showsResizeOverlay: Bool {
-        isSelected && !isDragging
+        isSelected && !isDragging && !isColorPickerOpen
     }
 
     /// Custom color assigned to the card, if any.
@@ -79,14 +80,14 @@ struct CanvasCardView: View {
     }
 
     private var strokeColor: Color {
-        if showsSelectionChrome { return cardColor ?? AppColors.selectionStroke }
+        if showsSelectionBorder { return cardColor ?? AppColors.selectionStroke }
         if isConnectingLine && isLinkTarget { return AppColors.selectionStroke.opacity(0.55) }
         if let cardColor { return cardColor.opacity(0.8) }
         return isImage ? AppColors.imageCardBorder : AppColors.noteCardBorder
     }
 
     private var strokeWidth: CGFloat {
-        if showsSelectionChrome { return 3 }
+        if showsSelectionBorder { return 3 }
         return cardColor == nil ? 1 : 2
     }
 
@@ -129,14 +130,6 @@ struct CanvasCardView: View {
         floatingToolbarOffsetY - (18 * toolbarWorldScale)
     }
 
-    private var inlineColorRowTopPadding: CGFloat {
-        8 * toolbarWorldScale
-    }
-
-    private var noteColorRowReservedHeight: CGFloat {
-        (40 * toolbarWorldScale) + inlineColorRowTopPadding
-    }
-
     var body: some View {
         ZStack(alignment: .topLeading) {
             cardFrame
@@ -163,7 +156,7 @@ struct CanvasCardView: View {
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
-                    .offset(y: showsSelectionChrome ? imageTitleOffsetY : (-18 * toolbarWorldScale))
+                    .offset(y: isSelected ? imageTitleOffsetY : (-18 * toolbarWorldScale))
                     .onChange(of: beginTitleRenameToken) { _, _ in
                         guard beginTitleRenameToken > 0 else { return }
                         beginTitleRename()
@@ -175,14 +168,14 @@ struct CanvasCardView: View {
                     }
             }
 
-            if showColorRow && showsSelectionChrome {
-                inlineColorSwatchRow
-                    .zIndex(3)
-            }
-
         }
         .frame(width: frameWidth, height: frameHeight)
         .zIndex(isSelected ? 10 : (isLinkTarget ? 8 : 1))
+        .transaction { transaction in
+            if isDragging || isResizing {
+                transaction.disablesAnimations = true
+            }
+        }
     }
 
     private var imageDisplayTitle: String {
@@ -335,7 +328,7 @@ struct CanvasCardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
-            .padding(.top, showColorRow ? noteColorRowReservedHeight : 8)
+            .padding(.top, 8)
             .allowsHitTesting(false)
             .opacity(isEditing ? 0 : 1)
         }
@@ -386,22 +379,6 @@ struct CanvasCardView: View {
         onRequestEdit()
     }
 
-    @ViewBuilder
-    private var inlineColorSwatchRow: some View {
-        CanvasCardColorSwatchRow(
-            activeColorHex: card.colorHex,
-            frameWidth: frameWidth,
-            zoom: zoom,
-            cardColors: cardColors,
-            showCustomColorPicker: $showCustomColorPicker,
-            onSetColor: onSetColor
-        )
-        .scaleEffect(toolbarWorldScale, anchor: .top)
-        .frame(width: frameWidth, alignment: .center)
-        .padding(.top, isImage ? (imageContentInset + inlineColorRowTopPadding) : inlineColorRowTopPadding)
-        .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
-    }
-
     private var handleScreenScale: CGFloat {
         1 / max(zoom, 0.12)
     }
@@ -412,11 +389,19 @@ struct CanvasCardView: View {
     }
 
     private var connectHitSize: CGFloat {
+        #if os(iOS)
+        screenPixels(CanvasPencilInteraction.connectHitPixels)
+        #else
         screenPixels(30)
+        #endif
     }
 
     private var handleHitSize: CGFloat {
+        #if os(iOS)
+        screenPixels(CanvasPencilInteraction.handleHitPixels)
+        #else
         screenPixels(26)
+        #endif
     }
 
     private var cornerHandleVisual: CGFloat { 8 }

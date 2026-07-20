@@ -151,10 +151,31 @@ struct IconRailView: View {
         #endif
     }
 
+    #if os(macOS)
+    private var iconStackTopPadding: CGFloat {
+        if !sidebarVisible {
+            AppColors.chromeRowHeight
+        } else {
+            max(0, contentTopInset - AppColors.chromeRowHeight)
+        }
+    }
+    #else
+    private var iconStackTopPadding: CGFloat {
+        max(0, contentTopInset - AppColors.chromeRowHeight)
+    }
+    #endif
+
     var body: some View {
         VStack(spacing: 0) {
+            #if os(macOS)
+            if sidebarVisible {
+                railHeaderColor
+                    .frame(height: AppColors.chromeRowHeight)
+            }
+            #else
             railHeaderColor
                 .frame(height: AppColors.chromeRowHeight)
+            #endif
 
             VStack(spacing: 4) {
                 IconRailButton(systemName: "magnifyingglass", tooltip: "Go to file") {
@@ -183,13 +204,17 @@ struct IconRailView: View {
                     }
                 }
             }
-            .padding(.top, max(0, contentTopInset - AppColors.chromeRowHeight))
+            .padding(.top, iconStackTopPadding)
 
             Spacer(minLength: 0)
         }
         .frame(width: 40)
         .frame(maxHeight: .infinity)
         .background(railSurfaceColor)
+        #if os(macOS)
+        .zIndex(sidebarVisible ? 2 : 0)
+        #else
         .zIndex(2)
+        #endif
     }
 }

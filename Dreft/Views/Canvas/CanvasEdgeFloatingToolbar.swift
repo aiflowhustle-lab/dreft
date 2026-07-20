@@ -97,6 +97,9 @@ struct CanvasEdgeFloatingToolbar: View {
                     .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .buttonStyle(.plain)
+            #if os(iOS)
+            .canvasPencilToolbarHitTarget()
+            #endif
             #if os(macOS)
             .onHover { hovered = $0 }
             #endif

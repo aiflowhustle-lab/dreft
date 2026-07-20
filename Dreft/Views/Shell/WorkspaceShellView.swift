@@ -51,8 +51,9 @@ struct WorkspaceShellView: View {
     @State private var sidebarWidth = SidebarLayout.defaultWidth
     @State private var isResizingSidebar = false
     #if os(iOS)
-    /// Leading clearance for Stage Manager traffic lights when the app is windowed.
-    @State private var stageManagerLeadingInset: CGFloat = 0
+    /// Reserve a top band for Stage Manager traffic lights only when the window floats (not fullscreen).
+    @State private var usesStageManagerTopBand = false
+    @State private var iPadLayoutDebounceTask: Task<Void, Never>?
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
@@ -152,10 +153,10 @@ struct WorkspaceShellView: View {
         #endif
     }
 
-    /// On iPad the sidebar floats over the canvas instead of being a fixed split pane.
+    /// On iPad the sidebar always floats over the canvas (regular + compact width).
     private var usesFloatingSidebar: Bool {
         #if os(iOS)
-        horizontalSizeClass == .regular
+        true
         #else
         false
         #endif
@@ -163,10 +164,30 @@ struct WorkspaceShellView: View {
 
     private var iconRailTopInset: CGFloat {
         #if os(macOS)
-        AppColors.macTrafficLightInset
+        sidebarVisible ? AppColors.macTrafficLightInset : AppColors.chromeRowHeight
         #else
         8
         #endif
+    }
+
+    #if os(macOS)
+    private var macIconRailWidth: CGFloat { 40 }
+
+    /// Shell-level tab bar overlay for the main pane (avoids title-bar clipping in windowed mode).
+    private var usesMacTabBarOverlay: Bool {
+        splitPane == nil
+    }
+
+    private var macTabBarOverlayLeadingInset: CGFloat {
+        guard sidebarVisible else { return 0 }
+        var inset = sidebarWidth
+        if iconRailVisible { inset += macIconRailWidth }
+        return inset
+    }
+    #endif
+
+    private var tabBarSurfaceColor: Color {
+        AppColors.tabBarBackground
     }
 
     private var shellLayout: some View {
@@ -181,7 +202,7 @@ struct WorkspaceShellView: View {
                 )
                 .frame(maxHeight: .infinity)
                 ShellVerticalHairline()
-                    .padding(.top, AppColors.chromeRowHeight)
+                    .padding(.top, tabBarChromeHeight)
             }
             #endif
 
@@ -200,18 +221,28 @@ struct WorkspaceShellView: View {
         }
         .animation(isResizingSidebar ? nil : .easeInOut(duration: 0.2), value: sidebarVisible)
         .animation(.easeInOut(duration: 0.2), value: rightSidebarVisible)
+        #if os(macOS)
+        .overlay(alignment: .topLeading) {
+            if usesDesktopChrome && usesMacTabBarOverlay {
+                macTabBarOverlay
+                    .zIndex(5)
+            }
+        }
+        #endif
         .background(alignment: .top) {
             if usesDesktopChrome {
-                AppColors.tabBarBackground
-                    .frame(height: AppColors.chromeRowHeight)
+                tabBarSurfaceColor
+                    .frame(height: tabBarChromeHeight)
                     .frame(maxWidth: .infinity)
             }
         }
+        #if os(macOS)
         .overlay(alignment: .top) {
             if usesDesktopChrome {
                 chromeRowHairline
             }
         }
+        #endif
         #if os(iOS)
         .overlay(alignment: .topLeading) {
             floatingSidebarOverlay
@@ -228,45 +259,68 @@ struct WorkspaceShellView: View {
 
     @ViewBuilder
     private var floatingSidebarOverlay: some View {
-        if usesFloatingSidebar && sidebarVisible {
-            ZStack(alignment: .topLeading) {
-                if !ipadSidebarPinned {
-                    // Invisible scrim: tapping anywhere outside dismisses the unpinned sidebar.
-                    Color.black.opacity(0.001)
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture { dismissFloatingSidebar() }
-                }
+        if sidebarVisible {
+            GeometryReader { geo in
+                let panelWidth = floatingSidebarPanelWidth(in: geo)
+                ZStack(alignment: .topLeading) {
+                    if !ipadSidebarPinned || !usesDesktopChrome {
+                        Color.black.opacity(0.001)
+                            .ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture { dismissFloatingSidebar() }
+                            .gesture(sidebarDismissDragGesture)
+                    }
 
-                HStack(alignment: .top, spacing: 6) {
-                    IPadIconRail(
-                        workspace: workspace,
-                        sidebarVisible: $sidebarVisible,
-                        sidebarPanel: $sidebarPanel,
-                        onGoToFile: { showGoToFile = true }
-                    )
-                    IPadFloatingSidebar(
-                        workspace: workspace,
-                        sidebarVisible: $sidebarVisible,
-                        sidebarPanel: $sidebarPanel,
-                        isPinned: $ipadSidebarPinned
-                    )
-                }
-                .padding(.leading, 6)
-                .padding(.vertical, 10)
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 25)
-                        .onEnded { value in
-                            // Swipe left over the panel dismisses it.
-                            if value.translation.width < -60,
-                               abs(value.translation.width) > abs(value.translation.height) {
-                                dismissFloatingSidebar()
-                            }
+                    HStack(alignment: .top, spacing: 6) {
+                        if usesDesktopChrome {
+                            IPadIconRail(
+                                workspace: workspace,
+                                sidebarVisible: $sidebarVisible,
+                                sidebarPanel: $sidebarPanel,
+                                onGoToFile: { showGoToFile = true },
+                                onSwipeToDismiss: (ipadSidebarPinned && usesDesktopChrome) ? nil : dismissFloatingSidebar
+                            )
                         }
-                )
-                .transition(.move(edge: .leading).combined(with: .opacity))
+                        IPadFloatingSidebar(
+                            workspace: workspace,
+                            sidebarVisible: $sidebarVisible,
+                            sidebarPanel: $sidebarPanel,
+                            isPinned: $ipadSidebarPinned,
+                            panelWidth: panelWidth,
+                            onSwipeToDismiss: (ipadSidebarPinned && usesDesktopChrome) ? nil : dismissFloatingSidebar
+                        )
+                    }
+                    .padding(.leading, 6)
+                    .padding(.top, max(10, geo.safeAreaInsets.top))
+                    .padding(.bottom, 10)
+                }
             }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .transition(.move(edge: .leading).combined(with: .opacity))
         }
+    }
+
+    /// Keep sidebar width stable when the keyboard opens (don't shrink with safe-area inset).
+    private func floatingSidebarPanelWidth(in geo: GeometryProxy) -> CGFloat {
+        if horizontalSizeClass == .regular {
+            return IPadShellMetrics.sidebarWidth
+        }
+        return min(
+            IPadShellMetrics.sidebarWidth,
+            max(280, geo.size.width - (usesDesktopChrome ? IPadShellMetrics.railWidth + 18 : 16))
+        )
+    }
+
+    /// Swipe left on the canvas/scrim or sidebar panel to close the floating sidebar (Obsidian-style).
+    private var sidebarDismissDragGesture: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onEnded { value in
+                guard !(ipadSidebarPinned && usesDesktopChrome) else { return }
+                if value.translation.width < -40,
+                   abs(value.translation.width) > abs(value.translation.height) * 1.2 {
+                    dismissFloatingSidebar()
+                }
+            }
     }
     #endif
 
@@ -393,21 +447,134 @@ struct WorkspaceShellView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.canvasBackground)
+        #if os(iOS)
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear {
+                        scheduleIPadWindowLayoutUpdate(size: geo.size)
+                    }
+                    .onChange(of: geo.size) { _, newSize in
+                        scheduleIPadWindowLayoutUpdate(size: newSize)
+                    }
+            }
+        }
+        #endif
     }
 
     private var mainEditorPane: some View {
         VStack(spacing: 0) {
-            tabBar
-                .frame(height: AppColors.chromeRowHeight)
-                .background(AppColors.tabBarBackground)
-                #if os(macOS)
-                .background { MacWindowDragHandle() }
-                #endif
+            #if os(macOS)
+            if usesMacTabBarOverlay {
+                Color.clear.frame(height: tabBarChromeHeight)
+            } else {
+                macTabBarChrome
+            }
+            #else
+            iPadWindowedTabChrome {
+                tabBar
+            }
+            .frame(height: tabBarChromeHeight)
+            .background(tabBarSurfaceColor)
+            #endif
 
             documentNavBar
             canvasArea
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    #if os(macOS)
+    private var macTabBarChrome: some View {
+        iPadWindowedTabChrome {
+            tabBar
+        }
+        .frame(height: tabBarChromeHeight)
+        .background(tabBarSurfaceColor)
+        .background(alignment: .bottom) {
+            MacWindowDragHandle()
+                .frame(height: tabBarRowHeight)
+        }
+    }
+
+    /// Obsidian-style tab row overlay — full width when sidebar is collapsed, editor column when open.
+    private var macTabBarOverlay: some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: macTabBarOverlayLeadingInset, height: tabBarChromeHeight)
+            macTabBarChrome
+        }
+        .frame(maxWidth: .infinity, minHeight: tabBarChromeHeight, maxHeight: tabBarChromeHeight, alignment: .leading)
+    }
+    #endif
+
+    /// Tab row height — includes Stage Manager band on iPad when windowed.
+    private var tabBarChromeHeight: CGFloat {
+        #if os(iOS)
+        if usesDesktopChrome && usesStageManagerTopBand {
+            return AppColors.iPadStageManagerTopBandHeight + tabBarRowHeight
+        }
+        if usesDesktopChrome {
+            return tabBarRowHeight
+        }
+        #endif
+        return tabBarRowHeight
+    }
+
+    private var tabBarRowHeight: CGFloat {
+        #if os(iOS)
+        if usesDesktopChrome { return AppColors.iPadTabBarRowHeight }
+        #endif
+        return AppColors.chromeRowHeight
+    }
+
+    #if os(iOS)
+    private var iPadSidebarToggleIconSize: CGFloat { 18 }
+    private var iPadSidebarToggleFrameSize: CGFloat { AppColors.minimumTouchTarget }
+    private var iPadSidebarToggleSlotWidth: CGFloat { AppColors.minimumTouchTarget + 4 }
+    #elseif os(macOS)
+    /// Tab-bar sidebar toggles only (+40% vs default chrome icons).
+    private var macSidebarToggleIconSize: CGFloat { 18 }
+    private var macSidebarToggleFrameSize: CGFloat { 31 }
+    private var macSidebarToggleSlotWidth: CGFloat { 39 }
+    #endif
+
+    private var sidebarToggleIconSize: CGFloat {
+        #if os(iOS)
+        usesDesktopChrome ? iPadSidebarToggleIconSize : 13
+        #elseif os(macOS)
+        macSidebarToggleIconSize
+        #else
+        13
+        #endif
+    }
+
+    private var sidebarToggleFrameSize: CGFloat {
+        #if os(iOS)
+        usesDesktopChrome ? iPadSidebarToggleFrameSize : 22
+        #elseif os(macOS)
+        macSidebarToggleFrameSize
+        #else
+        22
+        #endif
+    }
+
+    private var sidebarToggleLeadingSlotWidth: CGFloat {
+        #if os(macOS)
+        macSidebarToggleSlotWidth
+        #else
+        28
+        #endif
+    }
+
+    private var sidebarToggleTrailingSlot: CGFloat {
+        #if os(iOS)
+        usesDesktopChrome ? iPadSidebarToggleSlotWidth + 8 : 56
+        #elseif os(macOS)
+        78
+        #else
+        56
+        #endif
     }
 
     // MARK: - Split pane (second tab group)
@@ -491,12 +658,17 @@ struct WorkspaceShellView: View {
 
     private var splitEditorPane: some View {
         VStack(spacing: 0) {
-            splitPaneTabBar
-                .frame(height: AppColors.chromeRowHeight)
-                .background(AppColors.tabBarBackground)
-                #if os(macOS)
-                .background { MacWindowDragHandle() }
-                #endif
+            iPadWindowedTabChrome {
+                splitPaneTabBar
+            }
+            .frame(height: tabBarChromeHeight)
+            .background(tabBarSurfaceColor)
+            #if os(macOS)
+            .background(alignment: .bottom) {
+                MacWindowDragHandle()
+                    .frame(height: tabBarRowHeight)
+            }
+            #endif
 
             splitPaneNavBar
             splitPaneContent
@@ -744,26 +916,6 @@ struct WorkspaceShellView: View {
         .background(AppColors.canvasBackground)
         .foregroundStyle(AppColors.textPrimary)
         .toolbar(.hidden, for: .navigationBar)
-        .background {
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear {
-                        Task { @MainActor in
-                            updateStageManagerInset(from: geo)
-                        }
-                    }
-                    .onChange(of: geo.size) { _, _ in
-                        Task { @MainActor in
-                            updateStageManagerInset(from: geo)
-                        }
-                    }
-                    .onChange(of: geo.frame(in: .global).minX) { _, _ in
-                        Task { @MainActor in
-                            updateStageManagerInset(from: geo)
-                        }
-                    }
-            }
-        }
         .onAppear(perform: bootstrapShellIfNeeded)
         .onChange(of: workspace.activeTabID) { _, _ in
             noteIsReading = false
@@ -799,9 +951,25 @@ struct WorkspaceShellView: View {
 
     // MARK: - Tab bar (Chrome-like + Obsidian mobile chrome)
 
-    private let tabMaxWidth: CGFloat = 200
-    private let tabMinWidth: CGFloat = 96
-    private let singleTabWidth: CGFloat = 180
+    private var tabChromeControlSize: CGFloat {
+        #if os(iOS)
+        AppColors.minimumTouchTarget
+        #else
+        28
+        #endif
+    }
+
+    private var tabPlusSlotWidth: CGFloat {
+        #if os(iOS)
+        AppColors.minimumTouchTarget
+        #else
+        34
+        #endif
+    }
+
+    private let tabMaxWidth: CGFloat = 240
+    private let tabMinWidth: CGFloat = 115
+    private let singleTabWidth: CGFloat = 216
 
     private var tabBar: some View {
         paneTabBar(
@@ -841,8 +1009,8 @@ struct WorkspaceShellView: View {
             leading()
 
             GeometryReader { geo in
-                let trailingSlot: CGFloat = showsTrailingChrome ? 56 : 28
-                let plusSlot: CGFloat = 34
+                let trailingSlot: CGFloat = showsTrailingChrome ? sidebarToggleTrailingSlot : 28
+                let plusSlot: CGFloat = tabPlusSlotWidth
                 let available = max(0, geo.size.width - plusSlot - trailingSlot)
                 let count = max(tabs.count, 1)
                 let width = tabs.count > 1
@@ -876,11 +1044,13 @@ struct WorkspaceShellView: View {
                     Button(action: onAddTab) {
                         Image(systemName: "plus")
                             .font(.system(size: 15, weight: .medium))
-                            .frame(width: 28, height: 28)
+                            .frame(width: tabChromeControlSize, height: tabChromeControlSize)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(AppColors.textSecondary)
                     .help("New tab")
+                    .accessibilityLabel("New tab")
 
                     Spacer(minLength: 0)
                 }
@@ -892,7 +1062,9 @@ struct WorkspaceShellView: View {
                 chromeIconButton(
                     "sidebar.right",
                     tip: rightSidebarVisible ? "Collapse right sidebar" : "Expand right sidebar",
-                    isActive: rightSidebarVisible
+                    isActive: rightSidebarVisible,
+                    iconSize: sidebarToggleIconSize,
+                    frameSize: sidebarToggleFrameSize
                 ) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         rightSidebarVisible.toggle()
@@ -903,7 +1075,7 @@ struct WorkspaceShellView: View {
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity)
-        .frame(height: AppColors.chromeRowHeight)
+        .frame(height: tabBarRowHeight)
     }
 
     @ViewBuilder
@@ -914,7 +1086,7 @@ struct WorkspaceShellView: View {
     ) -> some View {
         if before.id != activeTabID && after.id != activeTabID {
             Rectangle()
-                .fill(AppColors.border)
+                .fill(AppColors.borderSubtle)
                 .frame(width: 1, height: 16)
                 .frame(maxHeight: .infinity, alignment: .center)
         } else {
@@ -940,13 +1112,17 @@ struct WorkspaceShellView: View {
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .semibold))
+                        .frame(width: tabChromeControlSize, height: tabChromeControlSize)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(AppColors.textMuted)
+                .accessibilityLabel("Close tab")
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: AppColors.chromeRowHeight - 2)
+        .frame(height: tabBarRowHeight)
+        .frame(maxHeight: .infinity, alignment: .center)
         .shellTabChrome(isActive: isActive)
         .contentShape(ShellTabShape())
         .onTapGesture(perform: onSelect)
@@ -973,68 +1149,101 @@ struct WorkspaceShellView: View {
             Image(systemName: "chevron.down")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(AppColors.textSecondary)
-                .frame(width: 24, height: 24)
+                .frame(width: tabChromeControlSize, height: tabChromeControlSize)
                 .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
         .help("List tabs")
+        .accessibilityLabel("List tabs")
     }
 
-    /// Layout: [Stage Manager window-control inset] → sidebar toggle → tabs.
+    /// iPad Stage Manager: traffic-light band when windowed; Mac/fullscreen unchanged.
+    @ViewBuilder
+    private func iPadWindowedTabChrome<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        #if os(iOS)
+        if usesDesktopChrome && usesStageManagerTopBand {
+            VStack(spacing: 0) {
+                Color.clear
+                    .frame(height: AppColors.iPadStageManagerTopBandHeight)
+                content()
+                    .frame(height: tabBarRowHeight)
+            }
+        } else {
+            content()
+        }
+        #else
+        content()
+        #endif
+    }
+
+    #if os(iOS)
+    private func scheduleIPadWindowLayoutUpdate(size: CGSize) {
+        iPadLayoutDebounceTask?.cancel()
+        iPadLayoutDebounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+            applyIPadWindowLayout(size: size)
+        }
+    }
+
+    /// Detect floating Stage Manager windows without thrashing layout on every frame change.
+    private func applyIPadWindowLayout(size: CGSize) {
+        let screen = UIScreen.main.bounds.size
+        let enterThreshold: CGFloat = 28
+        let exitThreshold: CGFloat = 10
+
+        let looksFloating: Bool
+        if usesStageManagerTopBand {
+            looksFloating = size.width < screen.width - exitThreshold
+                || size.height < screen.height - exitThreshold
+        } else {
+            looksFloating = size.width < screen.width - enterThreshold
+                || size.height < screen.height - enterThreshold
+        }
+
+        guard usesStageManagerTopBand != looksFloating else { return }
+        usesStageManagerTopBand = looksFloating
+    }
+    #endif
+
+    /// Obsidian tab row: sidebar toggle on the left (below traffic lights on iPad).
     @ViewBuilder
     private var tabBarLeading: some View {
         #if os(iOS)
         if usesDesktopChrome {
-            Color.clear
-                .frame(width: stageManagerLeadingInsetValue)
             chromeIconButton(
                 "sidebar.left",
                 tip: sidebarVisible ? "Hide sidebar" : "Show sidebar",
-                isActive: sidebarVisible
+                isActive: sidebarVisible,
+                iconSize: iPadSidebarToggleIconSize,
+                frameSize: iPadSidebarToggleFrameSize
             ) {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     sidebarVisible.toggle()
                 }
             }
-            .frame(width: 28)
-            .padding(.trailing, 6)
+            .frame(width: iPadSidebarToggleSlotWidth)
         }
-        #else
+        #elseif os(macOS)
         if !sidebarVisible && usesDesktopChrome {
             Color.clear
-                .frame(width: 28)
-            chromeIconButton("sidebar.left", tip: "Expand sidebar") {
+                .frame(width: AppColors.macTabBarTrafficLightClearance)
+            chromeIconButton(
+                "sidebar.left",
+                tip: "Expand sidebar",
+                iconSize: sidebarToggleIconSize,
+                frameSize: sidebarToggleFrameSize
+            ) {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     sidebarVisible = true
                 }
             }
-            .frame(width: 28)
+            .frame(width: sidebarToggleLeadingSlotWidth)
         }
         #endif
     }
-
-    /// Clearance for Stage Manager traffic lights when the app is windowed on iPad.
-    private var stageManagerLeadingInsetValue: CGFloat {
-        #if os(iOS)
-        stageManagerLeadingInset
-        #else
-        0
-        #endif
-    }
-
-    #if os(iOS)
-    private func updateStageManagerInset(from geo: GeometryProxy) {
-        let frame = geo.frame(in: .global)
-        let screen = UIScreen.main.bounds
-        let windowed = frame.minX > 8 || abs(frame.width - screen.width) > 16
-        let next: CGFloat = windowed ? 70 : 0
-        if stageManagerLeadingInset != next {
-            stageManagerLeadingInset = next
-        }
-    }
-    #endif
 
     @ViewBuilder
     private func tabIcon(for kind: WorkspaceTabKind) -> some View {
@@ -1144,7 +1353,7 @@ struct WorkspaceShellView: View {
 
     private var documentNavLeadingWidth: CGFloat {
         #if os(iOS)
-        100
+        usesDesktopChrome ? 72 : 100
         #else
         72
         #endif
@@ -1152,7 +1361,7 @@ struct WorkspaceShellView: View {
 
     private var documentNavTrailingWidth: CGFloat {
         #if os(iOS)
-        120
+        usesDesktopChrome ? 96 : 120
         #else
         96
         #endif
@@ -1163,25 +1372,36 @@ struct WorkspaceShellView: View {
         tip: String,
         isActive: Bool = false,
         isEnabled: Bool = true,
+        iconSize: CGFloat? = nil,
+        frameSize: CGFloat? = nil,
         action: @escaping () -> Void = {}
     ) -> some View {
-        Button(action: action) {
+        #if os(iOS)
+        let resolvedIconSize = iconSize ?? 15
+        let resolvedFrameSize = frameSize ?? AppColors.minimumTouchTarget
+        #else
+        let resolvedIconSize = iconSize ?? 13
+        let resolvedFrameSize = frameSize ?? 22
+        #endif
+        return Button(action: action) {
             Image(systemName: name)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: resolvedIconSize, weight: .medium))
                 .foregroundStyle(
                     isEnabled
                         ? (isActive ? AppColors.textPrimary : AppColors.textSecondary)
                         : AppColors.textMuted.opacity(0.35)
                 )
-                .frame(width: 22, height: 22)
+                .frame(width: resolvedFrameSize, height: resolvedFrameSize)
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: resolvedFrameSize > 30 ? 6 : 4)
                         .fill(isActive ? AppColors.sidebarSelection.opacity(0.85) : Color.clear)
                 )
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .help(tip)
+        .accessibilityLabel(tip)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
     // MARK: - Content
@@ -1304,10 +1524,12 @@ private extension View {
 
 /// Full-width divider under the unified top chrome row (tab bar + sidebar switcher).
 private struct ChromeRowHairline: View {
+    let clearHeight: CGFloat
+
     var body: some View {
         VStack(spacing: 0) {
             Color.clear
-                .frame(height: AppColors.chromeRowHeight - 1)
+                .frame(height: max(0, clearHeight - 1))
             ShellHairline()
         }
         .allowsHitTesting(false)
@@ -1316,7 +1538,7 @@ private struct ChromeRowHairline: View {
 
 extension WorkspaceShellView {
     fileprivate var chromeRowHairline: some View {
-        ChromeRowHairline()
+        ChromeRowHairline(clearHeight: tabBarChromeHeight)
     }
 }
 
@@ -1358,6 +1580,26 @@ private struct ShellTabShape: Shape {
     }
 }
 
+private struct ShellActiveTabOutline: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let radius: CGFloat = 10
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        return path
+    }
+}
+
 private extension View {
     func shellTabChrome(isActive: Bool) -> some View {
         self
@@ -1365,7 +1607,13 @@ private extension View {
                 if isActive {
                     ShellTabShape()
                         .fill(AppColors.canvasBackground)
-                        .shadow(color: Color.black.opacity(0.06), radius: 1, y: -0.5)
+                        .shadow(color: Color.black.opacity(0.04), radius: 0.5, y: -0.5)
+                }
+            }
+            .overlay {
+                if isActive {
+                    ShellActiveTabOutline()
+                        .stroke(AppColors.border.opacity(0.65), lineWidth: 1)
                 }
             }
             .clipShape(ShellTabShape())
@@ -1375,30 +1623,35 @@ private extension View {
 #if os(macOS)
 import AppKit
 
-/// Hides the system title and lets custom tab chrome sit flush with the window top (Obsidian-style).
-private struct MacWindowChromeConfigurator: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            configure(window: view.window)
-        }
-        return view
-    }
+/// Applies hidden title-bar chrome once per window. Must not touch `NSWindow` synchronously
+/// from `viewDidMoveToWindow` — that re-enters SwiftUI preference resolution and overflows the stack.
+private enum MacWindowChrome {
+    private static let configured = NSHashTable<NSWindow>.weakObjects()
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            configure(window: nsView.window)
-        }
-    }
+    static func configureOnce(_ window: NSWindow?) {
+        guard let window, !configured.contains(window) else { return }
+        configured.add(window)
 
-    private func configure(window: NSWindow?) {
-        guard let window else { return }
         window.titleVisibility = .hidden
         window.title = ""
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
         window.styleMask.insert(.fullSizeContentView)
         window.isMovableByWindowBackground = false
+        window.contentView?.clipsToBounds = false
+    }
+}
+
+private struct MacWindowChromeConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let window = nsView.window else { return }
+        DispatchQueue.main.async {
+            MacWindowChrome.configureOnce(window)
+        }
     }
 }
 
