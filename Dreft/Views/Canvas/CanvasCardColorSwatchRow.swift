@@ -15,8 +15,7 @@ struct CanvasCardColorSwatchRow: View {
     }
 
     private var toolbarWorldScale: CGFloat {
-        let clampedZoom = min(max(zoom, 0.45), 1.35)
-        return 1 / clampedZoom
+        CanvasFloatingToolbarChrome.counterScale(for: zoom)
     }
 
     private var colorRowLayoutWidth: CGFloat { 280 }

@@ -6,24 +6,21 @@ import AppKit
 
 struct VaultManagerView: View {
     @Bindable var workspace: WorkspaceStore
+    #if os(iOS)
+    var onRequestFolderPicker: ((VaultFolderPickerPurpose, @escaping (URL, VaultFolderPickerPurpose) -> Void) -> Void)? = nil
+    #endif
     @State private var screen: Screen = .home
     @State private var newVaultName = ""
     @State private var newVaultLocation = ""
     @State private var createLocationBookmark: Data?
     #if os(iOS)
-    @State private var showOpenFolderImporter = false
-    @State private var showCreateLocationImporter = false
+    @State private var localFolderPickerPurpose: VaultFolderPickerPurpose?
     #endif
     @FocusState private var nameFieldFocused: Bool
 
     private enum Screen {
         case home
         case createLocal
-    }
-
-    private enum FolderImportPurpose {
-        case openVault
-        case createLocation
     }
 
     private var appVersion: String {
@@ -48,22 +45,32 @@ struct VaultManagerView: View {
             screen = .home
         }
         #if os(iOS)
-        .fileImporter(
-            isPresented: $showOpenFolderImporter,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            handleFolderImport(result, for: .openVault)
-        }
-        .fileImporter(
-            isPresented: $showCreateLocationImporter,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            handleFolderImport(result, for: .createLocation)
+        .vaultFolderPicker(purpose: localFolderPickerBinding) { url, purpose in
+            handleFolderImport(url, for: purpose)
         }
         #endif
     }
+
+    #if os(iOS)
+    private var localFolderPickerBinding: Binding<VaultFolderPickerPurpose?> {
+        if onRequestFolderPicker != nil {
+            Binding(
+                get: { nil },
+                set: { _ in }
+            )
+        } else {
+            $localFolderPickerPurpose
+        }
+    }
+
+    private func requestFolderPicker(_ purpose: VaultFolderPickerPurpose) {
+        if let onRequestFolderPicker {
+            onRequestFolderPicker(purpose, handleFolderImport)
+        } else {
+            localFolderPickerPurpose = purpose
+        }
+    }
+    #endif
 
     private var managerCard: some View {
         HStack(spacing: 0) {
@@ -101,6 +108,7 @@ struct VaultManagerView: View {
                 .background(Circle().fill(AppColors.sidebarSelection))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Close vault manager")
         #endif
     }
 
@@ -153,19 +161,34 @@ struct VaultManagerView: View {
 
     private func vaultRow(_ vault: WorkspaceVault) -> some View {
         let isActive = vault.id == workspace.activeVault?.id
+        let accessIssue = workspace.vaultAccessibilityIssue(for: vault)
         return HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(vault.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-                Text(vault.path)
+                HStack(spacing: 5) {
+                    Text(vault.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                    if accessIssue != nil {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.orange)
+                            .accessibilityLabel("Needs reconnection")
+                    }
+                }
+                Text(accessIssue ?? vault.path)
                     .font(.system(size: 11))
-                    .foregroundStyle(AppColors.textMuted)
-                    .lineLimit(1)
+                    .foregroundStyle(accessIssue != nil ? Color.orange : AppColors.textMuted)
+                    .lineLimit(accessIssue == nil ? 1 : 2)
                     .truncationMode(.middle)
             }
             Spacer()
             Menu {
+                if accessIssue != nil {
+                    Button("Reconnect folder...") {
+                        reconnectVaultFolder(vault.id)
+                    }
+                    Divider()
+                }
                 Button("Remove from list") {
                     workspace.removeVault(vault.id)
                 }
@@ -180,6 +203,7 @@ struct VaultManagerView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .accessibilityLabel("Vault options")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -245,7 +269,7 @@ struct VaultManagerView: View {
 
             actionRow(
                 title: "Open folder as vault",
-                subtitle: "Choose a dedicated folder — not your entire Documents or Home folder.",
+                subtitle: openFolderVaultSubtitle,
                 buttonTitle: "Open",
                 isPrimary: false
             ) {
@@ -267,9 +291,17 @@ struct VaultManagerView: View {
 
     private var createVaultSubtitle: String {
         #if os(iOS)
-        "Create a new vault in Dreft storage or a chosen folder."
+        "Name your vault and store it on this iPad, or browse to a folder you choose."
         #else
-        "Create a vault in app storage or any folder you choose."
+        "Name your vault and store it in app storage, or choose any folder."
+        #endif
+    }
+
+    private var openFolderVaultSubtitle: String {
+        #if os(iOS)
+        "Pick a folder in Files. Dreft keeps access so your notes stay on this device."
+        #else
+        "Choose a dedicated folder — not your entire Documents or Home folder."
         #endif
     }
 
@@ -470,7 +502,7 @@ struct VaultManagerView: View {
             closeManager()
         }
         #else
-        showOpenFolderImporter = true
+        requestFolderPicker(.openVault)
         #endif
     }
 
@@ -487,13 +519,12 @@ struct VaultManagerView: View {
             createLocationBookmark = VaultSecurityAccess.createBookmark(for: url)
         }
         #else
-        showCreateLocationImporter = true
+        requestFolderPicker(.createLocation)
         #endif
     }
 
     #if os(iOS)
-    private func handleFolderImport(_ result: Result<[URL], Error>, for purpose: FolderImportPurpose) {
-        guard case .success(let urls) = result, let url = urls.first else { return }
+    private func handleFolderImport(_ url: URL, for purpose: VaultFolderPickerPurpose) {
         _ = url.startAccessingSecurityScopedResource()
 
         switch purpose {
@@ -504,9 +535,30 @@ struct VaultManagerView: View {
         case .createLocation:
             newVaultLocation = url.path
             createLocationBookmark = VaultSecurityAccess.createBookmark(for: url)
+        case .reconnectVault(let vaultID):
+            let bookmark = VaultSecurityAccess.createBookmark(for: url)
+            workspace.reconnectVault(vaultID, at: url, bookmarkData: bookmark)
         }
     }
     #endif
+
+    private func reconnectVaultFolder(_ vaultID: String) {
+        #if os(macOS)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Reconnect"
+        panel.message = "Choose the vault folder again to restore access."
+        if panel.runModal() == .OK, let url = panel.url {
+            _ = url.startAccessingSecurityScopedResource()
+            let bookmark = VaultSecurityAccess.createBookmark(for: url)
+            workspace.reconnectVault(vaultID, at: url, bookmarkData: bookmark)
+        }
+        #else
+        requestFolderPicker(.reconnectVault(vaultID: vaultID))
+        #endif
+    }
 
     private var hairline: some View {
         Rectangle()
@@ -557,4 +609,6 @@ struct VaultManagerView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
+}
+
 }

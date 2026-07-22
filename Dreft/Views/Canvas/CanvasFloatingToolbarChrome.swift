@@ -6,6 +6,15 @@ enum CanvasFloatingToolbarChrome {
     static let buttonSize: CGFloat = 36
     static let iconSize: CGFloat = 15
     static let pillSpacing: CGFloat = 10
+    /// Cap toolbar growth when zoomed in — matches Obsidian-style floating chrome.
+    static let counterScaleMaxZoom: CGFloat = 1.35
+
+    /// Counter-scale applied inside the card toolbar layer (the parent also applies `zoom`).
+    /// Keeps delete/color/zoom controls the same screen size at any canvas zoom, including max zoom-out.
+    static func counterScale(for zoom: CGFloat) -> CGFloat {
+        let clamped = min(max(zoom, CanvasViewTransform.minZoom), counterScaleMaxZoom)
+        return 1 / clamped
+    }
 
     @ViewBuilder
     static func pill<Content: View>(@ViewBuilder content: () -> Content) -> some View {

@@ -43,10 +43,15 @@ private struct IPadRailButton: View {
 }
 
 struct IPadIconRail: View {
-    @Bindable var workspace: WorkspaceStore
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
+    var isGraphActive = false
+    var isCanvasActive = false
     var onGoToFile: () -> Void = {}
+    var onOpenGraph: () -> Void = {}
+    var onCreateCanvas: () -> Void = {}
+    var onCreateNote: () -> Void = {}
+    var onManageVaults: () -> Void = {}
     var onSwipeToDismiss: (() -> Void)?
 
     var body: some View {
@@ -57,24 +62,22 @@ struct IPadIconRail: View {
             IPadRailButton(
                 systemName: "point.3.connected.trianglepath.dotted",
                 label: "Open graph view",
-                isActive: workspace.activeTab?.kind == .graph
+                isActive: isGraphActive
             ) {
-                workspace.openGraphTab()
+                onOpenGraph()
             }
             IPadRailButton(
                 systemName: "square.grid.2x2",
                 label: "Create new canvas",
-                isActive: workspace.activeTab?.kind == .canvas
+                isActive: isCanvasActive
             ) {
-                workspace.createCanvas()
+                onCreateCanvas()
             }
             IPadRailButton(systemName: "doc.badge.plus", label: "New note") {
-                workspace.createNote()
+                onCreateNote()
             }
             IPadRailButton(systemName: "square.stack.3d.up", label: "Manage vaults") {
-                withAnimation(.easeOut(duration: 0.15)) {
-                    workspace.isVaultManagerOpen = true
-                }
+                onManageVaults()
             }
             Spacer(minLength: 0)
         }
@@ -129,6 +132,7 @@ struct IPadFloatingSidebar: View {
     @Binding var sidebarPanel: SidebarPanel
     @Binding var isPinned: Bool
     var panelWidth: CGFloat = IPadShellMetrics.sidebarWidth
+    var onOpenDocument: ((WorkspaceFileEntry) -> Void)? = nil
     var onSwipeToDismiss: (() -> Void)?
 
     private var fileFolderSummary: String {
@@ -149,7 +153,8 @@ struct IPadFloatingSidebar: View {
                 sidebarVisible: $sidebarVisible,
                 sidebarPanel: $sidebarPanel,
                 activePanel: sidebarPanel,
-                floatingStyle: true
+                floatingStyle: true,
+                onOpenDocument: onOpenDocument
             )
 
             footer
@@ -174,13 +179,19 @@ struct IPadFloatingSidebar: View {
                 onDismiss: { onSwipeToDismiss?() }
             )
         )
+        .onAppear {
+            let normalized = SidebarPanel.normalized(sidebarPanel)
+            if normalized != sidebarPanel {
+                sidebarPanel = normalized
+            }
+        }
     }
 
     // MARK: Header — "Files" pill with panel dropdown
 
     private var panelSwitcherHeader: some View {
         Menu {
-            ForEach(SidebarPanel.allCases, id: \.self) { panel in
+            ForEach(SidebarPanel.shippedPanels, id: \.self) { panel in
                 Button {
                     sidebarPanel = panel
                 } label: {

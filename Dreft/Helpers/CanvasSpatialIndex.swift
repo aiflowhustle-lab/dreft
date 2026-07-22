@@ -3,7 +3,7 @@ import Foundation
 
 /// Uniform grid index for fast viewport queries on large canvases.
 struct CanvasSpatialIndex {
-    static let minimumCardCount = 80
+    static let minimumCardCount = 30
     private static let cellSize: CGFloat = 384
 
     private struct CellKey: Hashable {

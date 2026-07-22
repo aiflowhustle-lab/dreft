@@ -25,10 +25,13 @@ struct CanvasImageExportSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var viewport: CanvasExportViewport = .fullCanvas
-    @State private var exportZoom: CGFloat = 1
+    @State private var exportZoom: CGFloat = 2
     @State private var showLogo = true
     @State private var privacyMode = false
     @State private var isExporting = false
+    #if os(iOS)
+    @State private var pendingExport: IOSPendingFileExport?
+    #endif
 
     private var fileName: String {
         workspace.files.first(where: { $0.id == fileID })?.name ?? "Canvas"
@@ -95,7 +98,7 @@ struct CanvasImageExportSheet: View {
                 title: "Zoom",
                 subtitle: "Estimated image dimensions: \(dimensionText)"
             ) {
-                Slider(value: $exportZoom, in: 0.25...4)
+                Slider(value: $exportZoom, in: 0.5...8, step: 0.25)
                     .frame(width: 125)
             }
 
@@ -163,6 +166,27 @@ struct CanvasImageExportSheet: View {
         .frame(width: 440)
         .background(AppColors.overlayPanel)
         .foregroundStyle(AppColors.textPrimary)
+        #if os(iOS)
+        .fullScreenCover(item: $pendingExport) { export in
+            IOSFileExportPicker(fileURL: export.url) { savedURL in
+                pendingExport = nil
+                isExporting = false
+                if let savedURL {
+                    workspace.reportVaultError(
+                        title: "Image exported",
+                        message: """
+                        Saved as “\(savedURL.lastPathComponent)”.
+
+                        Open the Files app and browse to the folder you chose to view or share the image.
+                        """
+                    )
+                    dismiss()
+                }
+            }
+            .ignoresSafeArea()
+            .background(Color.clear)
+        }
+        #endif
     }
 
     private var header: some View {
@@ -250,21 +274,23 @@ struct CanvasImageExportSheet: View {
             return
         }
 
+        let exportName = sanitizedExportFileName()
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(fileName).png")
+            .appendingPathComponent(exportName)
         do {
             try data.write(to: url, options: .atomic)
-            isExporting = false
-            dismiss()
-            // Let the sheet dismiss before presenting the share sheet.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                IOSShareSheet.present(fileURL: url)
-            }
+            pendingExport = IOSPendingFileExport(url: url)
         } catch {
             isExporting = false
             workspace.reportVaultError(title: "Export failed", message: error.localizedDescription)
         }
         #endif
+    }
+
+    private func sanitizedExportFileName() -> String {
+        let trimmed = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? "Canvas" : trimmed
+        return base.hasSuffix(".png") ? base : "\(base).png"
     }
 
     private func renderPNGData() -> Data? {
@@ -278,13 +304,17 @@ struct CanvasImageExportSheet: View {
                 privacyMode: privacyMode
             )
         )
+        renderer.isOpaque = true
         renderer.scale = 1
 
         #if os(macOS)
         guard let image = renderer.nsImage,
               let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
-        return bitmap.representation(using: .png, properties: [:])
+        return bitmap.representation(
+            using: .png,
+            properties: [.compressionFactor: 1.0]
+        )
         #else
         return renderer.uiImage?.pngData()
         #endif

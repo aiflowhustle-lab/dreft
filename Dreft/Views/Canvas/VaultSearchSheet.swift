@@ -152,7 +152,7 @@ struct VaultSearchSheet: View {
         switch file.kind {
         case .note, .canvas:
             if let entry = workspace.files.first(where: { $0.id == file.id }) {
-                workspace.openTab(for: entry)
+                workspace.navigateToFile(entry)
             }
             dismiss()
         case .image:

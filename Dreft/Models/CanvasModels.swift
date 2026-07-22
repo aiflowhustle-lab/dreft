@@ -205,6 +205,17 @@ enum CanvasConstants {
     static let dotSize: CGFloat = 3
     static let displayMaxImagePixelEdge: CGFloat = 1024
     static let viewportPadding: CGFloat = 160
+    /// Extra world padding while panning/pinching — keeps nearby cards mounted without rendering the whole canvas.
+    static let interactionViewportPadding: CGFloat = 480
+    /// Extra padding beyond the interaction buffer for background image prefetch.
+    static let prefetchViewportPadding: CGFloat = 320
+    /// Debounce before expanding the mounted card set while panning/zooming.
+    static let cullingDebounceMs: Int = 100
+    /// LRU cap for decoded canvas image thumbnails.
+    static let imageCacheMaxEntries: Int = 96
+    static let imageCacheMaxBytes: Int = 96 * 1024 * 1024
+    /// Zoom below this: colored rectangles only (Tier 2 LOD).
+    static let lodBlockZoomThreshold: CGFloat = 0.25
     /// Fixed screen-pixel arrow size — stays visually consistent when zooming.
     static let edgeArrowScreenSize: CGFloat = 13
     /// Default compact note size (image-card connection / canvas click).
@@ -212,4 +223,26 @@ enum CanvasConstants {
     static let compactNoteHeight: CGFloat = 56
     /// Default dangling connector length when clicking a handle without dragging.
     static let defaultConnectDistance: CGFloat = 150
+}
+
+/// Render detail for **note** cards when zoomed out. Image cards always stay full fidelity (Obsidian-style).
+enum CanvasCardLOD: Int, Comparable {
+    case block
+    case summary
+    case full
+
+    static func < (lhs: CanvasCardLOD, rhs: CanvasCardLOD) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+
+    static func resolve(
+        zoom: CGFloat,
+        isSelected: Bool,
+        isLinkTarget: Bool,
+        isEditing: Bool
+    ) -> CanvasCardLOD {
+        if isSelected || isLinkTarget || isEditing { return .full }
+        if zoom < CanvasConstants.lodBlockZoomThreshold { return .block }
+        return .full
+    }
 }

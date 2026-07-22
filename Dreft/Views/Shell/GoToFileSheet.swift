@@ -152,7 +152,7 @@ struct GoToFileSheet: View {
         } else {
             workspace.openFileFromQuickSwitcher(
                 file,
-                replacingTabID: replacingTabID
+                replacingTabID: replacingTabID ?? workspace.activeTabID
             )
         }
         dismiss()

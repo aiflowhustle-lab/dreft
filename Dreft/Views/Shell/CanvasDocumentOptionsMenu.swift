@@ -9,7 +9,8 @@ struct CanvasDocumentOptionsMenu: View {
     @Bindable var workspace: WorkspaceStore
     @Bindable var canvasStore: CanvasStore
     let fileID: String
-    @Binding var splitLayout: NoteSplitLayout
+    var onSplitRight: () -> Void = {}
+    var onSplitDown: () -> Void = {}
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
 
@@ -25,27 +26,13 @@ struct CanvasDocumentOptionsMenu: View {
 
     var body: some View {
         Menu {
-            Button {
-                splitLayout = splitLayout == .right ? .none : .right
-            } label: {
-                if splitLayout == .right {
-                    Label("Split right", systemImage: "checkmark")
-                } else {
-                    Text("Split right")
-                }
-            }
-            Button {
-                splitLayout = splitLayout == .down ? .none : .down
-            } label: {
-                if splitLayout == .down {
-                    Label("Split down", systemImage: "checkmark")
-                } else {
-                    Text("Split down")
-                }
-            }
+            Button("Split right", action: onSplitRight)
+            Button("Split down", action: onSplitDown)
+            #if os(macOS)
             Button("Open in new window") {
                 openInNewWindow()
             }
+            #endif
 
             Divider()
 

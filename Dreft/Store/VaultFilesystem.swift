@@ -10,7 +10,7 @@ enum VaultFilesystem {
     static let welcomeNoteContent = """
     This is your new vault.
 
-    Make a note of something, create a link, or try the Importer!
+    Make a note, link ideas with [[wikilinks]], or open the graph view to explore connections.
 
     When you're ready, delete this note and make the vault your own.
     """

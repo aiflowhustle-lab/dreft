@@ -76,6 +76,7 @@ private func isSignificantCanvasSizeChange(from old: CGSize, to new: CGSize) -> 
 
 struct GraphView: View {
     @Bindable var workspace: WorkspaceStore
+    var onNavigateToFile: ((WorkspaceFileEntry) -> Void)? = nil
 
     @State private var nodes: [GraphNode] = []
     @State private var links: [GraphLink] = []
@@ -93,7 +94,7 @@ struct GraphView: View {
     @State private var alpha: CGFloat = 0
     @State private var zoomScale: CGFloat = 1
     @State private var zoomGestureStart: CGFloat?
-    @State private var controlsVisible = true
+    @State private var controlsVisible = false
 
     @State private var searchText = ""
     @State private var filterTags = false
@@ -361,6 +362,9 @@ struct GraphView: View {
         case .full:
             break
         }
+        #if os(iOS)
+        parts.append("Tap a dot to open")
+        #endif
         return parts.joined(separator: " · ")
     }
 
@@ -540,7 +544,10 @@ struct GraphView: View {
     }
 
     private var displayedNodes: [GraphNode] {
-        let base = timelapseActive ? graphNodesForDisplay : nodes
+        var base = timelapseActive ? graphNodesForDisplay : nodes
+        if filterTags {
+            base = base.filter { !workspace.tags(for: $0.id).isEmpty }
+        }
         if timelapseActive || filterOrphans {
             return base
         }
@@ -553,7 +560,21 @@ struct GraphView: View {
     }
 
     private func nodeMatchesSearch(_ node: GraphNode) -> Bool {
-        searchText.isEmpty || node.label.localizedCaseInsensitiveContains(searchText)
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return true }
+
+        if query.lowercased().hasPrefix("tag:") {
+            let term = String(query.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            return workspace.files(containingTag: term).contains { $0.id == node.id }
+        }
+
+        if node.label.localizedCaseInsensitiveContains(query) { return true }
+        if let file = workspace.files.first(where: { $0.id == node.id }),
+           file.kind == .note,
+           file.noteContent.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        return false
     }
 
     private var labelOpacity: CGFloat {
@@ -578,7 +599,14 @@ struct GraphView: View {
             } else if query.lowercased().hasPrefix("path:") {
                 target = workspace.path(for: node.id)
                 term = String(query.dropFirst(5))
-            } else if query.lowercased().hasPrefix("tag:") || query.lowercased().hasPrefix("line:")
+            } else if query.lowercased().hasPrefix("tag:") {
+                let tagTerm = String(query.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+                if !tagTerm.isEmpty,
+                   workspace.files(containingTag: tagTerm).contains(where: { $0.id == node.id }) {
+                    return group.color
+                }
+                continue
+            } else if query.lowercased().hasPrefix("line:")
                 || query.lowercased().hasPrefix("section:") || query.hasPrefix("[") {
                 continue
             } else {
@@ -776,6 +804,7 @@ struct GraphView: View {
             let nextID = GraphCanvasHitTesting.nodeID(
                 at: worldGraphPoint(location),
                 in: hoverHitTestNodes,
+                zoom: zoomScale,
                 dotOnly: true
             )
             if hoveredNodeID != nextID {
@@ -830,22 +859,56 @@ struct GraphView: View {
         zoomScale = newZoom
     }
 
+    private var graphNodeTapMoveThreshold: CGFloat {
+        #if os(iOS)
+        12
+        #else
+        3
+        #endif
+    }
+
+    private var graphNodeDragStartThreshold: CGFloat {
+        #if os(iOS)
+        10
+        #else
+        0
+        #endif
+    }
+
+    private var graphBackgroundPanStartThreshold: CGFloat {
+        #if os(iOS)
+        14
+        #else
+        4
+        #endif
+    }
+
     private var graphNodeInteractionGesture: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named("graphCanvas"))
             .onChanged { value in
+                let distance = hypot(value.translation.width, value.translation.height)
+
                 if draggedNodeID == nil, !isPanningGraph {
                     if let nodeID = GraphCanvasHitTesting.nodeID(
                         at: worldGraphPoint(value.startLocation),
-                        in: hoverHitTestNodes
+                        in: hoverHitTestNodes,
+                        zoom: zoomScale
                     ) {
+                        #if os(iOS)
+                        if distance > graphNodeDragStartThreshold {
+                            draggedNodeID = nodeID
+                            guard let index = nodeIndexByID[nodeID] else { return }
+                            nodeDragStart = nodes[index].position
+                            kickSimulation(to: 0.6)
+                        }
+                        #else
                         draggedNodeID = nodeID
                         guard let index = nodeIndexByID[nodeID] else { return }
                         nodeDragStart = nodes[index].position
                         kickSimulation(to: 0.6)
-                        #if os(macOS)
                         NSCursor.closedHand.set()
                         #endif
-                    } else if hypot(value.translation.width, value.translation.height) > 4 {
+                    } else if distance > graphBackgroundPanStartThreshold {
                         isPanningGraph = true
                         panDragStart = panOffset
                         if hoveredNodeID != nil {
@@ -882,22 +945,35 @@ struct GraphView: View {
                     return
                 }
 
-                let moved = hypot(value.translation.width, value.translation.height) > 3
-                let tappedID = draggedNodeID
-                    ?? GraphCanvasHitTesting.nodeID(
-                        at: worldGraphPoint(value.location),
-                        in: hoverHitTestNodes
-                    )
+                let distance = hypot(value.translation.width, value.translation.height)
+                let isTap = distance <= graphNodeTapMoveThreshold
+                let tappedID = GraphCanvasHitTesting.nodeID(
+                    at: worldGraphPoint(isTap ? value.startLocation : value.location),
+                    in: hoverHitTestNodes,
+                    zoom: zoomScale
+                ) ?? draggedNodeID
 
-                if !moved, let nodeID = tappedID,
+                if isTap, let nodeID = tappedID,
                    let file = workspace.files.first(where: { $0.id == nodeID }) {
-                    workspace.openTab(for: file)
+                    if let draggedID = draggedNodeID,
+                       let index = nodeIndexByID[draggedID],
+                       let start = nodeDragStart {
+                        mutateGraphNodesWithoutAnimation {
+                            nodes[index].position = start
+                            nodes[index].velocity = .zero
+                        }
+                    }
+                    if let onNavigateToFile {
+                        onNavigateToFile(file)
+                    } else {
+                        workspace.navigateToFile(file)
+                    }
                 }
 
                 let wasDragging = draggedNodeID != nil
                 draggedNodeID = nil
                 nodeDragStart = nil
-                if wasDragging {
+                if wasDragging, !isTap {
                     kickSimulation(to: 0.4)
                     scheduleLayoutSave()
                 }
@@ -1209,6 +1285,7 @@ struct GraphView: View {
         }
         .buttonStyle(.plain)
         .help("Open graph settings")
+        .accessibilityLabel("Open graph settings")
     }
 
     private var graphControlsPanel: some View {
@@ -1252,6 +1329,7 @@ struct GraphView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Restore default settings")
+                .accessibilityLabel("Restore default graph settings")
                 Button {
                     controlsVisible = false
                 } label: {
@@ -1261,6 +1339,7 @@ struct GraphView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Close")
+                .accessibilityLabel("Close graph settings")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)

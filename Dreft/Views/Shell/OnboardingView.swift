@@ -15,8 +15,7 @@ struct OnboardingView: View {
     @State private var createLocationBookmark: Data?
     @State private var tourPage = 0
     #if os(iOS)
-    @State private var showOpenFolderImporter = false
-    @State private var showCreateLocationImporter = false
+    @State private var folderPickerPurpose: VaultFolderPickerPurpose?
     #endif
     @FocusState private var nameFieldFocused: Bool
 
@@ -30,13 +29,6 @@ struct OnboardingView: View {
         case choices
         case create
     }
-
-    #if os(iOS)
-    private enum FolderImportPurpose {
-        case openVault
-        case createLocation
-    }
-    #endif
 
     var body: some View {
         ZStack {
@@ -52,19 +44,8 @@ struct OnboardingView: View {
         }
         .vaultErrorAlert(workspace: workspace)
         #if os(iOS)
-        .fileImporter(
-            isPresented: $showOpenFolderImporter,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            handleFolderImport(result, for: .openVault)
-        }
-        .fileImporter(
-            isPresented: $showCreateLocationImporter,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            handleFolderImport(result, for: .createLocation)
+        .vaultFolderPicker(purpose: $folderPickerPurpose) { url, purpose in
+            handleFolderImport(url, for: purpose)
         }
         #endif
     }
@@ -149,7 +130,7 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             vaultActionRow(
                 title: "Try Dreft",
-                subtitle: "Create a sample vault with a welcome note.",
+                subtitle: "Start instantly with a sample vault and welcome note — nothing to set up.",
                 buttonTitle: "Start",
                 isPrimary: true
             ) {
@@ -176,7 +157,7 @@ struct OnboardingView: View {
 
             vaultActionRow(
                 title: "Open folder as vault",
-                subtitle: "Use an existing Obsidian-style vault folder.",
+                subtitle: openFolderVaultSubtitle,
                 buttonTitle: "Open",
                 isPrimary: false
             ) {
@@ -423,7 +404,7 @@ struct OnboardingView: View {
             advanceToTour()
         }
         #else
-        showOpenFolderImporter = true
+        folderPickerPurpose = .openVault
         #endif
     }
 
@@ -440,13 +421,12 @@ struct OnboardingView: View {
             createLocationBookmark = VaultSecurityAccess.createBookmark(for: url)
         }
         #else
-        showCreateLocationImporter = true
+        folderPickerPurpose = .createLocation
         #endif
     }
 
     #if os(iOS)
-    private func handleFolderImport(_ result: Result<[URL], Error>, for purpose: FolderImportPurpose) {
-        guard case .success(let urls) = result, let url = urls.first else { return }
+    private func handleFolderImport(_ url: URL, for purpose: VaultFolderPickerPurpose) {
         _ = url.startAccessingSecurityScopedResource()
 
         switch purpose {
@@ -457,6 +437,8 @@ struct OnboardingView: View {
         case .createLocation:
             newVaultLocation = url.path
             createLocationBookmark = VaultSecurityAccess.createBookmark(for: url)
+        case .reconnectVault:
+            break
         }
     }
     #endif
@@ -494,9 +476,17 @@ struct OnboardingView: View {
 
     private var createVaultSubtitle: String {
         #if os(iOS)
-        "Create a vault in Dreft storage or a folder you choose."
+        "Name your vault and store it on this iPad, or browse to a folder you choose."
         #else
-        "Create a vault in app storage or any folder you choose."
+        "Name your vault and store it in app storage, or choose any folder."
+        #endif
+    }
+
+    private var openFolderVaultSubtitle: String {
+        #if os(iOS)
+        "Pick a folder in Files (for example an Obsidian vault). Dreft keeps access so your notes stay on your device."
+        #else
+        "Choose a dedicated folder of markdown and canvas files — not your entire Documents or Home folder."
         #endif
     }
 
@@ -511,7 +501,7 @@ struct OnboardingView: View {
     private var locationDescription: String {
         if newVaultLocation.isEmpty {
             #if os(iOS)
-            return "On My iPad / Dreft / Vaults"
+            return "Stored inside Dreft on this iPad"
             #else
             return "Dreft / Vaults (app storage)"
             #endif

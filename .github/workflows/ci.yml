@@ -40,3 +40,11 @@ jobs:
             -project Dreft.xcodeproj \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Test on iPad simulator
+        run: |
+          xcodebuild test \
+            -scheme Dreft \
+            -project Dreft.xcodeproj \
+            -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4),OS=latest' \
+            CODE_SIGNING_ALLOWED=NO

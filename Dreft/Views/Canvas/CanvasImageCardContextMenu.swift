@@ -35,10 +35,6 @@ struct CanvasImageCardContextMenu: View {
 
         Button("Swap file...", action: onSwap)
 
-        Button("Open in new window") {
-            openInNewWindow()
-        }
-
         Divider()
 
         Button("Rename...") {
@@ -144,24 +140,10 @@ struct CanvasImageCardContextMenu: View {
         guard let url = store.imageFileURL(for: card) else { return }
         NSWorkspace.shared.open(url)
     }
-
-    private func openInNewWindow() {
-        workspace.reportVaultError(
-            title: "New window",
-            message: "Opening images in a separate window isn't supported yet."
-        )
-    }
     #else
     private func openInDefaultApp() {
         guard let url = store.imageFileURL(for: card) else { return }
         UIApplication.shared.open(url)
-    }
-
-    private func openInNewWindow() {
-        workspace.reportVaultError(
-            title: "New window",
-            message: "Opening images in a separate window isn't supported on iPad yet."
-        )
     }
     #endif
 }

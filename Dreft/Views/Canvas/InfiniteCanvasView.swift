@@ -54,11 +54,17 @@ struct InfiniteCanvasView: View {
   @State private var timelapseCurrentDate: Date?
   @State private var timelapseTask: Task<Void, Never>?
   @State private var timelapseRevision = 0
+  /// Cards kept in the view tree — expands while panning, trims when navigation settles.
+  @State private var mountedCardIDs: Set<String> = []
+  @State private var mountedEdgeIDs: Set<String> = []
+  @State private var cullingDebounceTask: Task<Void, Never>?
 
   var body: some View {
     GeometryReader { geo in
       let size = geo.size
       let safeBottom = geo.safeAreaInsets.bottom
+      let vaultFiles = VaultFile.openableFiles(from: workspace.files)
+      let edgesInView = mountedEdges(for: size)
       ZStack {
         AppColors.canvasBackground
 
@@ -71,13 +77,13 @@ struct InfiniteCanvasView: View {
 
         canvasInteractionBackground(canvasSize: size)
 
-        canvasCardsLayer(canvasSize: size)
+        canvasCardsLayer(canvasSize: size, vaultFiles: vaultFiles)
           .zIndex(3)
 
         CanvasEdgeHitOverlay(
           transform: displayTransform,
           cardIndex: cardIndex,
-          edges: activeCanvasEdges,
+          edges: edgesInView,
           positionOverrides: cardDragOverrides,
           resizeOverrides: cardResizeOverrides,
           edgeEndpoint: { edge in
@@ -111,7 +117,7 @@ struct InfiniteCanvasView: View {
         CanvasEdgesScreenOverlay(
           transform: displayTransform,
           cardIndex: cardIndex,
-          edges: activeCanvasEdges,
+          edges: edgesInView,
           connectingFrom: store.connectingFrom,
           positionOverrides: cardDragOverrides,
           resizeOverrides: cardResizeOverrides,
@@ -124,7 +130,7 @@ struct InfiniteCanvasView: View {
         CanvasEdgeLabelLayer(
           transform: displayTransform,
           cardIndex: cardIndex,
-          edges: activeCanvasEdges,
+          edges: edgesInView,
           positionOverrides: cardDragOverrides,
           resizeOverrides: cardResizeOverrides,
           editingEdgeID: editingEdgeLabelID,
@@ -166,6 +172,7 @@ struct InfiniteCanvasView: View {
         cardToolbarCustomColorOpen = false
         edgeToolbarColorRowOpen = false
         edgeToolbarCustomColorOpen = false
+        replaceMountedContent(for: size)
       }
       .onChange(of: store.selectedEdgeID) { _, newValue in
         if newValue != editingEdgeLabelID {
@@ -177,14 +184,17 @@ struct InfiniteCanvasView: View {
         }
       }
       .onChange(of: store.historyRevision) { _, _ in
-        cardDragOverrides.removeAll()
-        cardResizeOverrides.removeAll()
+        clearCardInteractionState()
+        replaceMountedContent(for: size)
+      }
+      .onChange(of: imageTitleRenameTokens) { _, _ in
+        clearCardInteractionState()
       }
       #if os(iOS)
       .overlay {
         CanvasTouchCaptureView(
           passesThroughHits: true,
-          isEnabled: canvasNavigationEnabled,
+          isEnabled: canvasPanZoomEnabled,
           blocksNavigationAt: { point in
             blocksCanvasNavigation(at: point, canvasSize: size)
           },
@@ -241,7 +251,7 @@ struct InfiniteCanvasView: View {
         backlinkBadge(safeAreaBottom: safeBottom)
       }
       .overlay {
-        canvasNoteEditOverlay(canvasSize: size)
+        canvasNoteEditOverlay(canvasSize: size, vaultFiles: vaultFiles)
           .zIndex(250)
       }
       .overlay {
@@ -260,7 +270,7 @@ struct InfiniteCanvasView: View {
       .background(AppColors.canvasBackground)
       #if os(macOS)
       .onCanvasScroll { delta, location, zoomRequested, phaseEnded in
-        if timelapsePlaying || store.contextMenu != nil || store.isVaultOpen || store.focusCardID != nil { return }
+        if store.contextMenu != nil || store.isVaultOpen || store.focusCardID != nil { return }
         isCanvasInteracting = true
         if zoomRequested {
           applyZoom(at: location, factor: exp(-delta.height * 0.0015))
@@ -281,12 +291,15 @@ struct InfiniteCanvasView: View {
         displayTransform = store.transform
         store.vaultURL = vaultURL
         store.viewportSize = size
+        replaceMountedContent(for: size)
       }
       .onDisappear {
         stopCanvasTimelapse(showAll: true)
+        CanvasImageCache.shared.setPinnedKeys([])
       }
       .onChange(of: size) { _, newSize in
         store.viewportSize = newSize
+        replaceMountedContent(for: newSize)
       }
       .onChange(of: vaultURL) { _, newURL in
         store.vaultURL = newURL
@@ -366,29 +379,109 @@ struct InfiniteCanvasView: View {
     }
   }
 
-  private func visibleCards(for canvasSize: CGSize) -> [CanvasCard] {
-    let sourceCards = timelapseActive ? timelapseFilteredCards : store.cards
-    if timelapseActive {
-      return sourceCards
+  private func canvasViewportPadding() -> CGFloat {
+    if isCanvasInteracting || isCardResizing {
+      return CanvasConstants.interactionViewportPadding
     }
-    let viewport = CanvasViewport.worldRect(
+    return CanvasConstants.viewportPadding
+  }
+
+  private func viewport(for canvasSize: CGSize, padding: CGFloat) -> CGRect {
+    CanvasViewport.worldRect(
       canvasSize: canvasSize,
       transform: displayTransform,
-      padding: isCanvasInteracting ? 4_000 : CanvasConstants.viewportPadding
+      padding: padding
     )
-    let visibleIDs = CanvasViewport.visibleCardIDs(
-      cards: sourceCards,
-      viewport: viewport,
+  }
+
+  private func computeVisibleCardIDs(for canvasSize: CGSize, padding: CGFloat? = nil) -> Set<String> {
+    let pad = padding ?? canvasViewportPadding()
+    return CanvasViewport.visibleCardIDs(
+      cards: store.cards,
+      viewport: viewport(for: canvasSize, padding: pad),
       positionOverrides: cardDragOverrides,
       resizeOverrides: cardResizeOverrides,
       selectedID: store.selectedCardID,
       hoverID: store.hoverCardID,
       spatialIndex: store.spatialIndexForCulling()
     )
-    if isCanvasInteracting || isCardResizing {
+  }
+
+  private func computeVisibleEdgeIDs(for canvasSize: CGSize, padding: CGFloat? = nil) -> Set<String> {
+    let pad = padding ?? canvasViewportPadding()
+    return CanvasViewport.visibleEdgeIDs(
+      edges: activeCanvasEdges,
+      cardIndex: cardIndex,
+      viewport: viewport(for: canvasSize, padding: pad),
+      positionOverrides: cardDragOverrides,
+      resizeOverrides: cardResizeOverrides,
+      selectedID: store.selectedEdgeID,
+      editingID: editingEdgeLabelID ?? store.editingEdgeID,
+      pendingInteractionID: pendingEdgeInteractionID
+    )
+  }
+
+  private func replaceMountedContent(for canvasSize: CGSize) {
+    guard !timelapseActive else { return }
+    cullingDebounceTask?.cancel()
+    mountedCardIDs = computeVisibleCardIDs(for: canvasSize)
+    mountedEdgeIDs = computeVisibleEdgeIDs(for: canvasSize)
+  }
+
+  private func expandMountedContent(for canvasSize: CGSize) {
+    guard !timelapseActive else { return }
+    mountedCardIDs.formUnion(computeVisibleCardIDs(for: canvasSize))
+    mountedEdgeIDs.formUnion(computeVisibleEdgeIDs(for: canvasSize))
+  }
+
+  private func handleViewportChanged(canvasSize: CGSize) {
+    guard !timelapseActive else { return }
+    if isCanvasInteracting || isCardResizing || isCardDragging {
+      scheduleMountedContentExpansion(for: canvasSize)
+    } else {
+      replaceMountedContent(for: canvasSize)
+    }
+  }
+
+  private func scheduleMountedContentExpansion(for canvasSize: CGSize) {
+    cullingDebounceTask?.cancel()
+    cullingDebounceTask = Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(CanvasConstants.cullingDebounceMs))
+      guard !Task.isCancelled else { return }
+      expandMountedContent(for: canvasSize)
+    }
+  }
+
+  private func mountedCards(for canvasSize: CGSize) -> [CanvasCard] {
+    let sourceCards = timelapseActive ? timelapseFilteredCards : store.cards
+    if timelapseActive {
       return sourceCards
     }
-    return sourceCards.filter { visibleIDs.contains($0.id) }
+    let ids = mountedCardIDs.isEmpty
+      ? computeVisibleCardIDs(for: canvasSize)
+      : mountedCardIDs
+    return sourceCards.filter { ids.contains($0.id) }
+  }
+
+  private func mountedEdges(for canvasSize: CGSize) -> [CanvasEdge] {
+    let sourceEdges = activeCanvasEdges
+    if timelapseActive {
+      return sourceEdges
+    }
+    let ids = mountedEdgeIDs.isEmpty
+      ? computeVisibleEdgeIDs(for: canvasSize)
+      : mountedEdgeIDs
+    return sourceEdges.filter { ids.contains($0.id) }
+  }
+
+  private func liveVisibleEdges(for canvasSize: CGSize) -> [CanvasEdge] {
+    let ids = computeVisibleEdgeIDs(for: canvasSize)
+    return activeCanvasEdges.filter { ids.contains($0.id) }
+  }
+
+  /// Legacy name kept for hit-testing — uses live viewport, not the sticky mounted superset.
+  private func visibleEdges(for canvasSize: CGSize) -> [CanvasEdge] {
+    liveVisibleEdges(for: canvasSize)
   }
 
   /// Pan / tap target behind cards — screen space so iOS hit-testing stays accurate.
@@ -417,17 +510,21 @@ struct InfiniteCanvasView: View {
       }
   }
 
-  private var canvasNavigationEnabled: Bool {
-    !timelapsePlaying
-      && store.contextMenu == nil
+  private var canvasPanZoomEnabled: Bool {
+    store.contextMenu == nil
       && !isCardDragging
       && !isCardResizing
       && !store.isConnectingLine
       && store.focusCardID == nil
+      && !store.isVaultOpen
+  }
+
+  private var canvasNavigationEnabled: Bool {
+    canvasPanZoomEnabled && !timelapsePlaying
   }
 
   private var canvasPanGestureEnabled: Bool {
-    canvasNavigationEnabled && !store.isVaultOpen
+    canvasPanZoomEnabled
   }
 
   /// Double-click empty canvas → place a new note card at the click location.
@@ -494,8 +591,16 @@ struct InfiniteCanvasView: View {
   }
 
   private func endCardInteractionFreeze() {
-    restoreCameraAfterCardDragIfNeeded()
     cardInteractionFrozenTransform = nil
+  }
+
+  /// Drop any in-flight card drag/resize so camera, cards, and edges share one transform.
+  private func clearCardInteractionState() {
+    isCardDragging = false
+    isCardResizing = false
+    cardInteractionFrozenTransform = nil
+    cardDragOverrides.removeAll()
+    cardResizeOverrides.removeAll()
   }
 
   #if os(iOS)
@@ -513,12 +618,13 @@ struct InfiniteCanvasView: View {
   #endif
 
   /// Cards render in screen space (like edges) — avoids transformEffect breaking drag on iOS.
-  private func canvasCardsLayer(canvasSize: CGSize) -> some View {
+  private func canvasCardsLayer(canvasSize: CGSize, vaultFiles: [VaultFile]) -> some View {
     let transform = cardRenderTransform
     let zoom = transform.zoom
-    let cards = visibleCards(for: canvasSize)
+    let cards = mountedCards(for: canvasSize)
     let _ = store.imageCacheRevision
     let _ = store.historyRevision
+    let prefetchKey = imagePrefetchKey(for: canvasSize, zoom: zoom)
 
     return ZStack(alignment: .topLeading) {
       ForEach(cards) { card in
@@ -526,8 +632,12 @@ struct InfiniteCanvasView: View {
         let liveFrame = cardDisplayFrame(card)
         let screenOrigin = cardScreenOrigin(for: liveFrame, transform: transform)
 
-        canvasCardView(card: card, displayFrame: layoutFrame, canvasSize: canvasSize)
-          .id(card.id)
+        canvasCardView(
+          card: card,
+          displayFrame: layoutFrame,
+          canvasSize: canvasSize,
+          vaultFiles: vaultFiles
+        )
           .frame(width: layoutFrame.width, height: layoutFrame.height)
           .scaleEffect(zoom, anchor: .topLeading)
           .offset(x: screenOrigin.x, y: screenOrigin.y)
@@ -536,12 +646,203 @@ struct InfiniteCanvasView: View {
           }
       }
     }
+    .task(id: prefetchKey) {
+      await prefetchVisibleImages(canvasSize: canvasSize)
+    }
+    .onChange(of: displayTransform) { _, _ in
+      handleViewportChanged(canvasSize: canvasSize)
+    }
+    .onChange(of: store.hoverCardID) { _, _ in
+      if store.isConnectingLine {
+        expandMountedContent(for: canvasSize)
+      }
+    }
     .allowsHitTesting(!timelapsePlaying)
     .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
   }
 
+  private func imagePrefetchKey(for canvasSize: CGSize, zoom: CGFloat) -> String {
+    let pad = canvasViewportPadding() + CanvasConstants.prefetchViewportPadding
+    let imageIDs = computeVisibleCardIDs(for: canvasSize, padding: pad)
+      .filter { id in store.cards.first(where: { $0.id == id })?.kind == .image }
+      .sorted()
+      .joined(separator: ",")
+    return "\(imageIDs)|\(String(format: "%.3f", zoom))"
+  }
+
+  private func prefetchVisibleImages(canvasSize: CGSize) async {
+    let strictPad = canvasViewportPadding()
+    let prefetchPad = strictPad + CanvasConstants.prefetchViewportPadding
+    let strictIDs = computeVisibleCardIDs(for: canvasSize, padding: strictPad)
+    let prefetchIDs = computeVisibleCardIDs(for: canvasSize, padding: prefetchPad)
+
+    var pinKeys = Set<String>()
+    for card in store.cards where strictIDs.contains(card.id) && card.kind == .image {
+      pinKeys.insert(CanvasImageCache.keyString(forCardID: card.id, content: card.content))
+    }
+    await MainActor.run {
+      CanvasImageCache.shared.setPinnedKeys(pinKeys)
+    }
+
+    let centerWorld = store.screenToWorld(
+      CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
+      in: canvasSize,
+      transform: displayTransform
+    )
+
+    func cardCenter(_ card: CanvasCard) -> CGPoint {
+      if let frame = cardResizeOverrides[card.id] {
+        return CGPoint(x: frame.midX, y: frame.midY)
+      }
+      let origin = cardDragOverrides[card.id] ?? CGPoint(x: card.x, y: card.y)
+      return CGPoint(x: origin.x + card.width / 2, y: origin.y + card.height / 2)
+    }
+
+    func distance(from card: CanvasCard) -> CGFloat {
+      let c = cardCenter(card)
+      return hypot(c.x - centerWorld.x, c.y - centerWorld.y)
+    }
+
+    let strictImages = store.cards
+      .filter { strictIDs.contains($0.id) && $0.kind == .image }
+      .sorted { distance(from: $0) < distance(from: $1) }
+    let ringImages = store.cards
+      .filter { prefetchIDs.contains($0.id) && !strictIDs.contains($0.id) && $0.kind == .image }
+      .sorted { distance(from: $0) < distance(from: $1) }
+
+    for card in strictImages + ringImages {
+      let loaded = await CanvasImageCache.shared.prepareDisplayImageIfNeeded(
+        forCardID: card.id,
+        content: card.content,
+        vaultURL: vaultURL
+      )
+      if loaded {
+        await MainActor.run { store.imageCacheRevision += 1 }
+      }
+    }
+  }
+
+  private func cardUsesInteractiveChrome(_ card: CanvasCard) -> Bool {
+    store.selectedCardID == card.id
+      || store.focusCardID == card.id
+      || cardResizeOverrides[card.id] != nil
+  }
+
+  private func handleCardDragBegan() {
+    isCardDragging = true
+    beginCardInteractionFreeze()
+  }
+
+  private func handleCardMove(cardID: String, preview: CGPoint) {
+    if var frame = cardResizeOverrides[cardID] {
+      frame.origin = preview
+      cardResizeOverrides[cardID] = frame
+    } else {
+      cardDragOverrides[cardID] = preview
+    }
+  }
+
+  private func handleCardMoveEnd(cardID: String) {
+    if let frame = cardResizeOverrides[cardID] {
+      store.resizeCard(cardID, frame: frame)
+      cardResizeOverrides.removeValue(forKey: cardID)
+    } else if let origin = cardDragOverrides[cardID] {
+      store.moveCard(cardID, to: origin)
+      cardDragOverrides.removeValue(forKey: cardID)
+    }
+    suppressCanvasTapUntil = Date().addingTimeInterval(0.35)
+    isCardDragging = false
+    endCardInteractionFreeze()
+    settleMountedContent()
+  }
+
   @ViewBuilder
-  private func canvasCardView(card: CanvasCard, displayFrame: CGRect, canvasSize: CGSize) -> some View {
+  private func canvasCardView(
+    card: CanvasCard,
+    displayFrame: CGRect,
+    canvasSize: CGSize,
+    vaultFiles: [VaultFile]
+  ) -> some View {
+    if cardUsesInteractiveChrome(card) {
+      interactiveCanvasCardView(
+        card: card,
+        displayFrame: displayFrame,
+        canvasSize: canvasSize,
+        vaultFiles: vaultFiles
+      )
+    } else {
+      compactCanvasCardView(
+        card: card,
+        displayFrame: displayFrame,
+        canvasSize: canvasSize,
+        vaultFiles: vaultFiles
+      )
+    }
+  }
+
+  @ViewBuilder
+  private func compactCanvasCardView(
+    card: CanvasCard,
+    displayFrame: CGRect,
+    canvasSize: CGSize,
+    vaultFiles: [VaultFile]
+  ) -> some View {
+    let cardView = CanvasCardCompactView(
+      card: card,
+      displayFrame: displayFrame,
+      zoom: cardRenderTransform.zoom,
+      vaultURL: vaultURL,
+      vaultFiles: vaultFiles,
+      isLinkTarget: store.hoverCardID == card.id,
+      isConnectingLine: store.isConnectingLine,
+      imageCacheRevision: store.imageCacheRevision,
+      onImageLoaded: { store.imageCacheRevision += 1 },
+      onSelect: { store.selectCard(card.id) },
+      onDragBegan: { handleCardDragBegan() },
+      onMove: { handleCardMove(cardID: card.id, preview: $0) },
+      onMoveEnd: { handleCardMoveEnd(cardID: card.id) }
+    )
+
+    if card.kind == .image {
+      cardView.contextMenu {
+        CanvasImageCardContextMenu(
+          workspace: workspace,
+          store: store,
+          card: card,
+          sidebarVisible: $sidebarVisible,
+          sidebarPanel: $sidebarPanel,
+          onZoom: {
+            store.selectedCardID = card.id
+            store.zoomToSelection(canvasSize: canvasSize)
+            displayTransform = store.transform
+          },
+          onSwap: {
+            swapImageCardID = card.id
+            #if os(macOS)
+            openMacImageSwapPanel(for: card.id)
+            #else
+            showImageSwapPicker = true
+            #endif
+          },
+          onRemove: { store.deleteCard(card.id) },
+          onRename: {
+            store.selectedCardID = card.id
+            imageTitleRenameTokens[card.id, default: 0] += 1
+          }
+        )
+      }
+    } else {
+      cardView
+    }
+  }
+
+  @ViewBuilder
+  private func interactiveCanvasCardView(
+    card: CanvasCard,
+    displayFrame: CGRect,
+    canvasSize: CGSize,
+    vaultFiles: [VaultFile]
+  ) -> some View {
     let cardView = CanvasCardView(
       card: card,
       displayFrame: displayFrame,
@@ -550,34 +851,13 @@ struct InfiniteCanvasView: View {
       isConnectingLine: store.isConnectingLine,
       zoom: cardRenderTransform.zoom,
       vaultURL: vaultURL,
-      vaultFiles: VaultFile.openableFiles(from: workspace.files),
+      vaultFiles: vaultFiles,
       onSelect: {
         store.selectCard(card.id)
       },
-      onDragBegan: {
-        isCardDragging = true
-        beginCardInteractionFreeze()
-      },
-      onMove: { preview in
-        if var frame = cardResizeOverrides[card.id] {
-          frame.origin = preview
-          cardResizeOverrides[card.id] = frame
-        } else {
-          cardDragOverrides[card.id] = preview
-        }
-      },
-      onMoveEnd: {
-        if let frame = cardResizeOverrides[card.id] {
-          store.resizeCard(card.id, frame: frame)
-          cardResizeOverrides.removeValue(forKey: card.id)
-        } else if let origin = cardDragOverrides[card.id] {
-          store.moveCard(card.id, to: origin)
-          cardDragOverrides.removeValue(forKey: card.id)
-        }
-        suppressCanvasTapUntil = Date().addingTimeInterval(0.35)
-        isCardDragging = false
-        endCardInteractionFreeze()
-      },
+      onDragBegan: { handleCardDragBegan() },
+      onMove: { handleCardMove(cardID: card.id, preview: $0) },
+      onMoveEnd: { handleCardMoveEnd(cardID: card.id) },
       onResize: { cardResizeOverrides[card.id] = $0 },
       onResizeBegan: {
         isCardResizing = true
@@ -590,9 +870,12 @@ struct InfiniteCanvasView: View {
         }
         isCardResizing = false
         endCardInteractionFreeze()
+        settleMountedContent()
       },
       onDelete: { store.deleteCard(card.id) },
       onZoomToCard: {
+        clearCardInteractionState()
+        isCanvasInteracting = false
         store.zoomToSelection(canvasSize: canvasSize)
         displayTransform = store.transform
       },
@@ -629,6 +912,8 @@ struct InfiniteCanvasView: View {
       beginTitleRenameToken: imageTitleRenameTokens[card.id] ?? 0,
       isEditing: store.focusCardID == card.id,
       isColorPickerOpen: store.selectedCardID == card.id && cardToolbarColorRowOpen,
+      imageCacheRevision: store.imageCacheRevision,
+      onImageLoaded: { store.imageCacheRevision += 1 },
       onRequestEdit: {
         store.selectedCardID = card.id
         store.selectedEdgeID = nil
@@ -671,7 +956,7 @@ struct InfiniteCanvasView: View {
   }
 
   @ViewBuilder
-  private func canvasNoteEditOverlay(canvasSize: CGSize) -> some View {
+  private func canvasNoteEditOverlay(canvasSize: CGSize, vaultFiles: [VaultFile]) -> some View {
     if let focusID = store.focusCardID,
        let card = cardIndex[focusID],
        card.kind != .image {
@@ -686,7 +971,7 @@ struct InfiniteCanvasView: View {
         initialText: CanvasCardContent.markdownBody(
           for: card,
           vaultURL: vaultURL,
-          vaultFiles: VaultFile.openableFiles(from: workspace.files)
+          vaultFiles: vaultFiles
         ),
         cardSize: CGSize(width: screenW, height: screenH),
         colorHex: card.colorHex,
@@ -741,6 +1026,8 @@ struct InfiniteCanvasView: View {
         showCustomColorPicker: $cardToolbarCustomColorOpen,
         onDelete: { store.deleteCard(card.id) },
         onZoomToCard: {
+          clearCardInteractionState()
+          isCanvasInteracting = false
           store.zoomToSelection(canvasSize: canvasSize)
           displayTransform = store.transform
         },
@@ -793,7 +1080,7 @@ struct InfiniteCanvasView: View {
       )
       let screen = store.worldToScreen(mid, transform: displayTransform)
       let zoom = displayTransform.zoom
-      let toolbarWorldScale = 1 / min(max(zoom, 0.45), 1.35)
+      let toolbarWorldScale = CanvasFloatingToolbarChrome.counterScale(for: zoom)
 
       VStack(spacing: 6) {
         CanvasEdgeFloatingToolbar(
@@ -878,11 +1165,6 @@ struct InfiniteCanvasView: View {
     applyZoom(at: anchor, targetZoom: newZoom)
   }
 
-  private func restoreCameraAfterCardDragIfNeeded() {
-    guard displayTransform != store.transform else { return }
-    displayTransform = store.transform
-  }
-
   private func applyZoom(at anchor: CGPoint, targetZoom: CGFloat) {
     guard !isCardDragging, !isCardResizing else { return }
     var t = displayTransform
@@ -894,12 +1176,19 @@ struct InfiniteCanvasView: View {
     displayTransform = t
   }
 
+  private func settleMountedContent() {
+    let size = store.viewportSize
+    guard size.width > 0, size.height > 0 else { return }
+    replaceMountedContent(for: size)
+  }
+
   private func finishCanvasInteraction() {
     // Only the designated owner persists camera into the shared document snapshot.
     if persistsCamera {
       store.setTransform(displayTransform)
     }
     isCanvasInteracting = false
+    settleMountedContent()
   }
 
   // MARK: - Image import
@@ -1014,7 +1303,7 @@ struct InfiniteCanvasView: View {
           startCanvasTimelapse(canvasSize: canvasSize)
         }
       },
-      tooltipAnchor: .leading(caretCenterX: 15)
+      tooltipAnchor: .leading(caretCenterX: 18)
     )
     .padding(14)
   }
@@ -1096,7 +1385,7 @@ struct InfiniteCanvasView: View {
       timelapseCurrentDate = nil
       timelapseRevision &+= 1
       if let canvasSize {
-        zoomToFitAll(canvasSize: canvasSize)
+        replaceMountedContent(for: canvasSize)
       }
     }
   }
@@ -1104,11 +1393,15 @@ struct InfiniteCanvasView: View {
   // MARK: - Chrome
 
   private func zoomToFitAll(canvasSize: CGSize) {
+    clearCardInteractionState()
+    isCanvasInteracting = false
     store.zoomToFit(canvasSize: canvasSize)
     displayTransform = store.transform
   }
 
   private func zoomToSelection(canvasSize: CGSize) {
+    clearCardInteractionState()
+    isCanvasInteracting = false
     store.zoomToSelection(canvasSize: canvasSize)
     displayTransform = store.transform
   }
@@ -1163,6 +1456,7 @@ struct InfiniteCanvasView: View {
   #if os(iOS)
   private func obsidianBottomToolbar(canvasSize: CGSize, safeAreaBottom: CGFloat = 0) -> some View {
     CanvasIPadBottomToolbar(
+      imageSystemName: "photo.on.rectangle.angled",
       safeAreaBottom: safeAreaBottom,
       onAddCard: {
         store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
@@ -1654,6 +1948,7 @@ struct InfiniteCanvasView: View {
   private func edgeInteractionGesture(canvasSize: CGSize) -> some Gesture {
     DragGesture(minimumDistance: 0, coordinateSpace: .named("canvasScreen"))
       .onChanged { value in
+        guard !timelapsePlaying else { return }
         guard store.contextMenu == nil, !isCardDragging, !isCardResizing else { return }
         guard !isPointOnSelectedCardToolbar(value.startLocation) else { return }
         guard !isPointOnCanvasToolbar(value.startLocation, canvasSize: canvasSize) else { return }
@@ -1724,7 +2019,7 @@ struct InfiniteCanvasView: View {
     let toScreen = { store.worldToScreen($0, transform: displayTransform) }
     var best: (id: String, distance: CGFloat)?
 
-    for edge in store.edges {
+    for edge in visibleEdges(for: canvasSize) {
       guard let from = store.cards.first(where: { $0.id == edge.fromID }),
             let endpoint = store.edgeEndpoint(
               for: edge,

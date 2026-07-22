@@ -223,7 +223,9 @@ final class WorkspacePersistenceCoordinator {
 
     func flushPendingChanges() {
         markEntireActiveVaultDirty()
+        workspace.markSaveStatus(.saving)
         flushToDisk()
+        workspace.markSaveStatus(.saved)
     }
 
     private func restartVaultWatcher() {
@@ -326,10 +328,17 @@ final class WorkspacePersistenceCoordinator {
 
     private func scheduleSave() {
         saveTask?.cancel()
+        workspace.markSaveStatus(.saving)
         saveTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 800_000_000)
+            try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
             self?.flushToDisk()
+            self?.workspace.markSaveStatus(.saved)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            if self?.workspace.saveStatus == .saved {
+                self?.workspace.markSaveStatus(.idle)
+            }
         }
     }
 }

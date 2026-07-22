@@ -1,13 +1,17 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+#else
+import UIKit
+import CoreText
 #endif
 
 struct NoteDocumentOptionsMenu: View {
     @Bindable var workspace: WorkspaceStore
     let fileID: String
     @Binding var isReading: Bool
-    @Binding var splitLayout: NoteSplitLayout
+    var onSplitRight: () -> Void = {}
+    var onSplitDown: () -> Void = {}
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
     @Binding var showFindBar: Bool
@@ -16,6 +20,9 @@ struct NoteDocumentOptionsMenu: View {
     @State private var showBacklinksSheet = false
     @State private var showOutgoingSheet = false
     @State private var linkedLinksMode: NoteLinkedLinksMode = .backlinks
+    #if os(iOS)
+    @State private var pendingPDFExport: IOSPendingFileExport?
+    #endif
 
     private var file: WorkspaceFileEntry? {
         workspace.files.first { $0.id == fileID }
@@ -30,9 +37,8 @@ struct NoteDocumentOptionsMenu: View {
 
             Button {
                 isReading = true
-                splitLayout = .none
             } label: {
-                if isReading && splitLayout == .none {
+                if isReading {
                     Label("Reading view", systemImage: "checkmark")
                 } else {
                     Text("Reading view")
@@ -42,15 +48,12 @@ struct NoteDocumentOptionsMenu: View {
             Divider()
 
             Button("Split right") {
-                splitLayout = .right
+                onSplitRight()
                 isReading = false
             }
             Button("Split down") {
-                splitLayout = .down
+                onSplitDown()
                 isReading = false
-            }
-            Button("Open in new window") {
-                openInNewWindow()
             }
 
             Divider()
@@ -91,12 +94,10 @@ struct NoteDocumentOptionsMenu: View {
             Button("Find...") {
                 showFindBar = true
                 isReading = false
-                splitLayout = .none
             }
             Button("Replace...") {
                 showFindBar = true
                 isReading = false
-                splitLayout = .none
             }
             .disabled(isReading)
 
@@ -159,6 +160,26 @@ struct NoteDocumentOptionsMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("More options")
+        .accessibilityLabel("More options")
+        #if os(iOS)
+        .fullScreenCover(item: $pendingPDFExport) { export in
+            IOSFileExportPicker(fileURL: export.url) { savedURL in
+                pendingPDFExport = nil
+                if let savedURL {
+                    workspace.reportVaultError(
+                        title: "PDF exported",
+                        message: """
+                        Saved as “\(savedURL.lastPathComponent)”.
+
+                        Open the Files app and browse to the folder you chose to view or share the PDF.
+                        """
+                    )
+                }
+            }
+            .ignoresSafeArea()
+            .background(Color.clear)
+        }
+        #endif
         .confirmationDialog(
             "Delete \"\(file?.name ?? "this file")\"?",
             isPresented: $showDeleteConfirm,
@@ -223,13 +244,6 @@ struct NoteDocumentOptionsMenu: View {
         printOperation.printInfo.jobDisposition = .save
         printOperation.run()
     }
-
-    private func openInNewWindow() {
-        workspace.reportVaultError(
-            title: "New window",
-            message: "Opening notes in a separate window isn't supported yet. Use a new tab instead."
-        )
-    }
     #else
     private func openInDefaultApp() {
         guard let path = workspace.diskPath(for: fileID) else { return }
@@ -284,26 +298,14 @@ struct NoteDocumentOptionsMenu: View {
             } while location < content.length
         }
 
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(file.name).pdf")
+        let exportName = file.name.hasSuffix(".pdf") ? file.name : "\(file.name).pdf"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(exportName)
         do {
             try data.write(to: url, options: .atomic)
-            IOSShareSheet.present(fileURL: url)
+            pendingPDFExport = IOSPendingFileExport(url: url)
         } catch {
             workspace.reportVaultError(title: "Export failed", message: error.localizedDescription)
         }
     }
-
-    private func openInNewWindow() {
-        workspace.reportVaultError(
-            title: "New window",
-            message: "Opening notes in a separate window isn't supported on iPad yet."
-        )
-    }
     #endif
 }
-
-#if os(iOS)
-import UIKit
-import CoreText
-#endif

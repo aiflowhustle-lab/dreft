@@ -52,6 +52,37 @@ enum CanvasViewport {
     return ids
   }
 
+  /// Edge IDs to render — viewport culling with always-on selection/editing.
+  static func visibleEdgeIDs(
+    edges: [CanvasEdge],
+    cardIndex: [String: CanvasCard],
+    viewport: CGRect,
+    positionOverrides: [String: CGPoint],
+    resizeOverrides: [String: CGRect] = [:],
+    selectedID: String?,
+    editingID: String?,
+    pendingInteractionID: String? = nil
+  ) -> Set<String> {
+    var ids = Set<String>()
+    if let selectedID { ids.insert(selectedID) }
+    if let editingID { ids.insert(editingID) }
+    if let pendingInteractionID { ids.insert(pendingInteractionID) }
+
+    for edge in edges {
+      if ids.contains(edge.id) { continue }
+      if edgeIntersectsViewport(
+        edge,
+        cardIndex: cardIndex,
+        positionOverrides: positionOverrides,
+        resizeOverrides: resizeOverrides,
+        viewport: viewport
+      ) {
+        ids.insert(edge.id)
+      }
+    }
+    return ids
+  }
+
   static func edgeIntersectsViewport(
     _ edge: CanvasEdge,
     cardIndex: [String: CanvasCard],

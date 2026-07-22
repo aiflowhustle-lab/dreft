@@ -37,7 +37,15 @@ enum VaultErrorMessages {
 enum VaultPathPolicy {
     /// Returns a user-facing reason when `url` should not be opened as a vault root.
     static func unsuitableVaultMessage(for url: URL) -> String? {
-        let path = url.standardizedFileURL.path
+        let standardized = url.standardizedFileURL
+        let path = standardized.path
+
+        #if os(iOS)
+        if VaultSecurityAccess.isInsideAppContainer(standardized) {
+            return nil
+        }
+        #endif
+
         let home = NSHomeDirectory()
 
         let blockedPaths = [

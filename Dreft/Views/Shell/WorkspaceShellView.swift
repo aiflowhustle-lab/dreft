@@ -13,21 +13,6 @@ enum SidebarLayout {
     }
 }
 
-/// A second editor pane (tab group) created by Split right / Split down.
-struct SplitPaneState {
-    var orientation: NoteSplitLayout
-    var tabs: [WorkspaceTab]
-    var activeTabID: String
-
-    var activeTab: WorkspaceTab? {
-        tabs.first { $0.id == activeTabID } ?? tabs.first
-    }
-
-    static func newTabID() -> String {
-        "t" + UUID().uuidString.prefix(8).lowercased()
-    }
-}
-
 struct WorkspaceShellView: View {
     @State private var workspace: WorkspaceStore
     @State private var canvasDocuments: CanvasDocumentRegistry
@@ -40,20 +25,21 @@ struct WorkspaceShellView: View {
     @State private var noteIsReading = false
     @State private var noteSplitLayout: NoteSplitLayout = .none
     @State private var showNoteFindBar = false
-    /// Obsidian-style second tab group: the split side is a full pane with its
-    /// own tab bar, nav bar, and content — not a sub-view inside one tab.
-    @State private var splitPane: SplitPaneState?
-    @State private var splitPaneIsReading = false
-    @State private var splitPaneShowFindBar = false
-    /// When true, the Go-to-file picker opens files into the split pane.
-    @State private var goToFileTargetsSplitPane = false
+    /// Nested Obsidian-style split tree; nil means a single root pane only.
+    @State private var splitRoot: EditorSplitNode?
+    @State private var auxiliaryPanes: [String: EditorAuxiliaryPane] = [:]
+    @State private var paneUIState: [String: EditorPaneUIState] = [:]
+    @State private var focusedPaneID = EditorSplitTree.rootPaneID
+    /// When set, Go-to-file opens into this pane id.
+    @State private var goToFileTargetPaneID: String?
     @AppStorage("sidebarWidth") private var sidebarWidthStorage = SidebarLayout.defaultWidth
     @State private var sidebarWidth = SidebarLayout.defaultWidth
     @State private var isResizingSidebar = false
     #if os(iOS)
-    /// Reserve a top band for Stage Manager traffic lights only when the window floats (not fullscreen).
     @State private var usesStageManagerTopBand = false
     @State private var iPadLayoutDebounceTask: Task<Void, Never>?
+    @State private var vaultFolderPickerPurpose: VaultFolderPickerPurpose?
+    @State private var vaultFolderPickerHandler: ((URL, VaultFolderPickerPurpose) -> Void)?
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
@@ -116,6 +102,7 @@ struct WorkspaceShellView: View {
     private func bootstrapShellIfNeeded() {
         startPersistenceIfNeeded()
         sidebarWidth = SidebarLayout.clamped(CGFloat(sidebarWidthStorage))
+        workspace.checkActiveVaultAccessibility()
     }
 
     var body: some View {
@@ -133,7 +120,7 @@ struct WorkspaceShellView: View {
                 persistenceCoordinator?.refreshVaultFromDiskIfNeeded()
             }
             #if os(iOS)
-            if phase == .background {
+            if phase == .inactive || phase == .background {
                 persistenceCoordinator?.flushPendingChanges()
             }
             #endif
@@ -173,16 +160,17 @@ struct WorkspaceShellView: View {
     #if os(macOS)
     private var macIconRailWidth: CGFloat { 40 }
 
-    /// Shell-level tab bar overlay for the main pane (avoids title-bar clipping in windowed mode).
-    private var usesMacTabBarOverlay: Bool {
-        splitPane == nil
+    private var macLeftmostPaneID: String {
+        if let splitRoot, let leftmost = EditorSplitTree.leftmostPane(in: splitRoot) {
+            return leftmost
+        }
+        return EditorSplitTree.rootPaneID
     }
 
-    private var macTabBarOverlayLeadingInset: CGFloat {
-        guard sidebarVisible else { return 0 }
-        var inset = sidebarWidth
-        if iconRailVisible { inset += macIconRailWidth }
-        return inset
+    /// Leftmost pane tab bar may need a small inset past the icon rail to clear traffic lights.
+    private func macPaneTrafficLightClearance(for paneID: String) -> CGFloat {
+        guard paneShowsLeadingChrome(paneID), !sidebarVisible else { return 0 }
+        return max(0, AppColors.macTabBarTrafficLightClearance - macIconRailWidth)
     }
     #endif
 
@@ -190,19 +178,31 @@ struct WorkspaceShellView: View {
         AppColors.tabBarBackground
     }
 
+    private var documentBookmarkIconSize: CGFloat { 16 }
+    private var documentBookmarkFrameSize: CGFloat { 28 }
+
     private var shellLayout: some View {
         HStack(spacing: 0) {
             #if os(macOS)
             if iconRailVisible && usesDesktopChrome {
                 IconRailView(
-                    workspace: workspace,
                     sidebarVisible: $sidebarVisible,
-                    onGoToFile: { showGoToFile = true },
+                    isGraphActive: focusedPaneActiveTab?.kind == .graph,
+                    isCanvasActive: focusedPaneActiveTab?.kind == .canvas,
+                    onGoToFile: openGoToFileInFocusedPane,
+                    onOpenGraph: openGraphInFocusedPane,
+                    onCreateCanvas: createCanvasInFocusedPane,
+                    onCreateNote: createNoteInFocusedPane,
+                    onManageVaults: {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            workspace.isVaultManagerOpen = true
+                        }
+                    },
                     contentTopInset: iconRailTopInset
                 )
+                .frame(width: 40)
                 .frame(maxHeight: .infinity)
                 ShellVerticalHairline()
-                    .padding(.top, tabBarChromeHeight)
             }
             #endif
 
@@ -221,16 +221,8 @@ struct WorkspaceShellView: View {
         }
         .animation(isResizingSidebar ? nil : .easeInOut(duration: 0.2), value: sidebarVisible)
         .animation(.easeInOut(duration: 0.2), value: rightSidebarVisible)
-        #if os(macOS)
-        .overlay(alignment: .topLeading) {
-            if usesDesktopChrome && usesMacTabBarOverlay {
-                macTabBarOverlay
-                    .zIndex(5)
-            }
-        }
-        #endif
         .background(alignment: .top) {
-            if usesDesktopChrome {
+            if usesDesktopChrome && splitRoot == nil {
                 tabBarSurfaceColor
                     .frame(height: tabBarChromeHeight)
                     .frame(maxWidth: .infinity)
@@ -238,7 +230,7 @@ struct WorkspaceShellView: View {
         }
         #if os(macOS)
         .overlay(alignment: .top) {
-            if usesDesktopChrome {
+            if usesDesktopChrome && splitRoot == nil {
                 chromeRowHairline
             }
         }
@@ -274,10 +266,19 @@ struct WorkspaceShellView: View {
                     HStack(alignment: .top, spacing: 6) {
                         if usesDesktopChrome {
                             IPadIconRail(
-                                workspace: workspace,
                                 sidebarVisible: $sidebarVisible,
                                 sidebarPanel: $sidebarPanel,
-                                onGoToFile: { showGoToFile = true },
+                                isGraphActive: focusedPaneActiveTab?.kind == .graph,
+                                isCanvasActive: focusedPaneActiveTab?.kind == .canvas,
+                                onGoToFile: openGoToFileInFocusedPane,
+                                onOpenGraph: openGraphInFocusedPane,
+                                onCreateCanvas: createCanvasInFocusedPane,
+                                onCreateNote: createNoteInFocusedPane,
+                                onManageVaults: {
+                                    withAnimation(.easeOut(duration: 0.15)) {
+                                        workspace.isVaultManagerOpen = true
+                                    }
+                                },
                                 onSwipeToDismiss: (ipadSidebarPinned && usesDesktopChrome) ? nil : dismissFloatingSidebar
                             )
                         }
@@ -287,6 +288,7 @@ struct WorkspaceShellView: View {
                             sidebarPanel: $sidebarPanel,
                             isPinned: $ipadSidebarPinned,
                             panelWidth: panelWidth,
+                            onOpenDocument: openDocumentInFocusedPane,
                             onSwipeToDismiss: (ipadSidebarPinned && usesDesktopChrome) ? nil : dismissFloatingSidebar
                         )
                     }
@@ -337,7 +339,8 @@ struct WorkspaceShellView: View {
                 workspace: workspace,
                 sidebarVisible: $sidebarVisible,
                 sidebarPanel: $sidebarPanel,
-                activePanel: sidebarPanel
+                activePanel: sidebarPanel,
+                onOpenDocument: openDocumentInFocusedPane
             )
         }
         .frame(width: sidebarWidth)
@@ -389,7 +392,7 @@ struct WorkspaceShellView: View {
                             ForEach(linkedIDs, id: \.self) { linkedID in
                                 if let file = workspace.files.first(where: { $0.id == linkedID }) {
                                     Button {
-                                        workspace.selectFile(file.id)
+                                        openDocumentInFocusedPane(file)
                                     } label: {
                                         HStack(spacing: 8) {
                                             Image(systemName: file.kind == .canvas ? "square.grid.2x2" : "doc.text")
@@ -427,26 +430,17 @@ struct WorkspaceShellView: View {
     @ViewBuilder
     private var editorColumn: some View {
         Group {
-            if let pane = splitPane {
-                if pane.orientation == .right {
-                    HStack(spacing: 0) {
-                        mainEditorPane
-                        ShellVerticalHairline()
-                        splitEditorPane
-                    }
-                } else {
-                    VStack(spacing: 0) {
-                        mainEditorPane
-                        ShellHairline()
-                        splitEditorPane
-                    }
-                }
+            if let splitRoot {
+                splitNodeView(splitRoot)
             } else {
-                mainEditorPane
+                editorPane(paneID: EditorSplitTree.rootPaneID)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.canvasBackground)
+        .onChange(of: workspace.files) { _, files in
+            canvasDocuments.syncVaultFiles(files)
+        }
         #if os(iOS)
         .background {
             GeometryReader { geo in
@@ -462,49 +456,85 @@ struct WorkspaceShellView: View {
         #endif
     }
 
-    private var mainEditorPane: some View {
+    private func splitNodeView(_ node: EditorSplitNode) -> AnyView {
+        switch node {
+        case .pane(let paneID):
+            return AnyView(editorPane(paneID: paneID))
+        case .split(let axis, let ratio, let first, let second):
+            switch axis {
+            case .horizontal:
+                return AnyView(
+                    GeometryReader { geo in
+                        HStack(spacing: 0) {
+                            splitNodeView(first)
+                                .frame(width: geo.size.width * ratio)
+                            ShellVerticalHairline()
+                            splitNodeView(second)
+                                .frame(width: geo.size.width * (1 - ratio))
+                        }
+                    }
+                )
+            case .vertical:
+                return AnyView(
+                    GeometryReader { geo in
+                        VStack(spacing: 0) {
+                            splitNodeView(first)
+                                .frame(height: geo.size.height * ratio)
+                            ShellHairline()
+                            splitNodeView(second)
+                                .frame(height: geo.size.height * (1 - ratio))
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    private func editorPane(paneID: String) -> some View {
         VStack(spacing: 0) {
             #if os(macOS)
-            if usesMacTabBarOverlay {
-                Color.clear.frame(height: tabBarChromeHeight)
-            } else {
-                macTabBarChrome
-            }
+            // Tab row renders in a per-pane overlay (Obsidian-style, one tab bar per editor group).
+            Color.clear.frame(height: tabBarRowHeight)
             #else
             iPadWindowedTabChrome {
-                tabBar
+                paneTabBarContent(paneID: paneID)
             }
             .frame(height: tabBarChromeHeight)
             .background(tabBarSurfaceColor)
             #endif
 
-            documentNavBar
-            canvasArea
+            paneNavBar(paneID: paneID)
+            paneContent(paneID: paneID)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onTapGesture {
+            focusedPaneID = paneID
+        }
+        #if os(macOS)
+        .overlay(alignment: .top) {
+            macPaneTabBarChrome(paneID: paneID)
+                .zIndex(5)
+        }
+        #endif
     }
 
     #if os(macOS)
-    private var macTabBarChrome: some View {
+    private func macPaneTabBarChrome(paneID: String) -> some View {
         iPadWindowedTabChrome {
-            tabBar
+            paneTabBarContent(paneID: paneID)
         }
-        .frame(height: tabBarChromeHeight)
+        .frame(height: tabBarRowHeight)
         .background(tabBarSurfaceColor)
+        .overlay(alignment: .bottom) {
+            ShellHairline()
+        }
         .background(alignment: .bottom) {
-            MacWindowDragHandle()
-                .frame(height: tabBarRowHeight)
+            if paneID == macLeftmostPaneID {
+                MacWindowDragHandle()
+                    .frame(height: tabBarRowHeight)
+            }
         }
-    }
-
-    /// Obsidian-style tab row overlay — full width when sidebar is collapsed, editor column when open.
-    private var macTabBarOverlay: some View {
-        HStack(spacing: 0) {
-            Color.clear
-                .frame(width: macTabBarOverlayLeadingInset, height: tabBarChromeHeight)
-            macTabBarChrome
-        }
-        .frame(maxWidth: .infinity, minHeight: tabBarChromeHeight, maxHeight: tabBarChromeHeight, alignment: .leading)
     }
     #endif
 
@@ -577,133 +607,369 @@ struct WorkspaceShellView: View {
         #endif
     }
 
-    // MARK: - Split pane (second tab group)
+    // MARK: - Split tree (nested Obsidian-style panes)
 
-    /// Drives the Split right / Split down menu items for both panes.
-    private var splitLayoutBinding: Binding<NoteSplitLayout> {
-        Binding(
-            get: { splitPane?.orientation ?? .none },
-            set: { newValue in
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    if newValue == .none {
-                        splitPane = nil
-                    } else {
-                        openSplitPane(orientation: newValue)
-                    }
-                }
-            }
-        )
+    private func paneTabs(for paneID: String) -> [WorkspaceTab] {
+        if paneID == EditorSplitTree.rootPaneID {
+            return workspace.tabs
+        }
+        return auxiliaryPanes[paneID]?.tabs ?? []
     }
 
-    private func openSplitPane(orientation: NoteSplitLayout) {
-        if var pane = splitPane {
-            pane.orientation = orientation
-            splitPane = pane
+    private func paneActiveTabID(for paneID: String) -> String {
+        if paneID == EditorSplitTree.rootPaneID {
+            return workspace.activeTabID
+        }
+        return auxiliaryPanes[paneID]?.activeTabID ?? ""
+    }
+
+    private func paneActiveTab(for paneID: String) -> WorkspaceTab? {
+        let tabs = paneTabs(for: paneID)
+        let activeID = paneActiveTabID(for: paneID)
+        return tabs.first { $0.id == activeID } ?? tabs.first
+    }
+
+    private func paneUI(for paneID: String) -> EditorPaneUIState {
+        if paneID == EditorSplitTree.rootPaneID {
+            return EditorPaneUIState(isReading: noteIsReading, showFindBar: showNoteFindBar)
+        }
+        return paneUIState[paneID] ?? EditorPaneUIState()
+    }
+
+    private func setPaneUI(_ paneID: String, _ state: EditorPaneUIState) {
+        guard paneID != EditorSplitTree.rootPaneID else {
+            noteIsReading = state.isReading
+            showNoteFindBar = state.showFindBar
             return
         }
-        guard var copy = activeTab else { return }
-        copy.id = SplitPaneState.newTabID()
-        splitPane = SplitPaneState(
-            orientation: orientation,
-            tabs: [copy],
-            activeTabID: copy.id
+        paneUIState[paneID] = state
+    }
+
+    private func splitPaneActions(for paneID: String) -> (() -> Void, () -> Void) {
+        (
+            { splitPane(paneID, axis: .horizontal) },
+            { splitPane(paneID, axis: .vertical) }
         )
     }
 
-    private func closeSplitPaneTab(_ tabID: String) {
-        guard var pane = splitPane else { return }
+    private func splitPane(_ paneID: String, axis: EditorSplitAxis) {
+        focusedPaneID = paneID
+        let currentRoot = splitRoot ?? .pane(EditorSplitTree.rootPaneID)
+        guard let (updatedRoot, newPaneID) = EditorSplitTree.splitPane(paneID, axis: axis, in: currentRoot) else {
+            return
+        }
+
+        let sourceTab = paneActiveTab(for: paneID) ?? WorkspaceTab(
+            id: EditorSplitTree.newTabID(),
+            title: "New tab",
+            kind: .newTab,
+            fileID: nil
+        )
+        var newTab = sourceTab
+        newTab.id = EditorSplitTree.newTabID()
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            splitRoot = updatedRoot
+            auxiliaryPanes[newPaneID] = EditorAuxiliaryPane(
+                tabs: [newTab],
+                activeTabID: newTab.id
+            )
+            paneUIState[newPaneID] = EditorPaneUIState()
+            focusedPaneID = newPaneID
+        }
+    }
+
+    private func collapseSplitIfNeeded() {
+        guard let splitRoot else { return }
+        let paneIDs = EditorSplitTree.allPaneIDs(in: splitRoot)
+        let remainingAux = paneIDs.filter { $0 != EditorSplitTree.rootPaneID }
+        if remainingAux.isEmpty {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                self.splitRoot = nil
+                auxiliaryPanes = [:]
+                paneUIState = [:]
+            }
+        }
+    }
+
+    private func closePaneTab(paneID: String, tabID: String) {
+        focusedPaneID = paneID
+        if paneID == EditorSplitTree.rootPaneID {
+            workspace.closeTab(tabID)
+            return
+        }
+
+        guard var pane = auxiliaryPanes[paneID] else { return }
         pane.tabs.removeAll { $0.id == tabID }
         if pane.tabs.isEmpty {
-            withAnimation(.easeInOut(duration: 0.18)) { splitPane = nil }
+            removeAuxiliaryPane(paneID)
             return
         }
         if pane.activeTabID == tabID {
             pane.activeTabID = pane.tabs[0].id
         }
-        splitPane = pane
+        auxiliaryPanes[paneID] = pane
     }
 
-    private func addSplitPaneTab() {
-        guard var pane = splitPane else { return }
+    private func closeAllPaneTabs(paneID: String) {
+        focusedPaneID = paneID
+        if paneID == EditorSplitTree.rootPaneID {
+            workspace.closeAllTabs()
+            return
+        }
+        removeAuxiliaryPane(paneID)
+    }
+
+    private func addPaneTab(paneID: String) {
+        focusedPaneID = paneID
         let tab = WorkspaceTab(
-            id: SplitPaneState.newTabID(),
+            id: EditorSplitTree.newTabID(),
             title: "New tab",
             kind: .newTab,
             fileID: nil
         )
+        if paneID == EditorSplitTree.rootPaneID {
+            workspace.tabs.append(tab)
+            workspace.activeTabID = tab.id
+            return
+        }
+        guard var pane = auxiliaryPanes[paneID] else { return }
         pane.tabs.append(tab)
         pane.activeTabID = tab.id
-        splitPane = pane
+        auxiliaryPanes[paneID] = pane
     }
 
-    private func openInSplitPane(_ file: WorkspaceFileEntry) {
-        guard var pane = splitPane, file.kind == .note || file.kind == .canvas else { return }
+    private func selectPaneTab(paneID: String, tab: WorkspaceTab) {
+        focusedPaneID = paneID
+        if paneID == EditorSplitTree.rootPaneID {
+            workspace.activeTabID = tab.id
+            workspace.selectedFileID = tab.fileID
+            return
+        }
+        guard var pane = auxiliaryPanes[paneID] else { return }
+        pane.activeTabID = tab.id
+        auxiliaryPanes[paneID] = pane
+        workspace.selectedFileID = tab.fileID
+    }
+
+    private func removeAuxiliaryPane(_ paneID: String) {
+        guard paneID != EditorSplitTree.rootPaneID else { return }
+        auxiliaryPanes.removeValue(forKey: paneID)
+        paneUIState.removeValue(forKey: paneID)
+        if let splitRoot {
+            if let collapsed = EditorSplitTree.removePane(paneID, from: splitRoot) {
+                self.splitRoot = collapsed == .pane(EditorSplitTree.rootPaneID) ? nil : collapsed
+            } else {
+                self.splitRoot = nil
+            }
+        }
+        if focusedPaneID == paneID {
+            focusedPaneID = EditorSplitTree.rootPaneID
+        }
+        collapseSplitIfNeeded()
+    }
+
+    private func openDocumentInFocusedPane(_ file: WorkspaceFileEntry) {
+        switch file.kind {
+        case .note, .canvas:
+            openFileInPane(focusedPaneID, file: file)
+        default:
+            workspace.selectFile(file.id)
+        }
+    }
+
+    private var goToFileReplacingTabID: String? {
+        let paneID = goToFileTargetPaneID ?? focusedPaneID
+        let tab = paneActiveTab(for: paneID)
+        if tab?.kind == .newTab { return tab?.id }
+        return paneActiveTabID(for: paneID)
+    }
+
+    private func handleGoToFileSelection(_ file: WorkspaceFileEntry) {
+        let paneID = goToFileTargetPaneID ?? focusedPaneID
+        openFileInPane(paneID, file: file)
+    }
+
+    private var focusedPaneActiveTab: WorkspaceTab? {
+        paneActiveTab(for: focusedPaneID)
+    }
+
+    private func openGoToFileInFocusedPane() {
+        goToFileTargetPaneID = focusedPaneID
+        showGoToFile = true
+    }
+
+    private func openGraphInFocusedPane() {
+        openGraphInPane(focusedPaneID)
+    }
+
+    private func createCanvasInFocusedPane() {
+        guard let entry = workspace.createCanvas(autoNavigate: false) else { return }
+        openFileInPane(focusedPaneID, file: entry)
+    }
+
+    private func createNoteInFocusedPane() {
+        guard let entry = workspace.createNote(autoNavigate: false) else { return }
+        openFileInPane(focusedPaneID, file: entry)
+    }
+
+    private func openGraphInPane(_ paneID: String) {
+        focusedPaneID = paneID
+        if paneID == EditorSplitTree.rootPaneID {
+            if let existing = workspace.tabs.first(where: { $0.kind == .graph }) {
+                workspace.activeTabID = existing.id
+                return
+            }
+            let tab = WorkspaceTab(
+                id: EditorSplitTree.newTabID(),
+                title: "Graph view",
+                kind: .graph,
+                fileID: nil
+            )
+            replaceActiveTabInRoot(with: tab)
+            return
+        }
+
+        guard var pane = auxiliaryPanes[paneID] else { return }
+        if let existing = pane.tabs.first(where: { $0.kind == .graph }) {
+            pane.activeTabID = existing.id
+            auxiliaryPanes[paneID] = pane
+            return
+        }
         let tab = WorkspaceTab(
-            id: SplitPaneState.newTabID(),
-            title: file.name,
-            kind: file.kind == .canvas ? .canvas : .note,
-            fileID: file.id
+            id: EditorSplitTree.newTabID(),
+            title: "Graph view",
+            kind: .graph,
+            fileID: nil
         )
-        if let index = pane.tabs.firstIndex(where: { $0.id == pane.activeTabID }),
-           pane.tabs[index].kind == .newTab {
+        replaceActiveTab(in: &pane, with: tab)
+        auxiliaryPanes[paneID] = pane
+    }
+
+    private func replaceActiveTabInRoot(with tab: WorkspaceTab) {
+        if let index = workspace.tabs.firstIndex(where: { $0.id == workspace.activeTabID }) {
+            workspace.tabs[index] = tab
+        } else {
+            workspace.tabs.append(tab)
+        }
+        workspace.activeTabID = tab.id
+        if let fileID = tab.fileID {
+            workspace.selectedFileID = fileID
+        }
+    }
+
+    private func replaceActiveTab(in pane: inout EditorAuxiliaryPane, with tab: WorkspaceTab) {
+        if let index = pane.tabs.firstIndex(where: { $0.id == pane.activeTabID }) {
             pane.tabs[index] = tab
         } else {
             pane.tabs.append(tab)
         }
         pane.activeTabID = tab.id
-        splitPane = pane
-        splitPaneIsReading = false
-        splitPaneShowFindBar = false
     }
 
-    private var splitEditorPane: some View {
-        VStack(spacing: 0) {
-            iPadWindowedTabChrome {
-                splitPaneTabBar
+    private func openFileInPane(_ paneID: String, file: WorkspaceFileEntry) {
+        guard file.kind == .note || file.kind == .canvas else { return }
+        focusedPaneID = paneID
+        if paneID == EditorSplitTree.rootPaneID {
+            if let existing = workspace.tabs.first(where: { $0.fileID == file.id }) {
+                workspace.activeTabID = existing.id
+                workspace.selectedFileID = file.id
+                noteIsReading = false
+                showNoteFindBar = false
+                return
             }
-            .frame(height: tabBarChromeHeight)
-            .background(tabBarSurfaceColor)
-            #if os(macOS)
-            .background(alignment: .bottom) {
-                MacWindowDragHandle()
-                    .frame(height: tabBarRowHeight)
-            }
-            #endif
-
-            splitPaneNavBar
-            splitPaneContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            let tab = WorkspaceTab(
+                id: EditorSplitTree.newTabID(),
+                title: file.name,
+                kind: file.kind == .canvas ? .canvas : .note,
+                fileID: file.id
+            )
+            replaceActiveTabInRoot(with: tab)
+            noteIsReading = false
+            showNoteFindBar = false
+            return
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        guard var pane = auxiliaryPanes[paneID] else { return }
+        if let existing = pane.tabs.first(where: { $0.fileID == file.id }) {
+            pane.activeTabID = existing.id
+            auxiliaryPanes[paneID] = pane
+            workspace.selectedFileID = file.id
+            return
+        }
+        let tab = WorkspaceTab(
+            id: EditorSplitTree.newTabID(),
+            title: file.name,
+            kind: file.kind == .canvas ? .canvas : .note,
+            fileID: file.id
+        )
+        replaceActiveTab(in: &pane, with: tab)
+        auxiliaryPanes[paneID] = pane
+        paneUIState[paneID] = EditorPaneUIState()
+        workspace.selectedFileID = file.id
     }
 
-    private var splitPaneTabBar: some View {
-        let tabs = splitPane?.tabs ?? []
-        let activeID = splitPane?.activeTabID ?? ""
+    private func paneShowsTrailingChrome(_ paneID: String) -> Bool {
+        EditorSplitTree.paneShowsRightSidebarChrome(paneID, in: splitRoot)
+    }
+
+    private func paneShowsLeadingChrome(_ paneID: String) -> Bool {
+        EditorSplitTree.paneShowsLeftSidebarChrome(paneID, in: splitRoot)
+    }
+
+    private func paneTabBarContent(paneID: String) -> some View {
+        let tabs = paneTabs(for: paneID)
+        let activeID = paneActiveTabID(for: paneID)
         return paneTabBar(
             tabs: tabs,
             activeTabID: activeID,
-            onSelect: { tab in
-                if var pane = splitPane {
-                    pane.activeTabID = tab.id
-                    splitPane = pane
+            onSelect: { selectPaneTab(paneID: paneID, tab: $0) },
+            onClose: { closePaneTab(paneID: paneID, tabID: $0) },
+            onCloseAll: { closeAllPaneTabs(paneID: paneID) },
+            onAddTab: { addPaneTab(paneID: paneID) },
+            showsTrailingChrome: paneShowsTrailingChrome(paneID),
+            leading: {
+                if paneShowsLeadingChrome(paneID) {
+                    tabBarLeading(for: paneID)
+                } else {
+                    EmptyView()
                 }
-            },
-            onClose: closeSplitPaneTab,
-            onAddTab: addSplitPaneTab,
-            showsTrailingChrome: showsSplitPaneTrailingChrome,
-            leading: { EmptyView() }
+            }
         )
     }
 
-    private var splitPaneNavBar: some View {
-        let tab = splitPane?.activeTab
+    private func paneNavBar(paneID: String) -> some View {
+        let tab = paneActiveTab(for: paneID)
+        let splitActions = splitPaneActions(for: paneID)
+        let isRoot = paneID == EditorSplitTree.rootPaneID
+
         return HStack(spacing: 0) {
             HStack(spacing: 14) {
-                chromeIconButton("chevron.left", tip: "Back", isEnabled: false)
-                chromeIconButton("chevron.right", tip: "Forward", isEnabled: false)
+                #if os(iOS)
+                if paneShowsLeadingChrome(paneID), !usesDesktopChrome {
+                    chromeIconButton("sidebar.left", tip: "Toggle sidebar") {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            sidebarVisible.toggle()
+                        }
+                    }
+                }
+                #endif
+                chromeIconButton(
+                    "chevron.left",
+                    tip: "Back",
+                    isEnabled: isRoot && workspace.canNavigateBack
+                ) {
+                    workspace.goBack()
+                }
+                chromeIconButton(
+                    "chevron.right",
+                    tip: "Forward",
+                    isEnabled: isRoot && workspace.canNavigateForward
+                ) {
+                    workspace.goForward()
+                }
             }
-            .frame(width: 72, alignment: .leading)
+            .frame(width: documentNavLeadingWidth, alignment: .leading)
 
             Text(workspace.documentTitle(for: tab))
                 .font(.system(size: 14))
@@ -712,46 +978,58 @@ struct WorkspaceShellView: View {
                 .frame(maxWidth: .infinity)
 
             HStack(spacing: 14) {
-                if let tab, let fileID = tab.fileID {
-                    Button {
-                        workspace.presentBookmarkEditor(for: fileID)
-                    } label: {
-                        Image(systemName: workspace.isBookmarked(fileID) ? "bookmark.fill" : "bookmark")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(
-                                workspace.isBookmarked(fileID)
-                                    ? AppColors.selectionStroke
-                                    : AppColors.textSecondary
-                            )
-                            .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
+                if tab?.kind == .note, let fileID = tab?.fileID {
+                    ObsidianViewModeButton(isReading: Binding(
+                        get: { paneUI(for: paneID).isReading },
+                        set: { newValue in
+                            var state = paneUI(for: paneID)
+                            state.isReading = newValue
+                            if newValue { state.showFindBar = false }
+                            setPaneUI(paneID, state)
+                        }
+                    )) {
+                        if isRoot { noteSplitLayout = .none }
                     }
-                    .buttonStyle(.plain)
-                    .help(workspace.isBookmarked(fileID) ? "Edit bookmark" : "Add bookmark")
-
-                    if tab.kind == .canvas {
-                        CanvasDocumentOptionsMenu(
-                            workspace: workspace,
-                            canvasStore: canvasDocuments.store(for: fileID),
-                            fileID: fileID,
-                            splitLayout: splitLayoutBinding,
-                            sidebarVisible: $sidebarVisible,
-                            sidebarPanel: $sidebarPanel
+                    NoteDocumentOptionsMenu(
+                        workspace: workspace,
+                        fileID: fileID,
+                        isReading: Binding(
+                            get: { paneUI(for: paneID).isReading },
+                            set: { newValue in
+                                var state = paneUI(for: paneID)
+                                state.isReading = newValue
+                                setPaneUI(paneID, state)
+                            }
+                        ),
+                        onSplitRight: splitActions.0,
+                        onSplitDown: splitActions.1,
+                        sidebarVisible: $sidebarVisible,
+                        sidebarPanel: $sidebarPanel,
+                        showFindBar: Binding(
+                            get: { paneUI(for: paneID).showFindBar },
+                            set: { newValue in
+                                var state = paneUI(for: paneID)
+                                state.showFindBar = newValue
+                                if newValue { state.isReading = false }
+                                setPaneUI(paneID, state)
+                            }
                         )
-                    } else if tab.kind == .note {
-                        NoteDocumentOptionsMenu(
-                            workspace: workspace,
-                            fileID: fileID,
-                            isReading: $splitPaneIsReading,
-                            splitLayout: splitLayoutBinding,
-                            sidebarVisible: $sidebarVisible,
-                            sidebarPanel: $sidebarPanel,
-                            showFindBar: $splitPaneShowFindBar
-                        )
-                    }
+                    )
+                }
+                if tab?.kind == .canvas, let fileID = tab?.fileID {
+                    documentBookmarkButton(fileID: fileID)
+                    CanvasDocumentOptionsMenu(
+                        workspace: workspace,
+                        canvasStore: canvasDocuments.store(for: fileID),
+                        fileID: fileID,
+                        onSplitRight: splitActions.0,
+                        onSplitDown: splitActions.1,
+                        sidebarVisible: $sidebarVisible,
+                        sidebarPanel: $sidebarPanel
+                    )
                 }
             }
-            .frame(width: 96, alignment: .trailing)
+            .frame(width: documentNavTrailingWidth, alignment: .trailing)
         }
         .padding(.horizontal, 14)
         .frame(height: 34)
@@ -759,8 +1037,10 @@ struct WorkspaceShellView: View {
     }
 
     @ViewBuilder
-    private var splitPaneContent: some View {
-        let tab = splitPane?.activeTab
+    private func paneContent(paneID: String) -> some View {
+        let tab = paneActiveTab(for: paneID)
+        let isRoot = paneID == EditorSplitTree.rootPaneID
+
         switch tab?.kind {
         case .canvas:
             if let fileID = tab?.fileID {
@@ -771,39 +1051,90 @@ struct WorkspaceShellView: View {
                     sidebarPanel: $sidebarPanel,
                     documentTitle: workspace.documentTitle(for: tab),
                     vaultURL: workspace.activeVaultURL,
-                    independentCamera: true,
-                    persistsCamera: false
+                    independentCamera: !isRoot,
+                    persistsCamera: isRoot
                 )
-                .id("\(fileID)-splitpane")
+                .id("\(fileID)-\(paneID)")
+                .onAppear {
+                    canvasDocuments.store(for: fileID).setVaultFiles(workspace.files)
+                }
             }
         case .note:
             if let fileID = tab?.fileID {
                 NoteEditorView(
                     workspace: workspace,
                     fileID: fileID,
-                    isReading: $splitPaneIsReading,
-                    splitLayout: .constant(.none),
-                    showFindBar: $splitPaneShowFindBar
+                    isReading: Binding(
+                        get: { paneUI(for: paneID).isReading },
+                        set: { newValue in
+                            var state = paneUI(for: paneID)
+                            state.isReading = newValue
+                            setPaneUI(paneID, state)
+                        }
+                    ),
+                    splitLayout: isRoot ? $noteSplitLayout : .constant(.none),
+                    showFindBar: Binding(
+                        get: { paneUI(for: paneID).showFindBar },
+                        set: { newValue in
+                            var state = paneUI(for: paneID)
+                            state.showFindBar = newValue
+                            setPaneUI(paneID, state)
+                        }
+                    )
                 )
-                .id("\(fileID)-splitpane")
+                .id("\(fileID)-\(paneID)")
+            } else {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(AppColors.canvasBackground)
             }
         case .graph:
-            GraphView(workspace: workspace)
-        case .newTab, .none:
-            VStack(spacing: 10) {
-                newTabPill("Go to file") {
-                    goToFileTargetsSplitPane = true
-                    showGoToFile = true
+            GraphView(workspace: workspace) { file in
+                openFileInPane(paneID, file: file)
+            }
+                .onAppear {
+                    if isRoot { workspace.flushNotesForGraph() }
                 }
-                newTabPill("Close") {
-                    if let id = splitPane?.activeTabID {
-                        closeSplitPaneTab(id)
-                    }
+        case .newTab, .none:
+            newTabPlaceholder(paneID: paneID)
+        }
+    }
+
+    private func documentBookmarkButton(fileID: String) -> some View {
+        Button {
+            workspace.presentBookmarkEditor(for: fileID)
+        } label: {
+            Image(systemName: workspace.isBookmarked(fileID) ? "bookmark.fill" : "bookmark")
+                .font(.system(size: documentBookmarkIconSize, weight: .medium))
+                .foregroundStyle(
+                    workspace.isBookmarked(fileID)
+                        ? AppColors.selectionStroke
+                        : AppColors.textSecondary
+                )
+                .frame(width: documentBookmarkFrameSize, height: documentBookmarkFrameSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(workspace.isBookmarked(fileID) ? "Edit bookmark" : "Add bookmark")
+    }
+
+    private func newTabPlaceholder(paneID: String) -> some View {
+        VStack(spacing: 10) {
+            newTabPill("Create new note") {
+                workspace.createNote()
+            }
+            newTabPill("Go to file") {
+                goToFileTargetPaneID = paneID
+                showGoToFile = true
+            }
+            newTabPill("Close") {
+                if let tab = paneActiveTab(for: paneID) {
+                    closePaneTab(paneID: paneID, tabID: tab.id)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(AppColors.canvasBackground)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppColors.canvasBackground)
     }
 
     #if os(macOS)
@@ -837,12 +1168,12 @@ struct WorkspaceShellView: View {
                 GoToFileSheet(
                     workspace: workspace,
                     isPresented: $showGoToFile,
-                    replacingTabID: goToFileTargetsSplitPane ? nil : (activeTab?.kind == .newTab ? activeTab?.id : nil),
-                    onFileSelected: goToFileTargetsSplitPane ? { openInSplitPane($0) } : nil
+                    replacingTabID: goToFileReplacingTabID,
+                    onFileSelected: handleGoToFileSelection
                 )
                 .zIndex(20)
                 .transition(.opacity)
-                .onDisappear { goToFileTargetsSplitPane = false }
+                .onDisappear { goToFileTargetPaneID = nil }
             }
         }
         .background(MacWindowChromeConfigurator())
@@ -856,7 +1187,10 @@ struct WorkspaceShellView: View {
             showNoteFindBar = false
         }
         .onChange(of: workspace.activeVaultID) { _, _ in
-            splitPane = nil
+            splitRoot = nil
+            auxiliaryPanes = [:]
+            paneUIState = [:]
+            focusedPaneID = EditorSplitTree.rootPaneID
         }
         .onChange(of: workspace.selectedFileID) { _, _ in
             if workspace.activeTab?.kind == .note {
@@ -884,7 +1218,13 @@ struct WorkspaceShellView: View {
                 .animation(nil, value: showGoToFile)
 
             if workspace.isVaultManagerOpen {
-                VaultManagerView(workspace: workspace)
+                VaultManagerView(
+                    workspace: workspace,
+                    onRequestFolderPicker: { purpose, handler in
+                        vaultFolderPickerHandler = handler
+                        vaultFolderPickerPurpose = purpose
+                    }
+                )
                     .zIndex(10)
                     .transition(.opacity)
             }
@@ -905,12 +1245,12 @@ struct WorkspaceShellView: View {
                 GoToFileSheet(
                     workspace: workspace,
                     isPresented: $showGoToFile,
-                    replacingTabID: goToFileTargetsSplitPane ? nil : (activeTab?.kind == .newTab ? activeTab?.id : nil),
-                    onFileSelected: goToFileTargetsSplitPane ? { openInSplitPane($0) } : nil
+                    replacingTabID: goToFileReplacingTabID,
+                    onFileSelected: handleGoToFileSelection
                 )
                 .zIndex(20)
                 .transition(.opacity)
-                .onDisappear { goToFileTargetsSplitPane = false }
+                .onDisappear { goToFileTargetPaneID = nil }
             }
         }
         .background(AppColors.canvasBackground)
@@ -923,7 +1263,10 @@ struct WorkspaceShellView: View {
             showNoteFindBar = false
         }
         .onChange(of: workspace.activeVaultID) { _, _ in
-            splitPane = nil
+            splitRoot = nil
+            auxiliaryPanes = [:]
+            paneUIState = [:]
+            focusedPaneID = EditorSplitTree.rootPaneID
         }
         .onChange(of: workspace.selectedFileID) { _, newValue in
             if workspace.activeTab?.kind == .note {
@@ -945,6 +1288,10 @@ struct WorkspaceShellView: View {
                 .keyboardShortcut("o", modifiers: .command)
                 .opacity(0)
                 .frame(width: 0, height: 0)
+        }
+        .vaultFolderPicker(purpose: $vaultFolderPickerPurpose) { url, purpose in
+            vaultFolderPickerHandler?(url, purpose)
+            vaultFolderPickerHandler = nil
         }
     }
     #endif
@@ -971,36 +1318,12 @@ struct WorkspaceShellView: View {
     private let tabMinWidth: CGFloat = 115
     private let singleTabWidth: CGFloat = 216
 
-    private var tabBar: some View {
-        paneTabBar(
-            tabs: workspace.tabs,
-            activeTabID: workspace.activeTabID,
-            onSelect: { tab in
-                workspace.activeTabID = tab.id
-                workspace.selectedFileID = tab.fileID
-            },
-            onClose: { workspace.closeTab($0) },
-            onAddTab: workspace.addTab,
-            showsTrailingChrome: showsMainPaneTrailingChrome,
-            leading: { tabBarLeading }
-        )
-    }
-
-    /// Right-sidebar toggle lives on the trailing editor pane when split right.
-    private var showsMainPaneTrailingChrome: Bool {
-        guard let pane = splitPane else { return true }
-        return pane.orientation == .down
-    }
-
-    private var showsSplitPaneTrailingChrome: Bool {
-        splitPane?.orientation == .right
-    }
-
     private func paneTabBar<Leading: View>(
         tabs: [WorkspaceTab],
         activeTabID: String,
         onSelect: @escaping (WorkspaceTab) -> Void,
         onClose: @escaping (String) -> Void,
+        onCloseAll: @escaping () -> Void,
         onAddTab: @escaping () -> Void,
         showsTrailingChrome: Bool,
         @ViewBuilder leading: () -> Leading
@@ -1056,7 +1379,12 @@ struct WorkspaceShellView: View {
                 }
             }
 
-            paneTabListMenu(tabs: tabs, activeTabID: activeTabID, onSelect: onSelect)
+            paneTabListMenu(
+                tabs: tabs,
+                activeTabID: activeTabID,
+                onSelect: onSelect,
+                onCloseAll: onCloseAll
+            )
 
             if showsTrailingChrome {
                 chromeIconButton(
@@ -1131,7 +1459,8 @@ struct WorkspaceShellView: View {
     private func paneTabListMenu(
         tabs: [WorkspaceTab],
         activeTabID: String,
-        onSelect: @escaping (WorkspaceTab) -> Void
+        onSelect: @escaping (WorkspaceTab) -> Void,
+        onCloseAll: @escaping () -> Void
     ) -> some View {
         Menu {
             ForEach(tabs) { tab in
@@ -1144,6 +1473,10 @@ struct WorkspaceShellView: View {
                         Text(tab.title)
                     }
                 }
+            }
+            if !tabs.isEmpty {
+                Divider()
+                Button("Close all tabs", role: .destructive, action: onCloseAll)
             }
         } label: {
             Image(systemName: "chevron.down")
@@ -1210,7 +1543,7 @@ struct WorkspaceShellView: View {
 
     /// Obsidian tab row: sidebar toggle on the left (below traffic lights on iPad).
     @ViewBuilder
-    private var tabBarLeading: some View {
+    private func tabBarLeading(for paneID: String) -> some View {
         #if os(iOS)
         if usesDesktopChrome {
             chromeIconButton(
@@ -1228,8 +1561,10 @@ struct WorkspaceShellView: View {
         }
         #elseif os(macOS)
         if !sidebarVisible && usesDesktopChrome {
-            Color.clear
-                .frame(width: AppColors.macTabBarTrafficLightClearance)
+            if macPaneTrafficLightClearance(for: paneID) > 0 {
+                Color.clear
+                    .frame(width: macPaneTrafficLightClearance(for: paneID))
+            }
             chromeIconButton(
                 "sidebar.left",
                 tip: "Expand sidebar",
@@ -1265,92 +1600,6 @@ struct WorkspaceShellView: View {
         }
     }
 
-    // MARK: - Document nav (back / title / more)
-
-    private var documentNavBar: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 14) {
-                #if os(iOS)
-                if !usesDesktopChrome {
-                    chromeIconButton("sidebar.left", tip: "Toggle sidebar") {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            sidebarVisible.toggle()
-                        }
-                    }
-                }
-                #endif
-                chromeIconButton(
-                    "chevron.left",
-                    tip: "Back",
-                    isEnabled: workspace.canNavigateBack
-                ) {
-                    workspace.goBack()
-                }
-                chromeIconButton(
-                    "chevron.right",
-                    tip: "Forward",
-                    isEnabled: workspace.canNavigateForward
-                ) {
-                    workspace.goForward()
-                }
-            }
-            .frame(width: documentNavLeadingWidth, alignment: .leading)
-
-            Text(documentTitle)
-                .font(.system(size: 14))
-                .foregroundStyle(AppColors.textSecondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
-
-            HStack(spacing: 14) {
-                if activeTab?.kind == .note, let fileID = activeTab?.fileID {
-                    ObsidianViewModeButton(isReading: $noteIsReading) {
-                        noteSplitLayout = .none
-                    }
-                    NoteDocumentOptionsMenu(
-                        workspace: workspace,
-                        fileID: fileID,
-                        isReading: $noteIsReading,
-                        splitLayout: splitLayoutBinding,
-                        sidebarVisible: $sidebarVisible,
-                        sidebarPanel: $sidebarPanel,
-                        showFindBar: $showNoteFindBar
-                    )
-                }
-                if activeTab?.kind == .canvas, let fileID = activeTab?.fileID {
-                    Button {
-                        workspace.presentBookmarkEditor(for: fileID)
-                    } label: {
-                        Image(systemName: workspace.isBookmarked(fileID) ? "bookmark.fill" : "bookmark")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(
-                                workspace.isBookmarked(fileID)
-                                    ? AppColors.selectionStroke
-                                    : AppColors.textSecondary
-                            )
-                            .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(workspace.isBookmarked(fileID) ? "Edit bookmark" : "Add bookmark")
-
-                    CanvasDocumentOptionsMenu(
-                        workspace: workspace,
-                        canvasStore: canvasDocuments.store(for: fileID),
-                        fileID: fileID,
-                        splitLayout: splitLayoutBinding,
-                        sidebarVisible: $sidebarVisible,
-                        sidebarPanel: $sidebarPanel
-                    )
-                }
-            }
-            .frame(width: documentNavTrailingWidth, alignment: .trailing)
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 34)
-        .background(AppColors.canvasBackground)
-    }
-
     private var documentNavLeadingWidth: CGFloat {
         #if os(iOS)
         usesDesktopChrome ? 72 : 100
@@ -1361,9 +1610,9 @@ struct WorkspaceShellView: View {
 
     private var documentNavTrailingWidth: CGFloat {
         #if os(iOS)
-        usesDesktopChrome ? 96 : 120
+        usesDesktopChrome ? 120 : 140
         #else
-        96
+        120
         #endif
     }
 
@@ -1404,79 +1653,7 @@ struct WorkspaceShellView: View {
         .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
-    // MARK: - Content
-
-    private var canvasArea: some View {
-        Group {
-            switch activeTab?.kind {
-            case .canvas:
-                let documentID = activeTab?.fileID ?? activeTab?.id ?? "default"
-                let canvasStore = canvasDocuments.store(for: documentID)
-                canvasDocumentContent(store: canvasStore, documentID: documentID)
-                .onAppear {
-                    canvasStore.setVaultFiles(workspace.files)
-                }
-                .onChange(of: workspace.files) { _, files in
-                    canvasDocuments.syncVaultFiles(files)
-                }
-                .onChange(of: workspace.activeTabID) { _, _ in
-                    if activeTab?.kind == .canvas {
-                        canvasStore.setVaultFiles(workspace.files)
-                    }
-                }
-            case .note:
-                if let fileID = activeTab?.fileID {
-                    NoteEditorView(
-                        workspace: workspace,
-                        fileID: fileID,
-                        isReading: $noteIsReading,
-                        splitLayout: $noteSplitLayout,
-                        showFindBar: $showNoteFindBar
-                    )
-                } else {
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(AppColors.canvasBackground)
-                }
-            case .graph:
-                GraphView(workspace: workspace)
-                    .onAppear {
-                        workspace.flushNotesForGraph()
-                    }
-            case .newTab, .none:
-                newTabPlaceholder
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func canvasDocumentContent(store: CanvasStore, documentID: String) -> some View {
-        InfiniteCanvasView(
-            store: store,
-            workspace: workspace,
-            sidebarVisible: $sidebarVisible,
-            sidebarPanel: $sidebarPanel,
-            documentTitle: documentTitle,
-            vaultURL: workspace.activeVaultURL
-        )
-        .id("\(documentID)-primary")
-    }
-
-    private var newTabPlaceholder: some View {
-        VStack(spacing: 10) {
-            newTabPill("Create new note") {
-                workspace.createNote()
-            }
-            newTabPill("Go to file") {
-                showGoToFile = true
-            }
-            newTabPill("Close") {
-                if let tab = activeTab { workspace.closeTab(tab.id) }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppColors.canvasBackground)
-    }
+    // MARK: - Placeholder pills
 
     private func newTabPill(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {

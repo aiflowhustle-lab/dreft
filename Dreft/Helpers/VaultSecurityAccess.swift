@@ -113,4 +113,31 @@ enum VaultSecurityAccess {
             vault.securityScopedBookmark = createBookmark(for: url)
         }
     }
+
+    /// Returns a user-facing reason when Dreft cannot read a vault folder on disk.
+    static func accessibilityIssue(for vault: WorkspaceVault) -> String? {
+        let pathURL = URL(fileURLWithPath: vault.path, isDirectory: true).standardizedFileURL
+
+        if isInsideAppContainer(pathURL) {
+            return FileManager.default.fileExists(atPath: pathURL.path)
+                ? nil
+                : "The vault folder is missing from app storage."
+        }
+
+        if let bookmark = vault.securityScopedBookmark {
+            guard resolveBookmark(bookmark) != nil else {
+                return "Folder access expired. Reconnect this vault to pick the folder again."
+            }
+            let resolved = resolvedURL(for: vault)
+            return FileManager.default.fileExists(atPath: resolved.path)
+                ? nil
+                : "The vault folder is missing or was moved."
+        }
+
+        if !FileManager.default.fileExists(atPath: pathURL.path) {
+            return "The vault folder is missing or was moved."
+        }
+
+        return "Folder access expired. Reconnect this vault to pick the folder again."
+    }
 }

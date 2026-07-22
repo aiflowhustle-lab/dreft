@@ -49,6 +49,21 @@ private struct ShellRailTooltipArrowShape: Shape {
     }
 }
 
+private struct RailTooltipAnchor: Equatable {
+    let label: String
+    let midY: CGFloat
+}
+
+private struct RailTooltipAnchorKey: PreferenceKey {
+    static var defaultValue: RailTooltipAnchor? = nil
+
+    static func reduce(value: inout RailTooltipAnchor?, nextValue: () -> RailTooltipAnchor?) {
+        if let next = nextValue() {
+            value = next
+        }
+    }
+}
+
 struct IconRailButton: View {
     let systemName: String?
     let textLabel: String?
@@ -110,11 +125,17 @@ struct IconRailButton: View {
             }
         }
         #endif
-        .overlay(alignment: .leading) {
-            if isHovered {
-                ShellRailTooltip(text: tooltip)
-                    .offset(x: 32)
-                    .zIndex(200)
+        .background {
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: RailTooltipAnchorKey.self,
+                    value: isHovered
+                        ? RailTooltipAnchor(
+                            label: tooltip,
+                            midY: geo.frame(in: .named("iconRail")).midY
+                        )
+                        : nil
+                )
             }
         }
         .help(tooltip)
@@ -122,18 +143,17 @@ struct IconRailButton: View {
 }
 
 struct IconRailView: View {
-    @Bindable var workspace: WorkspaceStore
     @Binding var sidebarVisible: Bool
+    var isGraphActive = false
+    var isCanvasActive = false
     var onGoToFile: () -> Void = {}
+    var onOpenGraph: () -> Void = {}
+    var onCreateCanvas: () -> Void = {}
+    var onCreateNote: () -> Void = {}
+    var onManageVaults: () -> Void = {}
     var contentTopInset: CGFloat = AppColors.macTrafficLightInset
 
-    private var isGraphActive: Bool {
-        workspace.activeTab?.kind == .graph
-    }
-
-    private var isCanvasActive: Bool {
-        workspace.activeTab?.kind == .canvas
-    }
+    @State private var tooltipAnchor: RailTooltipAnchor?
 
     private var railSurfaceColor: Color {
         #if os(macOS)
@@ -166,53 +186,68 @@ struct IconRailView: View {
     #endif
 
     var body: some View {
-        VStack(spacing: 0) {
-            #if os(macOS)
-            if sidebarVisible {
+        ZStack(alignment: .topLeading) {
+            railSurfaceColor
+                .frame(width: 40)
+                .frame(maxHeight: .infinity)
+
+            VStack(spacing: 0) {
+                #if os(macOS)
+                if sidebarVisible {
+                    railHeaderColor
+                        .frame(height: AppColors.chromeRowHeight)
+                }
+                #else
                 railHeaderColor
                     .frame(height: AppColors.chromeRowHeight)
-            }
-            #else
-            railHeaderColor
-                .frame(height: AppColors.chromeRowHeight)
-            #endif
+                #endif
 
-            VStack(spacing: 4) {
-                IconRailButton(systemName: "magnifyingglass", tooltip: "Go to file") {
-                    onGoToFile()
-                }
-                IconRailButton(
-                    systemName: "point.3.connected.trianglepath.dotted",
-                    tooltip: "Open graph view",
-                    isActive: isGraphActive
-                ) {
-                    workspace.openGraphTab()
-                }
-                IconRailButton(
-                    systemName: "square.grid.2x2",
-                    tooltip: "Create new canvas",
-                    isActive: isCanvasActive
-                ) {
-                    workspace.createCanvas()
-                }
-                IconRailButton(systemName: "doc.badge.plus", tooltip: "New note") {
-                    workspace.createNote()
-                }
-                IconRailButton(systemName: "square.stack.3d.up", tooltip: "Manage vaults") {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        workspace.isVaultManagerOpen = true
+                VStack(spacing: 4) {
+                    IconRailButton(systemName: "magnifyingglass", tooltip: "Go to file") {
+                        onGoToFile()
+                    }
+                    IconRailButton(
+                        systemName: "point.3.connected.trianglepath.dotted",
+                        tooltip: "Open graph view",
+                        isActive: isGraphActive
+                    ) {
+                        onOpenGraph()
+                    }
+                    IconRailButton(
+                        systemName: "square.grid.2x2",
+                        tooltip: "Create new canvas",
+                        isActive: isCanvasActive
+                    ) {
+                        onCreateCanvas()
+                    }
+                    IconRailButton(systemName: "doc.badge.plus", tooltip: "New note") {
+                        onCreateNote()
+                    }
+                    IconRailButton(systemName: "square.stack.3d.up", tooltip: "Manage vaults") {
+                        onManageVaults()
                     }
                 }
-            }
-            .padding(.top, iconStackTopPadding)
+                .padding(.top, iconStackTopPadding)
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+            }
+            .frame(width: 40)
+            .frame(maxHeight: .infinity)
         }
         .frame(width: 40)
         .frame(maxHeight: .infinity)
-        .background(railSurfaceColor)
+        .overlay(alignment: .topLeading) {
+            if let tooltipAnchor {
+                ShellRailTooltip(text: tooltipAnchor.label)
+                    .offset(x: 44, y: tooltipAnchor.midY - 14)
+                    .fixedSize()
+                    .allowsHitTesting(false)
+            }
+        }
+        .coordinateSpace(name: "iconRail")
+        .onPreferenceChange(RailTooltipAnchorKey.self) { tooltipAnchor = $0 }
         #if os(macOS)
-        .zIndex(sidebarVisible ? 2 : 0)
+        .zIndex(20)
         #else
         .zIndex(2)
         #endif

@@ -12,17 +12,27 @@ struct TimelapseWandButton: View {
         isPlaying ? "Stop timelapse animation" : "Start timelapse animation"
     }
 
+    #if os(iOS)
+    private let iconSize: CGFloat = 17
+    private let controlSize: CGFloat = 44
+    private let cornerRadius: CGFloat = 8
+    #else
+    private let iconSize: CGFloat = 15
+    private let controlSize: CGFloat = 36
+    private let cornerRadius: CGFloat = 7
+    #endif
+
     var body: some View {
         Button(action: onToggle) {
             Image(systemName: "wand.and.stars")
-                .font(.system(size: 13, weight: .regular))
+                .font(.system(size: iconSize, weight: .medium))
                 .foregroundStyle(Color(red: 0.38, green: 0.38, blue: 0.38))
-                .frame(width: 30, height: 30)
+                .frame(width: controlSize, height: controlSize)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill(Color(red: 0.96, green: 0.96, blue: 0.96))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
                         )
                 )
@@ -38,14 +48,15 @@ struct TimelapseWandButton: View {
         #endif
         .background {
             Color.clear
-                .frame(width: 30, height: 30)
+                .frame(width: controlSize, height: controlSize)
                 .obsidianTooltipBelow(
                     tooltipText,
                     isVisible: isHovered,
-                    gap: 34,
+                    gap: controlSize + 4,
                     anchor: tooltipAnchor
                 )
         }
+        .accessibilityLabel(tooltipText)
         .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 }

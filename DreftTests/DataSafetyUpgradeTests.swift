@@ -230,7 +230,9 @@ final class DataSafetyUpgradeTests: XCTestCase {
             transform: CanvasViewTransform()
         )
         let data = try CanvasDocumentFormat.encode(snapshot)
-        XCTAssertTrue(String(data: data, encoding: .utf8)?.contains("\"version\" : 1") == true)
+
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        XCTAssertEqual(json?["version"] as? Int, CanvasDocumentFormat.currentVersion)
 
         guard case .success(let decoded) = CanvasDocumentFormat.read(from: data) else {
             return XCTFail("Expected encoded canvas to decode")
@@ -279,6 +281,67 @@ final class DataSafetyUpgradeTests: XCTestCase {
 
         let readBack = VaultFilesystem.readCanvas(at: vaultURL.appendingPathComponent("test.canvas"))
         XCTAssertEqual(readBack?.cards.count, 0)
+    }
+
+    // MARK: - Tier 2 trust
+
+    func testShippedSidebarPanelsExcludeStubPanels() {
+        XCTAssertTrue(SidebarPanel.shippedPanels.contains(.files))
+        XCTAssertTrue(SidebarPanel.shippedPanels.contains(.search))
+        XCTAssertTrue(SidebarPanel.shippedPanels.contains(.tags))
+        XCTAssertTrue(SidebarPanel.shippedPanels.contains(.bookmarks))
+        XCTAssertFalse(SidebarPanel.shippedPanels.contains(.allProperties))
+        XCTAssertEqual(SidebarPanel.normalized(.allProperties), .files)
+    }
+
+    func testNoteTagParserFindsInlineAndFrontmatterTags() {
+        let content = """
+        ---
+        tags: project, area/work
+        ---
+
+        # Welcome
+
+        This note is #launch ready.
+        """
+        let tags = NoteTagParser.tags(in: content)
+        XCTAssertTrue(tags.contains("project"))
+        XCTAssertTrue(tags.contains("area/work"))
+        XCTAssertTrue(tags.contains("launch"))
+    }
+
+    func testVaultTagIndexGroupsFilesByTag() {
+        let files = [
+            WorkspaceFileEntry(
+                name: "A",
+                kind: .note,
+                noteContent: "#alpha #shared",
+                relativePath: "A.md"
+            ),
+            WorkspaceFileEntry(
+                name: "B",
+                kind: .note,
+                noteContent: "#beta #shared",
+                relativePath: "B.md"
+            ),
+        ]
+        let records = VaultTagIndex.records(from: files)
+        XCTAssertEqual(records.first(where: { $0.tag == "shared" })?.count, 2)
+        XCTAssertEqual(VaultTagIndex.files(withTag: "alpha", in: files).count, 1)
+    }
+
+    func testWelcomeNoteDoesNotMentionImporter() {
+        XCTAssertFalse(VaultFilesystem.welcomeNoteContent.localizedCaseInsensitiveContains("importer"))
+        XCTAssertTrue(VaultFilesystem.welcomeNoteContent.localizedCaseInsensitiveContains("wikilinks"))
+    }
+
+    func testVaultAccessibilityIssueForMissingExternalVault() {
+        let vault = WorkspaceVault(
+            name: "Missing",
+            path: tempRoot.appendingPathComponent("DoesNotExist", isDirectory: true).path,
+            securityScopedBookmark: nil
+        )
+        XCTAssertNotNil(VaultSecurityAccess.accessibilityIssue(for: vault))
     }
 
     // MARK: - Helpers

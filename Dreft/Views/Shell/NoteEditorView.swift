@@ -238,6 +238,8 @@ struct NoteEditorView: View {
 
     private var noteStatusBar: some View {
         HStack(spacing: 14) {
+            saveStatusLabel
+
             Spacer()
 
             Text("\(workspace.backlinkCount(for: fileID)) backlinks")
@@ -259,6 +261,20 @@ struct NoteEditorView: View {
     private var statusDivider: some View {
         Text("•")
             .foregroundStyle(AppColors.textMuted.opacity(0.55))
+    }
+
+    @ViewBuilder
+    private var saveStatusLabel: some View {
+        switch workspace.saveStatus {
+        case .idle:
+            EmptyView()
+        case .saving:
+            Text("Saving…")
+                .foregroundStyle(AppColors.textMuted)
+        case .saved:
+            Text("Saved")
+                .foregroundStyle(AppColors.textSecondary)
+        }
     }
 
     private func loadDraftIfNeeded() {

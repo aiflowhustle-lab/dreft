@@ -28,6 +28,9 @@
 		SM000019 /* CanvasMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100019 /* CanvasMath.swift */; };
 		SM000020 /* CanvasLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100020 /* CanvasLayout.swift */; };
 		SM000090 /* CanvasPencilInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100090 /* CanvasPencilInteraction.swift */; };
+		SM000091 /* VaultFolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100091 /* VaultFolderPicker.swift */; };
+		SM000094 /* CanvasCardSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100094 /* CanvasCardSurface.swift */; };
+		SM000095 /* NoteTagParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100095 /* NoteTagParser.swift */; };
 		SM000021 /* CanvasEdgesScreenOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100021 /* CanvasEdgesScreenOverlay.swift */; };
 		SM000022 /* WorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100022 /* WorkspaceStore.swift */; };
 		SM000023 /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100023 /* NoteEditorView.swift */; };
@@ -76,7 +79,7 @@
 		SM000067 /* CanvasIPadRightToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100066 /* CanvasIPadRightToolbar.swift */; };
 		SM000068 /* CanvasIPadBottomToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100067 /* CanvasIPadBottomToolbar.swift */; };
 		SM000069 /* IPadSidebarOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100068 /* IPadSidebarOverlay.swift */; };
-		SM000070 /* IOSShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100069 /* IOSShareSheet.swift */; };
+		SM000070 /* IOSFileExportPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100069 /* IOSFileExportPicker.swift */; };
 		SM000071 /* CanvasEdgeFloatingToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100070 /* CanvasEdgeFloatingToolbar.swift */; };
 		SM000072 /* CanvasEdgeLabelLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100071 /* CanvasEdgeLabelLayer.swift */; };
 		SM000073 /* CanvasEdgeHitOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100072 /* CanvasEdgeHitOverlay.swift */; };
@@ -125,6 +128,9 @@
 		SM100019 /* CanvasMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasMath.swift; sourceTree = "<group>"; };
 		SM100020 /* CanvasLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasLayout.swift; sourceTree = "<group>"; };
 		SM100090 /* CanvasPencilInteraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPencilInteraction.swift; sourceTree = "<group>"; };
+		SM100091 /* VaultFolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultFolderPicker.swift; sourceTree = "<group>"; };
+		SM100094 /* CanvasCardSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardSurface.swift; sourceTree = "<group>"; };
+		SM100095 /* NoteTagParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Helpers/NoteTagParser.swift; sourceTree = SOURCE_ROOT; };
 		SM100021 /* CanvasEdgesScreenOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasEdgesScreenOverlay.swift; sourceTree = "<group>"; };
 		SM100022 /* WorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStore.swift; sourceTree = "<group>"; };
 		SM100023 /* NoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorView.swift; sourceTree = "<group>"; };
@@ -173,7 +179,7 @@
 		SM100066 /* CanvasIPadRightToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasIPadRightToolbar.swift; sourceTree = "<group>"; };
 		SM100067 /* CanvasIPadBottomToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasIPadBottomToolbar.swift; sourceTree = "<group>"; };
 		SM100068 /* IPadSidebarOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPadSidebarOverlay.swift; sourceTree = "<group>"; };
-		SM100069 /* IOSShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSShareSheet.swift; sourceTree = "<group>"; };
+		SM100069 /* IOSFileExportPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSFileExportPicker.swift; sourceTree = "<group>"; };
 		SM100070 /* CanvasEdgeFloatingToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasEdgeFloatingToolbar.swift; sourceTree = "<group>"; };
 		SM100071 /* CanvasEdgeLabelLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasEdgeLabelLayer.swift; sourceTree = "<group>"; };
 		SM100072 /* CanvasEdgeHitOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasEdgeHitOverlay.swift; sourceTree = "<group>"; };
@@ -294,6 +300,7 @@
 			children = (
 				SM100006 /* CanvasEdgesView.swift */,
 				SM100007 /* CanvasCardView.swift */,
+				SM100094 /* CanvasCardSurface.swift */,
 				SM100008 /* InfiniteCanvasView.swift */,
 				SM100009 /* VaultSearchSheet.swift */,
 				SM100016 /* DotGridBackground.swift */,
@@ -354,7 +361,9 @@
 				SM100019 /* CanvasMath.swift */,
 				SM100020 /* CanvasLayout.swift */,
 				SM100090 /* CanvasPencilInteraction.swift */,
+				SM100091 /* VaultFolderPicker.swift */,
 				SM100029 /* WikilinkParser.swift */,
+				SM100095 /* NoteTagParser.swift */,
 				SM100054 /* WikilinkEditorSupport.swift */,
 				SM100031 /* AdvancedColorPickerPopover.swift */,
 				SM100032 /* GraphLinkIndex.swift */,
@@ -374,7 +383,7 @@
 				SM100079 /* GraphTimelapse.swift */,
 				SM100080 /* ObsidianTooltip.swift */,
 				SM100082 /* CanvasTimelapse.swift */,
-				SM100069 /* IOSShareSheet.swift */,
+				SM100069 /* IOSFileExportPicker.swift */,
 			);
 			path = Helpers;
 			sourceTree = "<group>";
@@ -498,6 +507,9 @@
 				SM000019 /* CanvasMath.swift in Sources */,
 				SM000020 /* CanvasLayout.swift in Sources */,
 				SM000090 /* CanvasPencilInteraction.swift in Sources */,
+				SM000091 /* VaultFolderPicker.swift in Sources */,
+				SM000094 /* CanvasCardSurface.swift in Sources */,
+				SM000095 /* NoteTagParser.swift in Sources */,
 				SM000021 /* CanvasEdgesScreenOverlay.swift in Sources */,
 				SM000022 /* WorkspaceStore.swift in Sources */,
 				SM000023 /* NoteEditorView.swift in Sources */,
@@ -544,7 +556,7 @@
 				SM000067 /* CanvasIPadRightToolbar.swift in Sources */,
 				SM000068 /* CanvasIPadBottomToolbar.swift in Sources */,
 				SM000069 /* IPadSidebarOverlay.swift in Sources */,
-				SM000070 /* IOSShareSheet.swift in Sources */,
+				SM000070 /* IOSFileExportPicker.swift in Sources */,
 				SM000071 /* CanvasEdgeFloatingToolbar.swift in Sources */,
 				SM000072 /* CanvasEdgeLabelLayer.swift in Sources */,
 				SM000073 /* CanvasEdgeHitOverlay.swift in Sources */,

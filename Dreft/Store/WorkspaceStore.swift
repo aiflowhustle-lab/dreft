@@ -25,6 +25,12 @@ struct ExternalVaultSync {
     var removedCanvasIDs: Set<String>
 }
 
+enum VaultSaveStatus: Equatable {
+    case idle
+    case saving
+    case saved
+}
+
 @Observable
 final class WorkspaceStore {
     var tabs: [WorkspaceTab] = []
@@ -43,6 +49,7 @@ final class WorkspaceStore {
     var isHelpOpen = false
     var sortOrder: SidebarSortOrder = .nameAscending
     var vaultAlert: VaultAlert?
+    var saveStatus: VaultSaveStatus = .idle
     /// Bumped when the cached wikilink graph changes — drives graph link refresh.
     private(set) var graphLinksVersion = 0
 
@@ -97,6 +104,19 @@ final class WorkspaceStore {
         files.filter { $0.kind == .note || $0.kind == .canvas }.count
     }
 
+    var tagRecords: [VaultTagRecord] {
+        VaultTagIndex.records(from: files)
+    }
+
+    func tags(for fileID: String) -> [String] {
+        guard let file = files.first(where: { $0.id == fileID }) else { return [] }
+        return VaultTagIndex.tags(for: file)
+    }
+
+    func files(containingTag tag: String, matchCase: Bool = false) -> [WorkspaceFileEntry] {
+        VaultTagIndex.files(withTag: tag, in: files, matchCase: matchCase)
+    }
+
     func graphNeighborhood(around fileID: String, depth: Int) -> Set<String> {
         graphLinkIndex.neighborhood(around: fileID, depth: depth)
     }
@@ -125,6 +145,50 @@ final class WorkspaceStore {
 
     func clearVaultAlert() {
         vaultAlert = nil
+    }
+
+    func vaultAccessibilityIssue(for vault: WorkspaceVault) -> String? {
+        VaultSecurityAccess.accessibilityIssue(for: vault)
+    }
+
+    func checkActiveVaultAccessibility() {
+        guard let vault = activeVault,
+              let issue = vaultAccessibilityIssue(for: vault) else { return }
+        reportVaultError(
+            title: "Can't access “\(vault.name)”",
+            message: """
+            \(issue)
+
+            Open Manage vaults and choose Reconnect folder to pick the vault folder again.
+            """
+        )
+    }
+
+    func reconnectVault(_ id: String, at url: URL, bookmarkData: Data? = nil) {
+        guard vaults.contains(where: { $0.id == id }) else { return }
+        if let reason = VaultPathPolicy.unsuitableVaultMessage(for: url) {
+            reportVaultError(title: "Can't reconnect this folder as a vault", message: reason)
+            return
+        }
+
+        let standardized = url.standardizedFileURL
+        _ = standardized.startAccessingSecurityScopedResource()
+        let bookmark = bookmarkData ?? VaultSecurityAccess.createBookmark(for: standardized)
+
+        guard let index = vaults.firstIndex(where: { $0.id == id }) else { return }
+        vaults[index].path = standardized.path
+        vaults[index].name = standardized.lastPathComponent
+        vaults[index].securityScopedBookmark = bookmark
+        VaultSecurityAccess.beginAccess(vaultID: id, url: standardized, bookmark: bookmark)
+
+        if activeVaultID == id {
+            loadVaultFromDisk(vaults[index])
+        }
+        onWorkspaceStateDirty?()
+    }
+
+    func markSaveStatus(_ status: VaultSaveStatus) {
+        saveStatus = status
     }
 
     func bootstrapDefaultVaultIfNeeded() {
@@ -547,10 +611,16 @@ final class WorkspaceStore {
 
     // MARK: - File CRUD
 
-    func createNote(inFolder folderID: String? = nil, named requestedName: String? = nil, replacingTabID: String? = nil) {
+    @discardableResult
+    func createNote(
+        inFolder folderID: String? = nil,
+        named requestedName: String? = nil,
+        replacingTabID: String? = nil,
+        autoNavigate: Bool = true
+    ) -> WorkspaceFileEntry? {
         guard let vaultURL = activeVaultURL else {
             reportVaultError(title: "No vault available", message: VaultErrorMessages.noActiveVault)
-            return
+            return nil
         }
         let name: String
         if let requestedName {
@@ -566,7 +636,7 @@ final class WorkspaceStore {
             try VaultFilesystem.createNote(relativePath: relativePath, vaultURL: vaultURL)
         } catch {
             reportVaultError(title: "Couldn't create note", message: error.localizedDescription)
-            return
+            return nil
         }
         let entry = WorkspaceFileEntry(
             id: relativePath,
@@ -576,13 +646,17 @@ final class WorkspaceStore {
             relativePath: relativePath
         )
         insertFile(entry, under: folderID)
-        openFileFromQuickSwitcher(entry, replacingTabID: replacingTabID)
+        if autoNavigate {
+            openFileFromQuickSwitcher(entry, replacingTabID: replacingTabID ?? activeTabID)
+        }
+        return entry
     }
 
-    func createCanvas(inFolder folderID: String? = nil) {
+    @discardableResult
+    func createCanvas(inFolder folderID: String? = nil, autoNavigate: Bool = true) -> WorkspaceFileEntry? {
         guard let vaultURL = activeVaultURL else {
             reportVaultError(title: "No vault available", message: VaultErrorMessages.noActiveVault)
-            return
+            return nil
         }
         let name = nextUntitledName(prefix: "Untitled canvas", kind: .canvas)
         let relativePath = VaultFilesystem.uniqueRelativePath(
@@ -592,7 +666,7 @@ final class WorkspaceStore {
             try VaultFilesystem.createCanvas(relativePath: relativePath, vaultURL: vaultURL)
         } catch {
             reportVaultError(title: "Couldn't create canvas", message: error.localizedDescription)
-            return
+            return nil
         }
         let entry = WorkspaceFileEntry(
             id: relativePath,
@@ -602,7 +676,10 @@ final class WorkspaceStore {
             relativePath: relativePath
         )
         insertFile(entry, under: folderID)
-        openTab(for: entry)
+        if autoNavigate {
+            navigateToFile(entry)
+        }
+        return entry
     }
 
     func createFolder(inFolder folderID: String? = nil) {
@@ -645,7 +722,7 @@ final class WorkspaceStore {
         selectedFileID = id
         switch file.kind {
         case .note, .canvas:
-            openTab(for: file)
+            navigateToFile(file)
         case .folder:
             toggleFolderExpanded(id)
         case .image:
@@ -821,13 +898,6 @@ final class WorkspaceStore {
         )
         tabs.insert(tab, at: min(insertIndex, tabs.count))
         activeTabID = tab.id
-    }
-
-    func reportNewWindowUnsupported() {
-        reportVaultError(
-            title: "New window",
-            message: "Opening files in a separate window isn't supported yet. Use a new tab instead."
-        )
     }
 
     private func rekeyBookmarkFileID(from oldFileID: String, to newFileID: String) {
@@ -1071,15 +1141,44 @@ final class WorkspaceStore {
             return
         }
         let tab = WorkspaceTab(id: "t-graph", title: "Graph view", kind: .graph, fileID: nil)
+        if let activeIndex = tabs.firstIndex(where: { $0.id == activeTabID }) {
+            tabs[activeIndex] = tab
+        } else {
+            tabs.append(tab)
+        }
+        activeTabID = tab.id
+    }
+
+    /// Obsidian-style navigation: reuse the active tab instead of opening a new one.
+    func navigateToFile(_ file: WorkspaceFileEntry) {
+        openFileFromQuickSwitcher(file, replacingTabID: activeTabID)
+    }
+
+    /// Explicitly open a file in a new tab (sidebar context menu, etc.).
+    func openTab(for file: WorkspaceFileEntry) {
+        selectedFileID = file.id
+
+        if let existing = tabs.first(where: { $0.fileID == file.id }) {
+            activeTabID = existing.id
+            return
+        }
+
+        let tabKind: WorkspaceTabKind = switch file.kind {
+        case .canvas: .canvas
+        case .note: .note
+        default: .note
+        }
+        let tab = WorkspaceTab(
+            id: "t" + UUID().uuidString.prefix(8).lowercased(),
+            title: file.name,
+            kind: tabKind,
+            fileID: file.id
+        )
         tabs.append(tab)
         activeTabID = tab.id
     }
 
-    func openTab(for file: WorkspaceFileEntry) {
-        openFileFromQuickSwitcher(file, replacingTabID: nil)
-    }
-
-    /// Opens a vault file, optionally replacing the current placeholder tab (e.g. "New tab").
+    /// Opens a vault file, optionally replacing a specific tab (e.g. "New tab" placeholder).
     func openFileFromQuickSwitcher(_ file: WorkspaceFileEntry, replacingTabID: String?) {
         selectedFileID = file.id
 
@@ -1105,6 +1204,8 @@ final class WorkspaceStore {
 
         if let replacingTabID, let index = tabs.firstIndex(where: { $0.id == replacingTabID }) {
             tabs[index] = tab
+        } else if let activeIndex = tabs.firstIndex(where: { $0.id == activeTabID }) {
+            tabs[activeIndex] = tab
         } else {
             tabs.append(tab)
         }
@@ -1132,6 +1233,18 @@ final class WorkspaceStore {
             activeTabID = next[0].id
             selectedFileID = next[0].fileID
         }
+    }
+
+    func closeAllTabs() {
+        let id = "t" + UUID().uuidString.prefix(8).lowercased()
+        tabs = [WorkspaceTab(
+            id: id,
+            title: "New tab",
+            kind: .newTab,
+            fileID: nil
+        )]
+        activeTabID = id
+        selectedFileID = nil
     }
 
     func syncTabTitle(fileID: String, title: String) {

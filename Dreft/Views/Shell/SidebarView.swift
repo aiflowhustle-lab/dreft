@@ -10,6 +10,13 @@ enum SidebarPanel: String, CaseIterable {
     case allProperties
     case bookmarks
 
+    /// Panels exposed in the sidebar UI.
+    static let shippedPanels: [SidebarPanel] = [.files, .search, .tags, .bookmarks]
+
+    static func normalized(_ panel: SidebarPanel) -> SidebarPanel {
+        shippedPanels.contains(panel) ? panel : .files
+    }
+
     var displayName: String {
         switch self {
         case .files: "Files"
@@ -65,6 +72,8 @@ private struct PanelSwitcherButton: View {
         }
         #if os(iOS)
         .help(label)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
         #endif
     }
 }
@@ -81,6 +90,9 @@ struct SidebarPanelSwitcherBar: View {
                 }
                 PanelSwitcherButton(systemName: "magnifyingglass", label: "Search", isActive: activePanel == .search) {
                     activePanel = .search
+                }
+                PanelSwitcherButton(systemName: "tag", label: "Tags", isActive: activePanel == .tags) {
+                    activePanel = .tags
                 }
                 PanelSwitcherButton(systemName: "bookmark", label: "Bookmarks", isActive: activePanel == .bookmarks) {
                     activePanel = .bookmarks
@@ -387,6 +399,7 @@ private struct SidebarFileRowView: View {
     @Bindable var workspace: WorkspaceStore
     let row: SidebarFileRow
     @Binding var dropTarget: SidebarDropTarget
+    var onOpenDocument: ((WorkspaceFileEntry) -> Void)? = nil
 
     @State private var renameDraft = ""
     @FocusState private var renameFocused: Bool
@@ -447,6 +460,8 @@ private struct SidebarFileRowView: View {
             if file.kind == .folder {
                 workspace.toggleFolderExpanded(file.id)
                 workspace.selectedFileID = file.id
+            } else if let onOpenDocument {
+                onOpenDocument(file)
             } else {
                 workspace.selectFile(file.id)
             }
@@ -664,6 +679,7 @@ struct SidebarView: View {
     var activePanel: SidebarPanel = .files
     /// Floating overlay style (iPad): transparent background, no built-in footer.
     var floatingStyle = false
+    var onOpenDocument: ((WorkspaceFileEntry) -> Void)? = nil
     @State private var dropTarget: SidebarDropTarget = .none
     @State private var searchQuery = ""
     @State private var searchMatchCase = false
@@ -677,7 +693,7 @@ struct SidebarView: View {
             case .search:
                 searchPanel
             case .tags:
-                emptyStatePanel("No tags found")
+                tagsPanel
             case .allProperties:
                 emptyStatePanel("No properties found")
             case .bookmarks:
@@ -774,7 +790,8 @@ struct SidebarView: View {
                         SidebarFileRowView(
                             workspace: workspace,
                             row: row,
-                            dropTarget: $dropTarget
+                            dropTarget: $dropTarget,
+                            onOpenDocument: onOpenDocument
                         )
                     }
                 }
@@ -848,13 +865,6 @@ struct SidebarView: View {
                         )
                 )
 
-                Button {} label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 14))
-                        .foregroundStyle(AppColors.textSecondary)
-                }
-                .buttonStyle(.plain)
-                .help("Search settings")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -870,7 +880,11 @@ struct SidebarView: View {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(searchResults) { file in
                             Button {
-                                workspace.selectFile(file.id)
+                                if let onOpenDocument {
+                                    onOpenDocument(file)
+                                } else {
+                                    workspace.selectFile(file.id)
+                                }
                             } label: {
                                 HStack {
                                     Text(file.name)
@@ -918,21 +932,38 @@ struct SidebarView: View {
 
         var term = raw
         var pathMode = false
+        var tagMode = false
         if raw.lowercased().hasPrefix("file:") {
             term = String(raw.dropFirst(5)).trimmingCharacters(in: .whitespaces)
         } else if raw.lowercased().hasPrefix("path:") {
             term = String(raw.dropFirst(5)).trimmingCharacters(in: .whitespaces)
             pathMode = true
+        } else if raw.lowercased().hasPrefix("tag:") {
+            term = String(raw.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            tagMode = true
         }
         guard !term.isEmpty else { return [] }
 
+        if tagMode {
+            return workspace.files(containingTag: term, matchCase: searchMatchCase)
+        }
+
         return workspace.files.filter { file in
             guard file.kind != .folder else { return false }
-            let target = pathMode ? workspace.path(for: file.id) : file.name
-            if searchMatchCase {
-                return target.contains(term)
+            if pathMode {
+                let target = workspace.path(for: file.id)
+                return searchMatchCase ? target.contains(term) : target.localizedCaseInsensitiveContains(term)
             }
-            return target.localizedCaseInsensitiveContains(term)
+
+            let nameMatches = searchMatchCase
+                ? file.name.contains(term)
+                : file.name.localizedCaseInsensitiveContains(term)
+            if nameMatches { return true }
+
+            guard file.kind == .note else { return false }
+            return searchMatchCase
+                ? file.noteContent.contains(term)
+                : file.noteContent.localizedCaseInsensitiveContains(term)
         }
     }
 
@@ -953,10 +984,8 @@ struct SidebarView: View {
 
             searchOptionRow(prefix: "path:", detail: "match path of the file")
             searchOptionRow(prefix: "file:", detail: "match file name")
-            searchOptionRow(prefix: "tag:", detail: "search for tags")
-            searchOptionRow(prefix: "line:", detail: "search keywords on same line")
-            searchOptionRow(prefix: "section:", detail: "search keywords under same heading")
-            searchOptionRow(prefix: "[property]", detail: "match property")
+            searchOptionRow(prefix: "tag:", detail: "match notes with tag")
+            searchHintRow("Plain text searches file names and note contents.")
 
             Spacer().frame(height: 8)
         }
@@ -990,6 +1019,82 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func searchHintRow(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12))
+            .foregroundStyle(AppColors.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+    }
+
+    // MARK: Tags panel
+
+    private var tagsPanel: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Tags")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+                Spacer()
+                Text("\(workspace.tagRecords.count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AppColors.textMuted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+
+            if workspace.tagRecords.isEmpty {
+                Spacer()
+                VStack(spacing: 6) {
+                    Text("No tags found")
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppColors.textMuted)
+                    Text("Add #tags in notes or a tags: field in frontmatter.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AppColors.textMuted)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                }
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(workspace.tagRecords) { record in
+                            Button {
+                                openTagSearch(record.tag)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "number")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(AppColors.selectionStroke)
+                                    Text(record.tag)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(AppColors.textPrimary)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("\(record.count)")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(AppColors.textMuted)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func openTagSearch(_ tag: String) {
+        searchQuery = "tag:\(tag)"
+        sidebarPanel = .search
+        searchFieldFocused = true
     }
 
     // MARK: Bookmarks panel
@@ -1026,7 +1131,11 @@ struct SidebarView: View {
                     VStack(spacing: 0) {
                         ForEach(workspace.bookmarkEntries) { entry in
                             Button {
-                                workspace.selectFile(entry.file.id)
+                                if let onOpenDocument {
+                                    onOpenDocument(entry.file)
+                                } else {
+                                    workspace.selectFile(entry.file.id)
+                                }
                             } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: "bookmark.fill")
@@ -1064,9 +1173,6 @@ struct SidebarView: View {
         }
         Button("Open to the right") {
             workspace.openTabToRight(for: file)
-        }
-        Button("Open in new window") {
-            workspace.reportNewWindowUnsupported()
         }
 
         Divider()

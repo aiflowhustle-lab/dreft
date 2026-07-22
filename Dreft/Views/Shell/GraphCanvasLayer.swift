@@ -296,16 +296,25 @@ struct GraphNodeLabelsLayer: View {
 }
 
 enum GraphCanvasHitTesting {
+    #if os(iOS)
+    /// Minimum on-screen touch target (points) for graph node taps.
+    private static let minTouchTargetScreen: CGFloat = 44
+    #else
+    private static let minTouchTargetScreen: CGFloat = 20
+    #endif
+
     static func nodeID(
         at worldPoint: CGPoint,
         in nodes: [GraphCanvasDrawNode],
+        zoom: CGFloat = 1,
         dotOnly: Bool = false
     ) -> String? {
+        let z = max(zoom, 0.01)
         for node in nodes.reversed() {
             let layout = nodeLayout(for: node.position)
             let hitRect: CGRect
             if dotOnly {
-                let pad: CGFloat = 14
+                let pad = max(14, minTouchTargetScreen / (2 * z))
                 hitRect = CGRect(
                     x: layout.dotCenter.x - pad,
                     y: layout.dotCenter.y - pad,
@@ -313,12 +322,13 @@ enum GraphCanvasHitTesting {
                     height: pad * 2
                 )
             } else {
+                let dotPad = max(16, minTouchTargetScreen / (2 * z))
                 hitRect = layout.labelRect
                     .union(CGRect(
-                        x: layout.dotCenter.x - 16,
-                        y: layout.dotCenter.y - 16,
-                        width: 32,
-                        height: 32
+                        x: layout.dotCenter.x - dotPad,
+                        y: layout.dotCenter.y - dotPad,
+                        width: dotPad * 2,
+                        height: dotPad * 2
                     ))
             }
             if hitRect.contains(worldPoint) {

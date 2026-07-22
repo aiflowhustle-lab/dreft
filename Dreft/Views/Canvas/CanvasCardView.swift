@@ -34,6 +34,8 @@ struct CanvasCardView: View {
     var beginTitleRenameToken: Int = 0
     var isEditing: Bool = false
     var isColorPickerOpen: Bool = false
+    var imageCacheRevision: Int = 0
+    var onImageLoaded: () -> Void = {}
     var onRequestEdit: () -> Void = {}
 
     @FocusState private var isTitleFocused: Bool
@@ -77,33 +79,6 @@ struct CanvasCardView: View {
     private var cardColor: Color? {
         guard let hex = card.colorHex else { return nil }
         return Color(hexString: hex)
-    }
-
-    private var strokeColor: Color {
-        if showsSelectionBorder { return cardColor ?? AppColors.selectionStroke }
-        if isConnectingLine && isLinkTarget { return AppColors.selectionStroke.opacity(0.55) }
-        if let cardColor { return cardColor.opacity(0.8) }
-        return isImage ? AppColors.imageCardBorder : AppColors.noteCardBorder
-    }
-
-    private var strokeWidth: CGFloat {
-        if showsSelectionBorder { return 3 }
-        return cardColor == nil ? 1 : 2
-    }
-
-    private var cardCornerRadius: CGFloat {
-        isImage ? 4 : 8
-    }
-
-    /// Transparent canvas gap between image and border — always visible on image cards.
-    /// In world units so it scales proportionally with the border stroke as you zoom.
-    private var imageContentInset: CGFloat {
-        guard isImage else { return 0 }
-        return 4
-    }
-
-    private var fillColor: Color {
-        isImage ? AppColors.cardBackground : AppColors.noteCardBackground
     }
 
     /// Toolbar layout height in screen points (before counter-scale).
@@ -159,6 +134,7 @@ struct CanvasCardView: View {
                     .offset(y: isSelected ? imageTitleOffsetY : (-18 * toolbarWorldScale))
                     .onChange(of: beginTitleRenameToken) { _, _ in
                         guard beginTitleRenameToken > 0 else { return }
+                        cancelActiveDrag()
                         beginTitleRename()
                     }
                     .if(!isResizing && !isRenamingTitle) { view in
@@ -232,6 +208,7 @@ struct CanvasCardView: View {
     }
 
     private func beginTitleRename() {
+        cancelActiveDrag()
         titleDraft = imageDisplayTitle
         isRenamingTitle = true
     }
@@ -242,96 +219,30 @@ struct CanvasCardView: View {
         onUpdateTitle(titleDraft)
     }
 
+    /// DragGesture(minimumDistance: 0) may not receive onEnded when rename steals focus — reset parent drag state.
+    private func cancelActiveDrag() {
+        guard dragOrigin != nil || isDragging || isPressingCard else { return }
+        dragOrigin = nil
+        isDragging = false
+        isPressingCard = false
+        onMoveEnd()
+    }
+
     private var cardFrame: some View {
-        styledCardBody
-    }
-
-    private var styledCardBody: some View {
-        Group {
-            if isImage {
-                imageStyledBody
-            } else {
-                noteStyledBody
-            }
-        }
-    }
-
-    private var imageStyledBody: some View {
-        let inset = imageContentInset
-        let innerW = max(1, frameWidth - inset * 2)
-        let innerH = max(1, frameHeight - inset * 2)
-        return ZStack {
-            Color.clear
-            cardBody
-                .frame(width: innerW, height: innerH)
-                .clipShape(RoundedRectangle(cornerRadius: max(2, cardCornerRadius - 1)))
-        }
-        .frame(width: frameWidth, height: frameHeight)
-        .overlay(
-            RoundedRectangle(cornerRadius: cardCornerRadius)
-                .stroke(strokeColor, lineWidth: strokeWidth)
+        CanvasCardSurface(
+            card: card,
+            frameWidth: frameWidth,
+            frameHeight: frameHeight,
+            zoom: zoom,
+            vaultURL: vaultURL,
+            vaultFiles: vaultFiles,
+            isSelected: isSelected,
+            isLinkTarget: isLinkTarget,
+            isConnectingLine: isConnectingLine,
+            isEditing: isEditing,
+            imageCacheRevision: imageCacheRevision,
+            onImageLoaded: onImageLoaded
         )
-    }
-
-    private var noteStyledBody: some View {
-        cardBody
-            .frame(width: frameWidth, height: frameHeight)
-            .background(
-                ZStack {
-                    fillColor
-                    if let cardColor { cardColor.opacity(0.08) }
-                }
-            )
-            .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: cardCornerRadius)
-                    .stroke(strokeColor, lineWidth: strokeWidth)
-            )
-    }
-
-    @ViewBuilder
-    private var cardBody: some View {
-        switch card.kind {
-        case .image:
-            if let cgImage = CanvasImageCache.shared.displayImage(
-                forCardID: card.id,
-                content: card.content,
-                vaultURL: vaultURL
-            ) {
-                CachedCardImage(cgImage: cgImage)
-            } else {
-                ZStack {
-                    Color.white.opacity(0.04)
-                    ProgressView().controlSize(.small)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        case .note, .text:
-            let displayMarkdown = CanvasCardContent.markdownBody(
-                for: card,
-                vaultURL: vaultURL,
-                vaultFiles: vaultFiles
-            )
-            Group {
-                if displayMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(" ")
-                        .font(.system(size: 13))
-                        .foregroundStyle(AppColors.textPrimary)
-                } else {
-                    Text(NotePreviewCache.canvasCardPreview(for: displayMarkdown))
-                        .font(.system(size: 13))
-                        .foregroundStyle(AppColors.textPrimary)
-                        .tint(AppColors.noteLink)
-                }
-            }
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, 8)
-            .padding(.bottom, 8)
-            .padding(.top, 8)
-            .allowsHitTesting(false)
-            .opacity(isEditing ? 0 : 1)
-        }
     }
 
     private var cardDragGesture: some Gesture {

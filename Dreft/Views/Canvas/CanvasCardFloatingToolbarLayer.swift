@@ -25,8 +25,7 @@ struct CanvasCardFloatingToolbarLayer: View {
     private var colorRowGap: CGFloat { 5 }
 
     private var toolbarWorldScale: CGFloat {
-        let clampedZoom = min(max(zoom, 0.45), 1.35)
-        return 1 / clampedZoom
+        CanvasFloatingToolbarChrome.counterScale(for: zoom)
     }
 
     /// World-space spacer so the visible gap stays `colorRowGap` screen points at any zoom.
@@ -57,7 +56,7 @@ struct CanvasCardFloatingToolbarLayer: View {
         showColorRow: Bool,
         worldToScreen: (CGPoint) -> CGPoint
     ) -> CGRect {
-        let toolbarWorldScale = 1 / min(max(zoom, 0.45), 1.35)
+        let toolbarWorldScale = CanvasFloatingToolbarChrome.counterScale(for: zoom)
         let colorExtra: CGFloat = showColorRow ? 45 : 0
         let slotHeight = (CGFloat(38 + 12) + colorExtra) * toolbarWorldScale
         let screenOrigin = worldToScreen(worldFrame.origin)
