@@ -483,6 +483,94 @@ enum VaultFilesystem {
         }
     }
 
+    /// Seeds a starter canvas for onboarding sample-world path.
+    @discardableResult
+    static func seedOnboardingSampleContent(
+        vaultURL: URL,
+        worldName: String,
+        creatorType: CreatorType
+    ) throws -> String {
+        let sanitized = worldName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+        let canvasFileName = sanitized.isEmpty ? "World Map.canvas" : "\(sanitized).canvas"
+        let relativePath = canvasFileName
+
+        let now = Date()
+        let cardA = CanvasCard(
+            id: UUID().uuidString,
+            kind: .note,
+            x: 120,
+            y: 100,
+            width: 220,
+            height: 150,
+            content: starterCardContent(for: creatorType, index: 0),
+            title: starterCardTitle(for: creatorType, index: 0),
+            createdAt: now.addingTimeInterval(-3600)
+        )
+        let cardB = CanvasCard(
+            id: UUID().uuidString,
+            kind: .note,
+            x: 420,
+            y: 180,
+            width: 220,
+            height: 150,
+            content: starterCardContent(for: creatorType, index: 1),
+            title: starterCardTitle(for: creatorType, index: 1),
+            createdAt: now.addingTimeInterval(-1800)
+        )
+        let edge = CanvasEdge(
+            fromID: cardA.id,
+            fromSide: .right,
+            toID: cardB.id,
+            toSide: .left,
+            createdAt: now.addingTimeInterval(-900)
+        )
+        let snapshot = CanvasDocumentSnapshot(
+            cards: [cardA, cardB],
+            edges: [edge],
+            transform: CanvasViewTransform(x: 0, y: 0, zoom: 1)
+        )
+        try writeCanvas(snapshot, relativePath: relativePath, vaultURL: vaultURL)
+        return relativePath
+    }
+
+    private static func starterCardTitle(for type: CreatorType, index: Int) -> String {
+        switch type {
+        case .story:
+            return index == 0 ? "Protagonist" : "Act II thread"
+        case .webtoon:
+            return index == 0 ? "Main cast" : "Episode 3"
+        case .campaign:
+            return index == 0 ? "Faction map" : "Session notes"
+        case .notes:
+            return index == 0 ? "Overview" : "Linked topic"
+        }
+    }
+
+    private static func starterCardContent(for type: CreatorType, index: Int) -> String {
+        switch (type, index) {
+        case (.story, 0):
+            return "Your lead character — motivations, secrets, and arc."
+        case (.story, 1):
+            return "A plot thread to resolve in the next chapter."
+        case (.webtoon, 0):
+            return "Cast relationships and visual references."
+        case (.webtoon, 1):
+            return "Scene beats for the next episode."
+        case (.campaign, 0):
+            return "Factions, alliances, and contested territory."
+        case (.campaign, 1):
+            return "What happened last session — hooks for next time."
+        case (.notes, 0):
+            return "Start here. Link ideas with [[wikilinks]]."
+        case (.notes, 1):
+            return "A connected note — see how lore weaves together."
+        default:
+            return ""
+        }
+    }
+
     static func createFolder(relativePath: String, vaultURL: URL) throws {
         let url = vaultURL.appendingPathComponent(relativePath)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

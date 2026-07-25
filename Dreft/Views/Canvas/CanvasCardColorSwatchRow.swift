@@ -14,11 +14,10 @@ struct CanvasCardColorSwatchRow: View {
         return Color(hexString: hex)
     }
 
-    private var toolbarWorldScale: CGFloat {
-        CanvasFloatingToolbarChrome.counterScale(for: zoom)
-    }
-
-    private var colorRowLayoutWidth: CGFloat { 280 }
+    /// Compact row — matches the card icon toolbar width, not a full panel.
+    private var colorRowLayoutWidth: CGFloat { 184 }
+    private var swatchSize: CGFloat { 14 }
+    private var swatchSlotWidth: CGFloat { 22 }
 
     private var isCustomPresetColor: Bool {
         guard let hex = activeColorHex, !hex.isEmpty else { return false }
@@ -26,26 +25,29 @@ struct CanvasCardColorSwatchRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 2) {
             ForEach(cardColors, id: \.name) { entry in
                 ColorSwatchButton(
                     hex: entry.hex,
                     name: entry.name,
+                    swatchSize: swatchSize,
+                    slotWidth: swatchSlotWidth,
                     isActive: (activeColorHex ?? "").uppercased() == entry.hex.uppercased(),
                     action: { onSetColor(entry.hex) }
                 )
-                .frame(maxWidth: .infinity)
             }
             customColorSwatch
-                .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 5)
         .frame(width: colorRowLayoutWidth)
-        .background(AppColors.canvasBackground)
+        .background(AppColors.canvasBackground.opacity(0.98))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.5), radius: 14, y: 4)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
+        )
+        .shadow(color: AppColors.floatingChromeShadow, radius: 10, y: 3)
     }
 
     private var customColorSwatch: some View {
@@ -59,20 +61,18 @@ struct CanvasCardColorSwatchRow: View {
                         center: .center
                     )
                 )
-                .frame(width: 18, height: 18)
+                .frame(width: swatchSize, height: swatchSize)
                 .overlay {
                     if activeColorHex != nil, !isCustomPresetColor {
                         Circle()
                             .stroke(AppColors.selectionStroke, lineWidth: 1.5)
-                            .padding(-3)
+                            .padding(-2)
                     }
                 }
         }
         .buttonStyle(.plain)
-        #if os(iOS)
-        .frame(maxWidth: .infinity, minHeight: CanvasPencilInteraction.colorSwatchHitSize)
+        .frame(width: swatchSlotWidth, height: swatchSize + 4)
         .contentShape(Rectangle())
-        #endif
         .help("Custom color")
         .popover(isPresented: $showCustomColorPicker, arrowEdge: .bottom) {
             AdvancedColorPickerPopover(
@@ -87,6 +87,8 @@ struct CanvasCardColorSwatchRow: View {
     private struct ColorSwatchButton: View {
         let hex: String
         let name: String
+        let swatchSize: CGFloat
+        let slotWidth: CGFloat
         let isActive: Bool
         let action: () -> Void
         @State private var hovered = false
@@ -99,23 +101,21 @@ struct CanvasCardColorSwatchRow: View {
             Button(action: action) {
                 Circle()
                     .fill(swatchColor)
-                    .frame(width: 18, height: 18)
+                    .frame(width: swatchSize, height: swatchSize)
                     .overlay(
                         Circle()
                             .stroke(
                                 swatchColor.opacity(isActive ? 1 : (hovered ? 0.5 : 0)),
                                 lineWidth: 1.5
                             )
-                            .padding(-3)
+                            .padding(-2)
                     )
                     .scaleEffect(hovered && !isActive ? 1.08 : 1)
                     .animation(.easeOut(duration: 0.12), value: hovered)
             }
             .buttonStyle(.plain)
-            #if os(iOS)
-            .frame(maxWidth: .infinity, minHeight: CanvasPencilInteraction.colorSwatchHitSize)
+            .frame(width: slotWidth, height: swatchSize + 4)
             .contentShape(Rectangle())
-            #endif
             .help(name)
             .onHover { hovered = $0 }
         }

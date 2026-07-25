@@ -28,6 +28,10 @@ enum MarkdownEditAction: String, CaseIterable {
     case horizontalRule
     case callout
 
+    case indent
+    case outdent
+    case tag
+
     var menuTitle: String {
         switch self {
         case .bold: return "Bold"
@@ -52,6 +56,9 @@ enum MarkdownEditAction: String, CaseIterable {
         case .codeBlock: return "Code block"
         case .horizontalRule: return "Horizontal rule"
         case .callout: return "Callout"
+        case .indent: return "Indent"
+        case .outdent: return "Outdent"
+        case .tag: return "Tag"
         }
     }
 }
@@ -91,6 +98,9 @@ enum MarkdownEditingSupport {
         case .codeBlock: return insertCodeBlock(in: text, range: selectedRange)
         case .horizontalRule: return insertHorizontalRule(in: text, range: selectedRange)
         case .callout: return insertCallout(in: text, range: selectedRange)
+        case .indent: return adjustIndent(in: text, range: selectedRange, delta: 2)
+        case .outdent: return adjustIndent(in: text, range: selectedRange, delta: -2)
+        case .tag: return insertPlainText("#", in: text, range: selectedRange)
         }
     }
 
@@ -299,6 +309,48 @@ enum MarkdownEditingSupport {
         let callout = "\n> [!note]\n> \n"
         let newText = ns.replacingCharacters(in: clamped, with: callout)
         return (newText, NSRange(location: clamped.location + callout.count - 1, length: 0))
+    }
+
+    private static func insertPlainText(
+        _ insertion: String,
+        in text: String,
+        range: NSRange
+    ) -> (text: String, selectedRange: NSRange) {
+        let ns = text as NSString
+        let clamped = clamp(range, in: ns.length)
+        let newText = ns.replacingCharacters(in: clamped, with: insertion)
+        return (newText, NSRange(location: clamped.location + insertion.count, length: 0))
+    }
+
+    private static func adjustIndent(
+        in text: String,
+        range: NSRange,
+        delta: Int
+    ) -> (text: String, selectedRange: NSRange) {
+        let ns = text as NSString
+        let clamped = clamp(range, in: ns.length)
+        let blockRange = ns.lineRange(for: clamped)
+        let block = ns.substring(with: blockRange)
+        let lines = block.components(separatedBy: "\n")
+        let adjusted = lines.map { line -> String in
+            guard !line.isEmpty else { return line }
+            if delta > 0 {
+                return String(repeating: " ", count: delta) + line
+            }
+            var remaining = -delta
+            var result = line
+            while remaining > 0, result.hasPrefix(" ") {
+                result.removeFirst()
+                remaining -= 1
+            }
+            while remaining > 0, result.hasPrefix("\t") {
+                result.removeFirst()
+                remaining -= 1
+            }
+            return result
+        }
+        let updated = adjusted.joined(separator: "\n")
+        return replace(blockRange, with: updated, in: text, selectLength: clamped.length)
     }
 
     private static func replace(

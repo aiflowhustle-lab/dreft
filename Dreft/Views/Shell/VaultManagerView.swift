@@ -281,6 +281,32 @@ struct VaultManagerView: View {
             AppearanceSettingsSection()
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
+
+            hairline
+
+            Button {
+                closeManager()
+                NotificationCenter.default.post(name: .dreftShowOnboardingPreview, object: nil)
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Preview onboarding")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                        Text("Walk through the first-run flow again.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(AppColors.textMuted)
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppColors.textMuted)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .background(
             RoundedRectangle(cornerRadius: 10)
@@ -609,6 +635,4 @@ struct VaultManagerView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
-}
-
 }

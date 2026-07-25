@@ -1,16 +1,12 @@
 import SwiftUI
 
-enum OnboardingStorage {
-    static let completedKey = "hasCompletedOnboarding"
-}
-
 /// Routes between first-run onboarding and the main workspace.
 struct AppRootView: View {
     @AppStorage(OnboardingStorage.completedKey) private var hasCompletedOnboarding = false
-    @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.dark.rawValue
+    @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.light.rawValue
 
     private var appearanceMode: AppearanceMode {
-        AppearanceMode(rawValue: appearanceModeRaw) ?? .dark
+        AppearanceMode(rawValue: appearanceModeRaw) ?? .light
     }
 
     private var shouldShowOnboarding: Bool {
@@ -24,16 +20,20 @@ struct AppRootView: View {
     var body: some View {
         Group {
             if shouldShowOnboarding {
-                OnboardingView {
-                    hasCompletedOnboarding = true
+                OnboardingPresentationContainer {
+                    OnboardingFlowView {
+                        hasCompletedOnboarding = true
+                    }
                 }
             } else {
                 WorkspaceShellView()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppColors.canvasBackground)
         .preferredColorScheme(appearanceMode.colorScheme)
         .onChange(of: appearanceModeRaw) { _, newValue in
-            let mode = AppearanceMode(rawValue: newValue) ?? .dark
+            let mode = AppearanceMode(rawValue: newValue) ?? .light
             AppColors.setTheme(mode.theme)
         }
         .onAppear {

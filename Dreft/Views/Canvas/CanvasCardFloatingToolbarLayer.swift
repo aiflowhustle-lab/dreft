@@ -20,7 +20,7 @@ struct CanvasCardFloatingToolbarLayer: View {
 
     private var toolbarLayoutHeight: CGFloat { 38 }
     private var toolbarGapAboveCard: CGFloat { 12 }
-    private var colorRowLayoutHeight: CGFloat { 40 }
+    private var colorRowLayoutHeight: CGFloat { 28 }
     /// Visible gap between the icon toolbar and the color palette row.
     private var colorRowGap: CGFloat { 5 }
 
@@ -80,7 +80,7 @@ struct CanvasCardFloatingToolbarLayer: View {
 
                             CanvasCardColorSwatchRow(
                                 activeColorHex: card.colorHex,
-                                frameWidth: 280,
+                                frameWidth: frameWidth,
                                 zoom: zoom,
                                 cardColors: cardColors,
                                 showCustomColorPicker: $showCustomColorPicker,

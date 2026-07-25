@@ -29,6 +29,7 @@ struct NoteBodyTextView: View {
     var editorBackground: Color = AppColors.canvasBackground
     /// Plain-text edits; `fromTextUndo` is true for NSTextView/UITextView ⌘Z steps.
     var onTextEdited: ((String, Bool) -> Void)?
+    var toolbarBridge: NoteFormattingToolbarBridge? = nil
 
     @State private var activeQuery: WikilinkActiveQuery?
 
@@ -64,7 +65,8 @@ struct NoteBodyTextView: View {
                 editorBackground: editorBackground,
                 onSelectionChange: refreshActiveQuery,
                 onSuggestKey: handleSuggestKey,
-                onTextEdited: onTextEdited
+                onTextEdited: onTextEdited,
+                toolbarBridge: toolbarBridge
             )
             .frame(maxWidth: embeddedInCanvas ? .infinity : nil, maxHeight: embeddedInCanvas ? .infinity : nil)
             .frame(minHeight: embeddedInCanvas ? 0 : minBodyHeight)
@@ -329,6 +331,7 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
     var onSelectionChange: () -> Void
     var onSuggestKey: (WikilinkSuggestKey) -> Bool
     var onTextEdited: ((String, Bool) -> Void)?
+    var toolbarBridge: NoteFormattingToolbarBridge? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -537,6 +540,61 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
 
 final class NoteEditingUITextView: UITextView {
     weak var editingDelegate: NoteEditingTextViewDelegate?
+    var toolbarBridge: NoteFormattingToolbarBridge?
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    func configureToolbarBridge(_ bridge: NoteFormattingToolbarBridge?) {
+        if toolbarBridge === bridge, bridge?.textView === self {
+            bridge?.attachInputAccessory(to: self)
+            return
+        }
+        toolbarBridge = bridge
+        bridge?.textView = self
+        bridge?.applyAction = { [weak self] action in
+            guard let self else { return }
+            (self.editingDelegate as? NoteEditingUITextViewDelegate)?
+                .noteEditingTextView(self, apply: action)
+        }
+        if let bridge {
+            bridge.attachInputAccessory(to: self)
+        } else {
+            inputAccessoryView = UIView(frame: .zero)
+            if isFirstResponder {
+                reloadInputViews()
+            }
+        }
+        bridge?.scheduleRefresh()
+    }
+
+    func refreshFormattingToolbar() {
+        toolbarBridge?.scheduleRefresh()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became {
+            toolbarBridge?.textView = self
+            toolbarBridge?.attachInputAccessory(to: self)
+            refreshFormattingToolbar()
+            reloadInputViews()
+        }
+        return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            refreshFormattingToolbar()
+        }
+        return resigned
+    }
 
     override func editMenu(for textRange: UITextRange, suggestedActions: [UIMenuElement]) -> UIMenu? {
         var actions = suggestedActions
@@ -565,6 +623,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     var onSelectionChange: () -> Void
     var onSuggestKey: (WikilinkSuggestKey) -> Bool
     var onTextEdited: ((String, Bool) -> Void)?
+    var toolbarBridge: NoteFormattingToolbarBridge?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -585,12 +644,14 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         textView.smartDashesType = .no
         textView.smartQuotesType = .no
         context.coordinator.attach(textView: textView)
+        textView.configureToolbarBridge(toolbarBridge)
         context.coordinator.applyContent(text, selectedRange: selectedRange, to: textView)
         return textView
     }
 
     func updateUIView(_ textView: NoteEditingUITextView, context: Context) {
         context.coordinator.parent = self
+        textView.configureToolbarBridge(toolbarBridge)
         context.coordinator.syncIfNeeded(text: text, selectedRange: selectedRange, in: textView)
         if let containerSize, embeddedInCanvas, containerSize.width > 1, containerSize.height > 1 {
             textView.bounds.size = containerSize
@@ -622,6 +683,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 editorBackground: parent.editorBackground
             )
             isApplyingProgrammaticChange = false
+            textView.refreshFormattingToolbar()
             Task { @MainActor in
                 parent.text = updates.text
                 parent.selectedRange = updates.selectedRange
@@ -657,6 +719,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 textView.selectedRange = clampedRange(selectedRange, in: content)
             }
             updateCaretRect(for: textView)
+            (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -665,6 +728,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             let newText = textView.text ?? ""
             let newRange = textView.selectedRange
             let fromTextUndo = textView.undoManager?.isUndoing == true || textView.undoManager?.isRedoing == true
+            (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
             Task { @MainActor in
                 parent.text = newText
                 parent.selectedRange = newRange
@@ -678,6 +742,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             guard !isApplyingProgrammaticChange else { return }
             let newRange = textView.selectedRange
             restyle(textView)
+            (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
             Task { @MainActor in
                 parent.selectedRange = newRange
                 updateCaretRect(for: textView)

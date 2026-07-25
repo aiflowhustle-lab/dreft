@@ -42,7 +42,11 @@ struct CanvasEdgeHitOverlay: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(macOS)
         .allowsHitTesting(true)
+        #else
+        .allowsHitTesting(false)
+        #endif
     }
 
     private func screenPath(for edge: CanvasEdge) -> Path? {

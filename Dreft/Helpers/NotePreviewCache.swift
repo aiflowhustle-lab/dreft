@@ -12,7 +12,7 @@ enum NotePreviewCache {
             return cached
         }
 
-        let rendered = NoteMarkdownRenderer.previewAttributedString(from: content)
+        let rendered = NoteMarkdownRenderer.canvasCardPreviewAttributedString(from: content)
         cache[content] = rendered
         order.append(content)
         if order.count > maxEntries, let oldest = order.first {

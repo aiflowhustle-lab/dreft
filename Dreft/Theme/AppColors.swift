@@ -7,13 +7,21 @@ import Observation
 final class AppThemeState {
     static let shared = AppThemeState()
     var theme: AppTheme = .dark
+    private(set) var revision = 0
+
+    func apply(_ theme: AppTheme) {
+        guard self.theme != theme else { return }
+        self.theme = theme
+        revision += 1
+        NotePreviewCache.invalidateAll()
+    }
 }
 
 enum AppColors {
     private static var theme: AppTheme { AppThemeState.shared.theme }
 
     static func setTheme(_ theme: AppTheme) {
-        AppThemeState.shared.theme = theme
+        AppThemeState.shared.apply(theme)
     }
 
     static var canvasBackground: Color { theme.canvasBackground }

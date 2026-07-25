@@ -2,6 +2,8 @@ import SwiftUI
 
 /// Shared border + body rendering for canvas cards (compact and interactive modes).
 struct CanvasCardSurface: View {
+    @State private var themeState = AppThemeState.shared
+
     let card: CanvasCard
     let frameWidth: CGFloat
     let frameHeight: CGFloat
@@ -132,18 +134,20 @@ struct CanvasCardSurface: View {
             vaultURL: vaultURL,
             vaultFiles: vaultFiles
         )
+        let themeRevision = themeState.revision
         Group {
             if displayMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(" ")
                     .font(.system(size: 13))
-                    .foregroundStyle(AppColors.textPrimary)
+                    .foregroundStyle(themeState.theme.textPrimary)
             } else {
                 Text(NotePreviewCache.canvasCardPreview(for: displayMarkdown))
                     .font(.system(size: 13))
-                    .foregroundStyle(AppColors.textPrimary)
+                    .foregroundStyle(themeState.theme.textPrimary)
                     .tint(AppColors.noteLink)
             }
         }
+        .id(themeRevision)
         .multilineTextAlignment(.leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 8)

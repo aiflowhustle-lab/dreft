@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AppearanceSettingsSection: View {
-    @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.dark.rawValue
+    @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.light.rawValue
 
     /// Applies the theme in the setter so the new palette is installed before
     /// any view re-renders from the storage change.
@@ -9,7 +9,7 @@ struct AppearanceSettingsSection: View {
         Binding(
             get: { appearanceModeRaw },
             set: { newValue in
-                let mode = AppearanceMode(rawValue: newValue) ?? .dark
+                let mode = AppearanceMode(rawValue: newValue) ?? .light
                 AppColors.setTheme(mode.theme)
                 appearanceModeRaw = newValue
             }

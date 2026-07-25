@@ -94,7 +94,21 @@
 		SM000082 /* CanvasTimelapse.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100082 /* CanvasTimelapse.swift */; };
 		SM000083 /* TimelapseWandButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100083 /* TimelapseWandButton.swift */; };
 		SM000084 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100084 /* AppRootView.swift */; };
-		SM000085 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100085 /* OnboardingView.swift */; };
+		SM000085 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100085 /* OnboardingFlowView.swift */; };
+		SM000096 /* OnboardingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100096 /* OnboardingCopy.swift */; };
+		SM000097 /* OnboardingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100097 /* OnboardingModels.swift */; };
+		SM000098 /* OnboardingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100098 /* OnboardingConfig.swift */; };
+		SM000099 /* OnboardingAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100099 /* OnboardingAnalytics.swift */; };
+		SM000100 /* OnboardingComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100100 /* OnboardingComponents.swift */; };
+		SM000101 /* OnboardingGuidedFirstAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100101 /* OnboardingGuidedFirstAction.swift */; };
+		SM000102 /* OnboardingColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100102 /* OnboardingColors.swift */; };
+		SM000103 /* OnboardingMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100103 /* OnboardingMotion.swift */; };
+		SM000104 /* OnboardingSeamlessComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100104 /* OnboardingSeamlessComponents.swift */; };
+		SM000105 /* OnboardingTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100105 /* OnboardingTypography.swift */; };
+		SM000106 /* SpaceGrotesk.ttf in Resources */ = {isa = PBXBuildFile; fileRef = SM200003 /* SpaceGrotesk.ttf */; };
+		SM000086 /* GraphDocumentOptionsMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100086 /* GraphDocumentOptionsMenu.swift */; };
+		SM000087 /* NoteIPadFormattingToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100087 /* NoteIPadFormattingToolbar.swift */; };
+		SM000088 /* NoteFormattingToolbarBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100088 /* NoteFormattingToolbarBridge.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -194,7 +208,21 @@
 		SM100082 /* CanvasTimelapse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTimelapse.swift; sourceTree = "<group>"; };
 		SM100083 /* TimelapseWandButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelapseWandButton.swift; sourceTree = "<group>"; };
 		SM100084 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
-		SM100085 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		SM100085 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
+		SM100096 /* OnboardingCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingCopy.swift; sourceTree = "<group>"; };
+		SM100097 /* OnboardingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingModels.swift; sourceTree = "<group>"; };
+		SM100098 /* OnboardingConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingConfig.swift; sourceTree = "<group>"; };
+		SM100099 /* OnboardingAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAnalytics.swift; sourceTree = "<group>"; };
+		SM100100 /* OnboardingComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingComponents.swift; sourceTree = "<group>"; };
+		SM100101 /* OnboardingGuidedFirstAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGuidedFirstAction.swift; sourceTree = "<group>"; };
+		SM100102 /* OnboardingColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingColors.swift; sourceTree = "<group>"; };
+		SM100103 /* OnboardingMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingMotion.swift; sourceTree = "<group>"; };
+		SM100104 /* OnboardingSeamlessComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSeamlessComponents.swift; sourceTree = "<group>"; };
+		SM100105 /* OnboardingTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTypography.swift; sourceTree = "<group>"; };
+		SM200003 /* SpaceGrotesk.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = SpaceGrotesk.ttf; sourceTree = "<group>"; };
+		SM100086 /* GraphDocumentOptionsMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphDocumentOptionsMenu.swift; sourceTree = "<group>"; };
+		SM100087 /* NoteIPadFormattingToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteIPadFormattingToolbar.swift; sourceTree = "<group>"; };
+		SM100088 /* NoteFormattingToolbarBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFormattingToolbarBridge.swift; sourceTree = "<group>"; };
 		SM200001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		SM200002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		SM300001 /* Dreft.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dreft.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -237,6 +265,8 @@
 				SM500005 /* Models */,
 				SM500006 /* Store */,
 				SM500011 /* Helpers */,
+				SM500013 /* Onboarding */,
+				SM500014 /* Fonts */,
 				SM500008 /* Views */,
 				SM200001 /* Assets.xcassets */,
 				SM200002 /* PrivacyInfo.xcprivacy */,
@@ -328,7 +358,6 @@
 				SM100011 /* SidebarView.swift */,
 				SM100012 /* WorkspaceShellView.swift */,
 				SM100084 /* AppRootView.swift */,
-				SM100085 /* OnboardingView.swift */,
 				SM100023 /* NoteEditorView.swift */,
 				SM100024 /* GraphView.swift */,
 				SM100083 /* TimelapseWandButton.swift */,
@@ -336,6 +365,8 @@
 				SM100030 /* GoToFileSheet.swift */,
 				SM100033 /* GraphCanvasLayer.swift */,
 				SM100040 /* NoteDocumentOptionsMenu.swift */,
+				SM100086 /* GraphDocumentOptionsMenu.swift */,
+				SM100087 /* NoteIPadFormattingToolbar.swift */,
 				SM100041 /* NoteLinkedLinksSheet.swift */,
 				SM100042 /* ShellSidebarResizeHandle.swift */,
 				SM100052 /* DreftBrandMark.swift */,
@@ -377,6 +408,7 @@
 				SM100035 /* VaultErrors.swift */,
 				SM100036 /* NoteMarkdownRenderer.swift */,
 				SM100073 /* MarkdownEditingSupport.swift */,
+				SM100088 /* NoteFormattingToolbarBridge.swift */,
 				SM100074 /* NoteEditingMenuBuilder.swift */,
 				SM100076 /* NotePreviewCache.swift */,
 				SM100077 /* CanvasCardContent.swift */,
@@ -394,6 +426,32 @@
 				SM100051 /* DataSafetyUpgradeTests.swift */,
 			);
 			path = DreftTests;
+			sourceTree = "<group>";
+		};
+		SM500014 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				SM200003 /* SpaceGrotesk.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
+		SM500013 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				SM100096 /* OnboardingCopy.swift */,
+				SM100102 /* OnboardingColors.swift */,
+				SM100103 /* OnboardingMotion.swift */,
+				SM100097 /* OnboardingModels.swift */,
+				SM100098 /* OnboardingConfig.swift */,
+				SM100099 /* OnboardingAnalytics.swift */,
+				SM100100 /* OnboardingComponents.swift */,
+				SM100104 /* OnboardingSeamlessComponents.swift */,
+				SM100105 /* OnboardingTypography.swift */,
+				SM100085 /* OnboardingFlowView.swift */,
+				SM100101 /* OnboardingGuidedFirstAction.swift */,
+			);
+			path = Onboarding;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -470,6 +528,7 @@
 			files = (
 				SM000013 /* Assets.xcassets in Resources */,
 				SM000052 /* PrivacyInfo.xcprivacy in Resources */,
+				SM000106 /* SpaceGrotesk.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -529,6 +588,8 @@
 				SM000038 /* CanvasCardFloatingToolbarLayer.swift in Sources */,
 				SM000039 /* CanvasCardColorSwatchRow.swift in Sources */,
 				SM000040 /* NoteDocumentOptionsMenu.swift in Sources */,
+				SM000086 /* GraphDocumentOptionsMenu.swift in Sources */,
+				SM000087 /* NoteIPadFormattingToolbar.swift in Sources */,
 				SM000041 /* NoteLinkedLinksSheet.swift in Sources */,
 				SM000042 /* ShellSidebarResizeHandle.swift in Sources */,
 				SM000043 /* CanvasImageCardContextMenu.swift in Sources */,
@@ -561,6 +622,7 @@
 				SM000072 /* CanvasEdgeLabelLayer.swift in Sources */,
 				SM000073 /* CanvasEdgeHitOverlay.swift in Sources */,
 				SM000074 /* MarkdownEditingSupport.swift in Sources */,
+				SM000088 /* NoteFormattingToolbarBridge.swift in Sources */,
 				SM000075 /* NoteEditingMenuBuilder.swift in Sources */,
 				SM000076 /* CanvasNoteEditOverlay.swift in Sources */,
 				SM000077 /* NotePreviewCache.swift in Sources */,
@@ -571,7 +633,17 @@
 				SM000082 /* CanvasTimelapse.swift in Sources */,
 				SM000083 /* TimelapseWandButton.swift in Sources */,
 				SM000084 /* AppRootView.swift in Sources */,
-				SM000085 /* OnboardingView.swift in Sources */,
+				SM000085 /* OnboardingFlowView.swift in Sources */,
+				SM000096 /* OnboardingCopy.swift in Sources */,
+				SM000097 /* OnboardingModels.swift in Sources */,
+				SM000098 /* OnboardingConfig.swift in Sources */,
+				SM000099 /* OnboardingAnalytics.swift in Sources */,
+				SM000100 /* OnboardingComponents.swift in Sources */,
+				SM000101 /* OnboardingGuidedFirstAction.swift in Sources */,
+				SM000102 /* OnboardingColors.swift in Sources */,
+				SM000103 /* OnboardingMotion.swift in Sources */,
+				SM000104 /* OnboardingSeamlessComponents.swift in Sources */,
+				SM000105 /* OnboardingTypography.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -697,7 +769,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = K2Q9PMD826;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -711,13 +783,14 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIAppFonts = SpaceGrotesk.ttf;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -736,7 +809,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = K2Q9PMD826;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -750,13 +823,14 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIAppFonts = SpaceGrotesk.ttf;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -773,13 +847,13 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -797,13 +871,13 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;

@@ -203,6 +203,26 @@ final class WorkspaceStore {
         }
     }
 
+    func renameActiveVault(to name: String) {
+        guard let id = activeVaultID,
+              let index = vaults.firstIndex(where: { $0.id == id }) else { return }
+        vaults[index].name = name
+        onWorkspaceStateDirty?()
+    }
+
+    func reloadActiveVaultFromDisk() {
+        guard let vault = activeVault else { return }
+        loadVaultFromDisk(vault)
+    }
+
+    func openFirstCanvasIfAvailable() {
+        if let canvas = files.first(where: { $0.kind == .canvas }) {
+            openTab(for: canvas)
+        } else if let note = files.first(where: { $0.kind == .note }) {
+            openTab(for: note)
+        }
+    }
+
     func createVault(name: String, parentDirectory: String, parentBookmark: Data? = nil) throws {
         if let parentBookmark {
             _ = VaultSecurityAccess.beginParentAccess(bookmark: parentBookmark)

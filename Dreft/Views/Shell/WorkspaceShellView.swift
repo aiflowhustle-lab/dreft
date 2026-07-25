@@ -41,6 +41,7 @@ struct WorkspaceShellView: View {
     @State private var vaultFolderPickerPurpose: VaultFolderPickerPurpose?
     @State private var vaultFolderPickerHandler: ((URL, VaultFolderPickerPurpose) -> Void)?
     #endif
+    @State private var showOnboardingPreview = false
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -106,25 +107,43 @@ struct WorkspaceShellView: View {
     }
 
     var body: some View {
-        Group {
-        #if os(macOS)
-        macShell
-            .vaultErrorAlert(workspace: workspace)
-        #else
-        iosShell
-            .vaultErrorAlert(workspace: workspace)
-        #endif
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                persistenceCoordinator?.refreshVaultFromDiskIfNeeded()
-            }
-            #if os(iOS)
-            if phase == .inactive || phase == .background {
-                persistenceCoordinator?.flushPendingChanges()
-            }
+        ZStack {
+            Group {
+            #if os(macOS)
+            macShell
+                .vaultErrorAlert(workspace: workspace)
+            #else
+            iosShell
+                .vaultErrorAlert(workspace: workspace)
             #endif
+            }
+            .onboardingGuidedFirstAction(workspace: workspace)
+            .onReceive(NotificationCenter.default.publisher(for: .dreftShowOnboardingPreview)) { _ in
+                workspace.isVaultManagerOpen = false
+                showOnboardingPreview = true
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    persistenceCoordinator?.refreshVaultFromDiskIfNeeded()
+                }
+                #if os(iOS)
+                if phase == .inactive || phase == .background {
+                    persistenceCoordinator?.flushPendingChanges()
+                }
+                #endif
+            }
+
+            if showOnboardingPreview {
+                OnboardingPresentationContainer {
+                    OnboardingFlowView(isPreview: true) {
+                        showOnboardingPreview = false
+                    }
+                }
+                .transition(.opacity)
+                .zIndex(1)
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: showOnboardingPreview)
     }
 
     #if os(iOS)
@@ -695,6 +714,12 @@ struct WorkspaceShellView: View {
     private func closePaneTab(paneID: String, tabID: String) {
         focusedPaneID = paneID
         if paneID == EditorSplitTree.rootPaneID {
+            if splitRoot != nil,
+               workspace.tabs.count == 1,
+               workspace.tabs[0].id == tabID {
+                collapseRootPaneFromSplit()
+                return
+            }
             workspace.closeTab(tabID)
             return
         }
@@ -714,7 +739,11 @@ struct WorkspaceShellView: View {
     private func closeAllPaneTabs(paneID: String) {
         focusedPaneID = paneID
         if paneID == EditorSplitTree.rootPaneID {
-            workspace.closeAllTabs()
+            if splitRoot != nil {
+                collapseRootPaneFromSplit()
+            } else {
+                workspace.closeAllTabs()
+            }
             return
         }
         removeAuxiliaryPane(paneID)
@@ -754,19 +783,72 @@ struct WorkspaceShellView: View {
 
     private func removeAuxiliaryPane(_ paneID: String) {
         guard paneID != EditorSplitTree.rootPaneID else { return }
+
+        let nextFocus: String
+        if focusedPaneID == paneID, let splitRoot {
+            nextFocus = EditorSplitTree.paneAfterRemoving(paneID, in: splitRoot)
+                ?? EditorSplitTree.rootPaneID
+        } else {
+            nextFocus = focusedPaneID
+        }
+
         auxiliaryPanes.removeValue(forKey: paneID)
         paneUIState.removeValue(forKey: paneID)
-        if let splitRoot {
-            if let collapsed = EditorSplitTree.removePane(paneID, from: splitRoot) {
-                self.splitRoot = collapsed == .pane(EditorSplitTree.rootPaneID) ? nil : collapsed
-            } else {
-                self.splitRoot = nil
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            if let splitRoot {
+                if let collapsed = EditorSplitTree.removePane(paneID, from: splitRoot) {
+                    self.splitRoot = collapsed == .pane(EditorSplitTree.rootPaneID) ? nil : collapsed
+                } else {
+                    self.splitRoot = nil
+                }
             }
+            focusedPaneID = nextFocus
+            collapseSplitIfNeeded()
         }
-        if focusedPaneID == paneID {
+    }
+
+    /// Obsidian-style: closing the last tab in the root pane removes that split slot.
+    private func collapseRootPaneFromSplit() {
+        guard let tree = splitRoot else {
+            workspace.closeAllTabs()
+            return
+        }
+
+        let successorID = EditorSplitTree.paneAfterRemoving(
+            EditorSplitTree.rootPaneID,
+            in: tree
+        )
+
+        guard let successorID, let successorPane = auxiliaryPanes[successorID] else {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                workspace.closeAllTabs()
+            }
+            return
+        }
+
+        workspace.tabs = successorPane.tabs
+        workspace.activeTabID = successorPane.activeTabID
+        workspace.selectedFileID = workspace.activeTab?.fileID
+
+        auxiliaryPanes.removeValue(forKey: successorID)
+        paneUIState.removeValue(forKey: successorID)
+
+        guard var collapsed = EditorSplitTree.removePane(EditorSplitTree.rootPaneID, from: tree) else {
+            workspace.closeAllTabs()
+            return
+        }
+        collapsed = EditorSplitTree.replacePaneID(
+            collapsed,
+            oldID: successorID,
+            newID: EditorSplitTree.rootPaneID
+        )
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            splitRoot = collapsed == .pane(EditorSplitTree.rootPaneID) ? nil : collapsed
             focusedPaneID = EditorSplitTree.rootPaneID
+            collapseSplitIfNeeded()
         }
-        collapseSplitIfNeeded()
     }
 
     private func openDocumentInFocusedPane(_ file: WorkspaceFileEntry) {
@@ -1028,6 +1110,15 @@ struct WorkspaceShellView: View {
                         sidebarPanel: $sidebarPanel
                     )
                 }
+                if tab?.kind == .graph {
+                    GraphDocumentOptionsMenu(
+                        workspace: workspace,
+                        paneID: paneID,
+                        onSplitRight: splitActions.0,
+                        onSplitDown: splitActions.1,
+                        bookmarkFileID: graphBookmarkFileID()
+                    )
+                }
             }
             .frame(width: documentNavTrailingWidth, alignment: .trailing)
         }
@@ -1089,7 +1180,10 @@ struct WorkspaceShellView: View {
                     .background(AppColors.canvasBackground)
             }
         case .graph:
-            GraphView(workspace: workspace) { file in
+            GraphView(
+                workspace: workspace,
+                paneID: paneID
+            ) { file in
                 openFileInPane(paneID, file: file)
             }
                 .onAppear {
@@ -1098,6 +1192,20 @@ struct WorkspaceShellView: View {
         case .newTab, .none:
             newTabPlaceholder(paneID: paneID)
         }
+    }
+
+    private func graphBookmarkFileID() -> String? {
+        if let selected = workspace.selectedFileID,
+           let file = workspace.files.first(where: { $0.id == selected }),
+           file.kind == .note || file.kind == .canvas {
+            return selected
+        }
+        if let fileID = workspace.activeTab?.fileID,
+           let file = workspace.files.first(where: { $0.id == fileID }),
+           file.kind == .note || file.kind == .canvas {
+            return fileID
+        }
+        return nil
     }
 
     private func documentBookmarkButton(fileID: String) -> some View {
@@ -1673,28 +1781,6 @@ struct WorkspaceShellView: View {
 #Preview {
     WorkspaceShellView()
         .frame(width: 1200, height: 800)
-}
-
-private extension View {
-    func vaultErrorAlert(workspace: WorkspaceStore) -> some View {
-        alert(
-            workspace.vaultAlert?.title ?? "Vault error",
-            isPresented: Binding(
-                get: { workspace.vaultAlert != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        workspace.clearVaultAlert()
-                    }
-                }
-            )
-        ) {
-            Button("OK", role: .cancel) {
-                workspace.clearVaultAlert()
-            }
-        } message: {
-            Text(workspace.vaultAlert?.message ?? "")
-        }
-    }
 }
 
 // MARK: - Shared chrome

@@ -45,6 +45,9 @@ struct InfiniteCanvasView: View {
   @State private var hoverEdgeID: String?
   @State private var editingEdgeLabelID: String?
   @State private var edgeLabelDraft = ""
+  #if os(iOS)
+  @StateObject private var canvasNoteToolbarBridge = NoteFormattingToolbarBridge()
+  #endif
   #if canImport(PhotosUI)
   @State private var photoItems: [PhotosPickerItem] = []
   #endif
@@ -100,7 +103,11 @@ struct InfiniteCanvasView: View {
           }
         )
         .zIndex(4)
-        .allowsHitTesting(!timelapsePlaying)
+        #if os(macOS)
+        .allowsHitTesting(!timelapsePlaying && store.selectedCardID == nil)
+        #else
+        .allowsHitTesting(false)
+        #endif
         #if os(macOS)
         .canvasEdgeHandCursor(
           isActive: hoverEdgeID != nil
@@ -203,7 +210,13 @@ struct InfiniteCanvasView: View {
             displayTransform.x += delta.width
             displayTransform.y += delta.height
           },
+          onPanBegan: {
+            isCanvasInteracting = true
+            panActive = true
+            cancelPendingEdgeInteraction()
+          },
           onPanEnded: {
+            panActive = false
             finishCanvasInteraction()
           },
           onPinchBegan: { _ in
@@ -239,10 +252,12 @@ struct InfiniteCanvasView: View {
           .allowsHitTesting(!timelapsePlaying)
       }
       .overlay(alignment: .bottom) {
-        canvasBottomToolbar(canvasSize: size, safeAreaBottom: safeBottom)
-          .zIndex(300)
-          .opacity(timelapsePlaying ? 0.45 : 1)
-          .allowsHitTesting(!timelapsePlaying)
+        if store.focusCardID == nil {
+          canvasBottomToolbar(canvasSize: size, safeAreaBottom: safeBottom)
+            .zIndex(300)
+            .opacity(timelapsePlaying ? 0.45 : 1)
+            .allowsHitTesting(!timelapsePlaying)
+        }
       }
       .overlay(alignment: .bottomLeading) {
         zoomIndicator(safeAreaBottom: safeBottom)
@@ -292,6 +307,7 @@ struct InfiniteCanvasView: View {
         store.vaultURL = vaultURL
         store.viewportSize = size
         replaceMountedContent(for: size)
+        scheduleOnboardingTimelapseIfNeeded(canvasSize: size)
       }
       .onDisappear {
         stopCanvasTimelapse(showAll: true)
@@ -496,6 +512,7 @@ struct InfiniteCanvasView: View {
         handleCanvasTap(at: location, canvasSize: canvasSize)
       }
       .onTapGesture(coordinateSpace: .named("canvasScreen")) { location in
+        guard !isCanvasInteracting, !panActive else { return }
         // Tapping a connection line selects it (floating toolbar); the edge drag
         // gesture also selects, but this tap fires later and must not clear it.
         if let edgeID = hitTestEdge(at: location, canvasSize: canvasSize) {
@@ -507,6 +524,9 @@ struct InfiniteCanvasView: View {
         store.endContentEdit()
         store.focusCardID = nil
         editingEdgeLabelID = nil
+        #if os(iOS)
+        canvasNoteToolbarBridge.dismissKeyboard()
+        #endif
       }
   }
 
@@ -967,21 +987,42 @@ struct InfiniteCanvasView: View {
       let screenH = worldFrame.height * zoom
       let screenCenter = CGPoint(x: screenOrigin.x + screenW / 2, y: screenOrigin.y + screenH / 2)
 
-      CanvasNoteEditOverlay(
-        initialText: CanvasCardContent.markdownBody(
-          for: card,
-          vaultURL: vaultURL,
-          vaultFiles: vaultFiles
-        ),
-        cardSize: CGSize(width: screenW, height: screenH),
-        colorHex: card.colorHex,
-        files: workspace.files,
-        onTextEdited: { store.updateContent(for: focusID, content: $0, fromTextUndo: $1) },
-        onDismiss: {
-          store.endContentEdit()
-          store.focusCardID = nil
-        }
-      )
+      Group {
+        #if os(iOS)
+        CanvasNoteEditOverlay(
+          initialText: CanvasCardContent.markdownBody(
+            for: card,
+            vaultURL: vaultURL,
+            vaultFiles: vaultFiles
+          ),
+          cardSize: CGSize(width: screenW, height: screenH),
+          colorHex: card.colorHex,
+          files: workspace.files,
+          onTextEdited: { store.updateContent(for: focusID, content: $0, fromTextUndo: $1) },
+          onDismiss: {
+            store.endContentEdit()
+            store.focusCardID = nil
+          },
+          toolbarBridge: canvasNoteToolbarBridge
+        )
+        #else
+        CanvasNoteEditOverlay(
+          initialText: CanvasCardContent.markdownBody(
+            for: card,
+            vaultURL: vaultURL,
+            vaultFiles: vaultFiles
+          ),
+          cardSize: CGSize(width: screenW, height: screenH),
+          colorHex: card.colorHex,
+          files: workspace.files,
+          onTextEdited: { store.updateContent(for: focusID, content: $0, fromTextUndo: $1) },
+          onDismiss: {
+            store.endContentEdit()
+            store.focusCardID = nil
+          }
+        )
+        #endif
+      }
       .frame(width: screenW, height: screenH)
       .position(screenCenter)
       .zIndex(250)
@@ -1079,8 +1120,6 @@ struct InfiniteCanvasView: View {
         t: 0.5
       )
       let screen = store.worldToScreen(mid, transform: displayTransform)
-      let zoom = displayTransform.zoom
-      let toolbarWorldScale = CanvasFloatingToolbarChrome.counterScale(for: zoom)
 
       VStack(spacing: 6) {
         CanvasEdgeFloatingToolbar(
@@ -1105,13 +1144,12 @@ struct InfiniteCanvasView: View {
         if edgeToolbarColorRowOpen {
           CanvasCardColorSwatchRow(
             activeColorHex: edge.colorHex,
-            frameWidth: 280,
-            zoom: zoom,
+            frameWidth: 184,
+            zoom: displayTransform.zoom,
             cardColors: store.cardColors,
             showCustomColorPicker: $edgeToolbarCustomColorOpen,
             onSetColor: { store.setEdgeColor(edge.id, hex: $0) }
           )
-          .scaleEffect(toolbarWorldScale, anchor: .top)
           .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
         }
       }
@@ -1130,6 +1168,7 @@ struct InfiniteCanvasView: View {
         if !panActive {
           panActive = true
           isCanvasInteracting = true
+          cancelPendingEdgeInteraction()
           panAnchor = CGSize(width: displayTransform.x, height: displayTransform.y)
         }
         displayTransform.x = panAnchor.width + value.translation.width
@@ -1139,6 +1178,80 @@ struct InfiniteCanvasView: View {
         panActive = false
         finishCanvasInteraction()
       }
+  }
+
+  private func cancelPendingEdgeInteraction() {
+    pendingEdgeInteractionID = nil
+    edgeInteractionStartLocation = nil
+  }
+
+  private func lineHitRadius(for zoom: CGFloat) -> CGFloat {
+    max(8, min(28, 18 / max(zoom, 0.25)))
+  }
+
+  private func connectHandleHitRadiusPixels() -> CGFloat {
+    #if os(iOS)
+    CanvasPencilInteraction.connectHitPixels / 2
+    #else
+    15
+    #endif
+  }
+
+  private func connectHandleScreenCenter(for card: CanvasCard, side: CanvasSide) -> CGPoint {
+    let liveFrame = cardDisplayFrame(card)
+    let transform = cardRenderTransform
+    let origin = cardScreenOrigin(for: liveFrame, transform: transform)
+    let zoom = transform.zoom
+    let width = liveFrame.width * zoom
+    let height = liveFrame.height * zoom
+    switch side {
+    case .top:
+      return CGPoint(x: origin.x + width / 2, y: origin.y)
+    case .bottom:
+      return CGPoint(x: origin.x + width / 2, y: origin.y + height)
+    case .left:
+      return CGPoint(x: origin.x, y: origin.y + height / 2)
+    case .right:
+      return CGPoint(x: origin.x + width, y: origin.y + height / 2)
+    }
+  }
+
+  private func isPointOnSelectedCardConnectHandle(_ screenPoint: CGPoint) -> Bool {
+    guard let selectedID = store.selectedCardID,
+          let card = cardIndex[selectedID],
+          cardUsesInteractiveChrome(card) else { return false }
+
+    let hitRadius = connectHandleHitRadiusPixels()
+    for side in CanvasSide.allCases {
+      let center = connectHandleScreenCenter(for: card, side: side)
+      if hypot(screenPoint.x - center.x, screenPoint.y - center.y) <= hitRadius {
+        return true
+      }
+    }
+    return false
+  }
+
+  private func shouldDeferEdgeHitTest(at screenPoint: CGPoint, for edge: CanvasEdge) -> Bool {
+    guard let selectedID = store.selectedCardID,
+          let card = cardIndex[selectedID],
+          cardUsesInteractiveChrome(card) else { return false }
+
+    if edge.fromID == selectedID,
+       isNearConnectHandle(screenPoint, cardID: selectedID, side: edge.fromSide) {
+      return true
+    }
+    if edge.toID == selectedID,
+       let toSide = edge.toSide,
+       isNearConnectHandle(screenPoint, cardID: selectedID, side: toSide) {
+      return true
+    }
+    return false
+  }
+
+  private func isNearConnectHandle(_ screenPoint: CGPoint, cardID: String, side: CanvasSide) -> Bool {
+    guard let card = cardIndex[cardID] else { return false }
+    let center = connectHandleScreenCenter(for: card, side: side)
+    return hypot(screenPoint.x - center.x, screenPoint.y - center.y) <= connectHandleHitRadiusPixels()
   }
 
   private func pinchGesture(in size: CGSize) -> some Gesture {
@@ -1316,6 +1429,15 @@ struct InfiniteCanvasView: View {
       return workspace.files.first { $0.id == fileID && $0.kind == .canvas }
     }
     return nil
+  }
+
+  private func scheduleOnboardingTimelapseIfNeeded(canvasSize: CGSize) {
+    guard OnboardingPersistence.consumeAutoPlayTimelapse() else { return }
+    Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 900_000_000)
+      guard !timelapsePlaying else { return }
+      startCanvasTimelapse(canvasSize: canvasSize)
+    }
   }
 
   private func startCanvasTimelapse(canvasSize: CGSize) {
@@ -1950,8 +2072,14 @@ struct InfiniteCanvasView: View {
       .onChanged { value in
         guard !timelapsePlaying else { return }
         guard store.contextMenu == nil, !isCardDragging, !isCardResizing else { return }
+        guard !store.isConnectingLine else { return }
+        guard !isCanvasInteracting, !panActive else {
+          cancelPendingEdgeInteraction()
+          return
+        }
         guard !isPointOnSelectedCardToolbar(value.startLocation) else { return }
         guard !isPointOnCanvasToolbar(value.startLocation, canvasSize: canvasSize) else { return }
+        guard !isPointOnSelectedCardConnectHandle(value.startLocation) else { return }
 
         if pendingEdgeInteractionID == nil, !edgeInteractionActive, store.editingEdgeID == nil {
           guard let edgeID = hitTestEdge(at: value.startLocation, canvasSize: canvasSize) else { return }
@@ -1964,7 +2092,8 @@ struct InfiniteCanvasView: View {
            let start = edgeInteractionStartLocation {
           let dx = value.location.x - start.x
           let dy = value.location.y - start.y
-          if hypot(dx, dy) >= ContextMenuLayout.edgeDragThreshold {
+          let moved = hypot(dx, dy)
+          if moved >= ContextMenuLayout.edgeDragThreshold {
             edgeInteractionActive = true
             pendingEdgeInteractionID = nil
             store.beginEditingEdgeEndpoint(
@@ -1972,6 +2101,9 @@ struct InfiniteCanvasView: View {
               positionOverrides: cardDragOverrides,
               resizeOverrides: cardResizeOverrides
             )
+          } else if moved >= 4 {
+            cancelPendingEdgeInteraction()
+            return
           }
         }
 
@@ -1991,8 +2123,11 @@ struct InfiniteCanvasView: View {
         }
 
         guard store.contextMenu == nil, !isCardDragging, !isCardResizing else { return }
+        guard !store.isConnectingLine else { return }
+        guard !isCanvasInteracting, !panActive else { return }
         guard !isPointOnSelectedCardToolbar(value.startLocation) else { return }
         guard !isPointOnCanvasToolbar(value.startLocation, canvasSize: canvasSize) else { return }
+        guard !isPointOnSelectedCardConnectHandle(value.startLocation) else { return }
 
         if let edgeID = pendingEdgeInteractionID {
           store.selectEdge(edgeID)
@@ -2016,10 +2151,13 @@ struct InfiniteCanvasView: View {
 
   /// Hit-test any connection line — grab anywhere on the curve to drag the endpoint.
   private func hitTestEdge(at screenPoint: CGPoint, canvasSize: CGSize) -> String? {
+    if isPointOnSelectedCardConnectHandle(screenPoint) { return nil }
+
     let toScreen = { store.worldToScreen($0, transform: displayTransform) }
     var best: (id: String, distance: CGFloat)?
 
     for edge in visibleEdges(for: canvasSize) {
+      if shouldDeferEdgeHitTest(at: screenPoint, for: edge) { continue }
       guard let from = store.cards.first(where: { $0.id == edge.fromID }),
             let endpoint = store.edgeEndpoint(
               for: edge,
@@ -2041,7 +2179,7 @@ struct InfiniteCanvasView: View {
         toSide: endpoint.toSide,
         toScreen: toScreen
       )
-      if distance < ContextMenuLayout.lineHitRadius,
+      if distance < lineHitRadius(for: displayTransform.zoom),
          best == nil || distance < best!.distance {
         best = (edge.id, distance)
       }
@@ -2220,6 +2358,7 @@ struct CanvasTouchCaptureView: UIViewRepresentable {
   var isEnabled: Bool
   var blocksNavigationAt: ((CGPoint) -> Bool)? = nil
   var onPan: (CGSize) -> Void
+  var onPanBegan: (() -> Void)? = nil
   var onPanEnded: () -> Void
   var onPinchBegan: (CGPoint) -> Void
   var onPinchChanged: (CGFloat, CGPoint) -> Void
@@ -2239,6 +2378,7 @@ struct CanvasTouchCaptureView: UIViewRepresentable {
     uiView.navigationEnabled = isEnabled
     uiView.blocksNavigationAt = blocksNavigationAt
     uiView.onPan = onPan
+    uiView.onPanBegan = onPanBegan
     uiView.onPanEnded = onPanEnded
     uiView.onPinchBegan = onPinchBegan
     uiView.onPinchChanged = onPinchChanged
@@ -2258,6 +2398,7 @@ final class CanvasTouchUIView: UIView, UIGestureRecognizerDelegate {
     }
   }
   var onPan: ((CGSize) -> Void)?
+  var onPanBegan: (() -> Void)?
   var onPanEnded: (() -> Void)?
   var onPinchBegan: ((CGPoint) -> Void)?
   var onPinchChanged: ((CGFloat, CGPoint) -> Void)?
@@ -2394,6 +2535,8 @@ final class CanvasTouchUIView: UIView, UIGestureRecognizerDelegate {
 
   @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
     switch gesture.state {
+    case .began:
+      onPanBegan?()
     case .changed:
       let delta = gesture.translation(in: self)
       gesture.setTranslation(.zero, in: self)

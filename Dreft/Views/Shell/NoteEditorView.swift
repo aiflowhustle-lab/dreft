@@ -23,6 +23,9 @@ struct NoteEditorView: View {
     @State private var wikilinkSuggestIndex = 0
     @FocusState private var isTitleFocused: Bool
     @FocusState private var isBodyFocused: Bool
+    #if os(iOS)
+    @StateObject private var noteToolbarBridge = NoteFormattingToolbarBridge()
+    #endif
 
     private var file: WorkspaceFileEntry? {
         workspace.files.first { $0.id == fileID }
@@ -182,6 +185,17 @@ struct NoteEditorView: View {
                     .focused($isTitleFocused)
                     .onSubmit { commitTitle() }
 
+                #if os(iOS)
+                NoteBodyTextView(
+                    text: $draftContent,
+                    selectedRange: $bodySelectedRange,
+                    caretRect: $wikilinkCaretRect,
+                    isFocused: $isBodyFocused,
+                    files: workspace.files,
+                    suggestSelectedIndex: $wikilinkSuggestIndex,
+                    toolbarBridge: noteToolbarBridge
+                )
+                #else
                 NoteBodyTextView(
                     text: $draftContent,
                     selectedRange: $bodySelectedRange,
@@ -190,6 +204,7 @@ struct NoteEditorView: View {
                     files: workspace.files,
                     suggestSelectedIndex: $wikilinkSuggestIndex
                 )
+                #endif
             }
             .padding(.horizontal, 56)
             .padding(.top, 28)
@@ -197,6 +212,9 @@ struct NoteEditorView: View {
             .frame(maxWidth: AppColors.noteReadableWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        #if os(iOS)
+        .scrollDismissesKeyboard(.interactively)
+        #endif
     }
 
     private var readingSurface: some View {

@@ -77,6 +77,21 @@ enum NoteMarkdownRenderer {
         return attributed
     }
 
+    /// Canvas cards sit on `noteCardBackground`; delimiters must match that surface.
+    static func canvasCardPreviewAttributedString(from content: String) -> AttributedString {
+        let ns = WikilinkEditorSupport.attributedString(
+            for: content,
+            selectedRange: NSRange(location: NSNotFound, length: 0),
+            fontSize: 13,
+            hiddenDelimiterOn: AppColors.noteCardBackground
+        )
+        var attributed = AttributedString(ns)
+        for run in attributed.runs where run.link != nil {
+            attributed[run.range].foregroundColor = AppColors.noteLink
+        }
+        return attributed
+    }
+
     static func linkedPreviewAttributedString(from content: String) -> AttributedString {
         let ns = linkedAttributedString(for: content)
         return AttributedString(ns)

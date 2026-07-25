@@ -76,6 +76,7 @@ private func isSignificantCanvasSizeChange(from old: CGSize, to new: CGSize) -> 
 
 struct GraphView: View {
     @Bindable var workspace: WorkspaceStore
+    var paneID: String = EditorSplitTree.rootPaneID
     var onNavigateToFile: ((WorkspaceFileEntry) -> Void)? = nil
 
     @State private var nodes: [GraphNode] = []
@@ -211,6 +212,10 @@ struct GraphView: View {
             }
         }
         .background(AppColors.canvasBackground)
+        .onReceive(NotificationCenter.default.publisher(for: .graphCopyScreenshot)) { notification in
+            guard notification.userInfo?["paneID"] as? String == paneID else { return }
+            copyScreenshotToPasteboard()
+        }
         .onDisappear {
             simulationTask?.cancel()
             graphSyncTask?.cancel()
@@ -218,6 +223,38 @@ struct GraphView: View {
             stopTimelapse(showAll: true)
             persistGraphLayout()
         }
+    }
+
+    private func copyScreenshotToPasteboard() {
+        guard canvasSize.width > 1, canvasSize.height > 1 else { return }
+
+        let snapshot = GraphScreenshotView(
+            nodes: canvasDrawNodes,
+            links: canvasDrawLinks,
+            positions: nodePositionsByID(for: renderedNodes),
+            linkStrokeWidth: linkStrokeWidth,
+            showArrows: displayArrows && renderedLinks.count <= 400,
+            nodeDotSize: nodeDotSize,
+            labelOpacity: effectiveLabelOpacity,
+            linkRenderOpacity: graphLinkRenderOpacity,
+            zoom: zoomScale,
+            pan: panOffset,
+            canvasSize: canvasSize
+        )
+        .frame(width: canvasSize.width, height: canvasSize.height)
+
+        let renderer = ImageRenderer(content: snapshot)
+        renderer.isOpaque = true
+        renderer.scale = 2
+
+        #if os(macOS)
+        guard let image = renderer.nsImage else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+        #else
+        guard let image = renderer.uiImage else { return }
+        UIPasteboard.general.image = image
+        #endif
     }
 
     @ViewBuilder
@@ -1689,6 +1726,47 @@ struct GraphView: View {
 
     private func stableHash(_ string: String) -> Int {
         string.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) }
+    }
+}
+
+private struct GraphScreenshotView: View {
+    let nodes: [GraphCanvasDrawNode]
+    let links: [GraphCanvasLink]
+    let positions: [String: CGPoint]
+    let linkStrokeWidth: CGFloat
+    let showArrows: Bool
+    let nodeDotSize: CGFloat
+    let labelOpacity: CGFloat
+    let linkRenderOpacity: CGFloat
+    let zoom: CGFloat
+    let pan: CGSize
+    let canvasSize: CGSize
+
+    var body: some View {
+        ZStack {
+            AppColors.canvasBackground
+            GraphCanvasLayer(
+                nodes: nodes,
+                links: links,
+                positions: positions,
+                linkStrokeWidth: linkStrokeWidth,
+                showArrows: showArrows,
+                nodeDotSize: nodeDotSize,
+                labelOpacity: labelOpacity,
+                drawLabelsInCanvas: false,
+                linksDimmed: false,
+                linkRenderOpacity: linkRenderOpacity,
+                zoom: zoom,
+                pan: pan
+            )
+            GraphNodeLabelsLayer(
+                nodes: nodes,
+                labelOpacity: labelOpacity,
+                zoom: zoom,
+                pan: pan
+            )
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
     }
 }
 

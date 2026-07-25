@@ -473,4 +473,29 @@ enum EditorSplitTree {
             return allPaneIDs(in: first) + allPaneIDs(in: second)
         }
     }
+
+    static func replacePaneID(_ node: EditorSplitNode, oldID: String, newID: String) -> EditorSplitNode {
+        switch node {
+        case .pane(let id):
+            return .pane(id == oldID ? newID : id)
+        case .split(let axis, let ratio, let first, let second):
+            return .split(
+                axis: axis,
+                ratio: ratio,
+                first: replacePaneID(first, oldID: oldID, newID: newID),
+                second: replacePaneID(second, oldID: oldID, newID: newID)
+            )
+        }
+    }
+
+    /// Preferred focus target when a pane is removed (sibling before/after in layout order).
+    static func paneAfterRemoving(_ removedID: String, in node: EditorSplitNode) -> String? {
+        let order = allPaneIDs(in: node)
+        guard let index = order.firstIndex(of: removedID) else {
+            return order.first
+        }
+        if index + 1 < order.count { return order[index + 1] }
+        if index > 0 { return order[index - 1] }
+        return nil
+    }
 }
