@@ -190,6 +190,7 @@ struct NoteEditorView: View {
                     text: $draftContent,
                     selectedRange: $bodySelectedRange,
                     caretRect: $wikilinkCaretRect,
+                    selectionRects: .constant([]),
                     isFocused: $isBodyFocused,
                     files: workspace.files,
                     suggestSelectedIndex: $wikilinkSuggestIndex,
@@ -200,6 +201,7 @@ struct NoteEditorView: View {
                     text: $draftContent,
                     selectedRange: $bodySelectedRange,
                     caretRect: $wikilinkCaretRect,
+                    selectionRects: .constant([]),
                     isFocused: $isBodyFocused,
                     files: workspace.files,
                     suggestSelectedIndex: $wikilinkSuggestIndex

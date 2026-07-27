@@ -3,6 +3,9 @@ import SwiftUI
 enum CanvasFloatingToolbarChrome {
     static let pillCornerRadius: CGFloat = 14
     static let bottomPillCornerRadius: CGFloat = 12
+    static let keyboardAccessoryCornerRadius: CGFloat = 999
+    static let keyboardAccessoryButtonSize: CGFloat = 40
+    static let keyboardDismissButtonSize: CGFloat = 48
     static let buttonSize: CGFloat = 36
     static let iconSize: CGFloat = 15
     static let pillSpacing: CGFloat = 10
@@ -26,6 +29,33 @@ enum CanvasFloatingToolbarChrome {
             .clipShape(RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: pillCornerRadius, style: .continuous)
+                    .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
+            )
+            .shadow(color: AppColors.floatingChromeShadow, radius: 16, y: 4)
+    }
+
+    @ViewBuilder
+    static func keyboardAccessoryBar<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background { pillBackground(cornerRadius: keyboardAccessoryCornerRadius) }
+            .clipShape(Capsule(style: .continuous))
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
+            )
+            .shadow(color: AppColors.floatingChromeShadow, radius: 16, y: 4)
+    }
+
+    @ViewBuilder
+    static func keyboardDismissButton<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(width: keyboardDismissButtonSize, height: keyboardDismissButtonSize)
+            .background { pillBackground(cornerRadius: keyboardDismissButtonSize / 2) }
+            .clipShape(Circle())
+            .overlay(
+                Circle()
                     .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
             )
             .shadow(color: AppColors.floatingChromeShadow, radius: 16, y: 4)

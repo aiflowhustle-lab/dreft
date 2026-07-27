@@ -292,6 +292,82 @@ enum VaultFilesystem {
         return try? Data(contentsOf: url)
     }
 
+    /// Loads canvas asset bytes, trying direct path then fuzzy embed resolution (off main thread only).
+    static func imageDataForCanvasAsset(relativePath: String, vaultURL: URL) -> Data? {
+        if let data = imageData(at: relativePath, vaultURL: vaultURL) {
+            return data
+        }
+        let embedTarget = (relativePath as NSString).lastPathComponent
+        guard !embedTarget.isEmpty,
+              let resolved = resolveCanvasAssetPath(for: embedTarget, vaultURL: vaultURL),
+              resolved != relativePath else {
+            return nil
+        }
+        return imageData(at: resolved, vaultURL: vaultURL)
+    }
+
+    /// Resolves `![[target]]` embeds to a vault-relative asset path when possible.
+    static func resolveCanvasAssetPath(for embedTarget: String, vaultURL: URL) -> String? {
+        let trimmed = embedTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let existing = existingCanvasAssetPath(for: trimmed, vaultURL: vaultURL) {
+            return existing
+        }
+
+        let fileName = (trimmed as NSString).lastPathComponent
+        guard !fileName.isEmpty else { return nil }
+
+        let assetsDirectory = vaultURL.appendingPathComponent(canvasAssetsFolder, isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: assetsDirectory.path) else {
+            return nil
+        }
+
+        if files.contains(fileName) {
+            return "\(canvasAssetsFolder)/\(fileName)"
+        }
+
+        let stem = (fileName as NSString).deletingPathExtension
+        if let match = files.first(where: { ($0 as NSString).deletingPathExtension == stem }) {
+            return "\(canvasAssetsFolder)/\(match)"
+        }
+
+        if !stem.isEmpty,
+           let prefixMatch = files.first(where: { ($0 as NSString).deletingPathExtension.hasPrefix(stem) }) {
+            return "\(canvasAssetsFolder)/\(prefixMatch)"
+        }
+
+        return nil
+    }
+
+    /// Best-effort vault path for an image embed target, even before the file is confirmed on disk.
+    static func preferredCanvasAssetPath(for embedTarget: String) -> String {
+        let trimmed = embedTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("/") { return trimmed }
+        return "\(canvasAssetsFolder)/\((trimmed as NSString).lastPathComponent)"
+    }
+
+    private static func existingCanvasAssetPath(for trimmed: String, vaultURL: URL) -> String? {
+        let directURL = fileURL(relativePath: trimmed, vaultURL: vaultURL)
+        if FileManager.default.fileExists(atPath: directURL.path) {
+            return trimmed
+        }
+
+        let fileName = (trimmed as NSString).lastPathComponent
+        let assetsPath = "\(canvasAssetsFolder)/\(fileName)"
+        let assetsURL = fileURL(relativePath: assetsPath, vaultURL: vaultURL)
+        if FileManager.default.fileExists(atPath: assetsURL.path) {
+            return assetsPath
+        }
+
+        return nil
+    }
+
+    static func isImageEmbedTarget(_ target: String) -> Bool {
+        let ext = (target as NSString).pathExtension.lowercased()
+        return imageExtensions.contains(ext)
+    }
+
     static func readNoteContent(relativePath: String, vaultURL: URL) -> String? {
         let url = vaultURL.appendingPathComponent(relativePath)
         return try? String(contentsOf: url, encoding: .utf8)
@@ -377,21 +453,30 @@ enum VaultFilesystem {
         var referenced = Set<String>()
         enumerateCanvasFiles(vaultURL: vaultURL) { url in
             guard let snapshot = readCanvas(at: url) else { return }
-            referenced.formUnion(canvasAssetPaths(in: snapshot))
+            referenced.formUnion(canvasAssetPaths(in: snapshot, vaultURL: vaultURL))
         }
         for snapshot in pendingSnapshots.values {
-            referenced.formUnion(canvasAssetPaths(in: snapshot))
+            referenced.formUnion(canvasAssetPaths(in: snapshot, vaultURL: vaultURL))
         }
         return referenced
     }
 
-    static func canvasAssetPaths(in snapshot: CanvasDocumentSnapshot) -> Set<String> {
-        Set(snapshot.cards.compactMap { card in
-            guard card.kind == .image else { return nil }
-            let content = card.content
-            guard content.hasPrefix("\(canvasAssetsFolder)/") else { return nil }
-            return content
-        })
+    static func canvasAssetPaths(in snapshot: CanvasDocumentSnapshot, vaultURL: URL? = nil) -> Set<String> {
+        var paths = Set<String>()
+        for card in snapshot.cards {
+            switch card.kind {
+            case .image:
+                let content = card.content
+                if content.hasPrefix("\(canvasAssetsFolder)/") {
+                    paths.insert(content)
+                }
+            case .note, .text:
+                for path in NoteCardEmbedSupport.imagePaths(from: card.content, vaultURL: vaultURL) {
+                    paths.insert(path)
+                }
+            }
+        }
+        return paths
     }
 
     /// Deletes files in `.dreft/assets/` that no canvas document references.

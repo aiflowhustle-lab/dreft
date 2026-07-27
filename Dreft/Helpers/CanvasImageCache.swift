@@ -107,7 +107,7 @@ final class CanvasImageCache {
     if VaultFilesystem.isEmbeddedImageContent(content) {
       data = Data(base64Encoded: content, options: .ignoreUnknownCharacters)
     } else if let vaultURL {
-      data = VaultFilesystem.imageData(at: content, vaultURL: vaultURL)
+      data = VaultFilesystem.imageDataForCanvasAsset(relativePath: content, vaultURL: vaultURL)
     } else {
       data = nil
     }

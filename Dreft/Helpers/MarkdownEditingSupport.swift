@@ -22,6 +22,8 @@ enum MarkdownEditAction: String, CaseIterable {
     case taskList
 
     case wikilink
+    case embed
+    case attachment
     case externalLink
 
     case codeBlock
@@ -52,6 +54,8 @@ enum MarkdownEditAction: String, CaseIterable {
         case .numberedList: return "Numbered list"
         case .taskList: return "Task list"
         case .wikilink: return "Add link"
+        case .embed: return "Add embed"
+        case .attachment: return "Insert attachment"
         case .externalLink: return "Add external link"
         case .codeBlock: return "Code block"
         case .horizontalRule: return "Horizontal rule"
@@ -71,9 +75,9 @@ enum MarkdownEditingSupport {
     ) -> (text: String, selectedRange: NSRange) {
         switch action {
         case .bold:
-            return toggleWrap(open: "**", close: "**", in: text, range: selectedRange)
+            return toggleBold(in: text, range: selectedRange)
         case .italic:
-            return toggleWrap(open: "*", close: "*", in: text, range: selectedRange)
+            return toggleItalic(in: text, range: selectedRange)
         case .strikethrough:
             return toggleWrap(open: "~~", close: "~~", in: text, range: selectedRange)
         case .highlight:
@@ -94,6 +98,8 @@ enum MarkdownEditingSupport {
         case .numberedList: return toggleNumberedList(in: text, range: selectedRange)
         case .taskList: return toggleLinePrefix("- [ ] ", in: text, range: selectedRange)
         case .wikilink: return insertWikilink(in: text, range: selectedRange)
+        case .embed: return insertEmbed(in: text, range: selectedRange)
+        case .attachment: return insertEmbed(in: text, range: selectedRange)
         case .externalLink: return insertExternalLink(in: text, range: selectedRange)
         case .codeBlock: return insertCodeBlock(in: text, range: selectedRange)
         case .horizontalRule: return insertHorizontalRule(in: text, range: selectedRange)
@@ -102,6 +108,14 @@ enum MarkdownEditingSupport {
         case .outdent: return adjustIndent(in: text, range: selectedRange, delta: -2)
         case .tag: return insertPlainText("#", in: text, range: selectedRange)
         }
+    }
+
+    static func insertText(
+        _ insertion: String,
+        in text: String,
+        range: NSRange
+    ) -> (text: String, selectedRange: NSRange) {
+        insertPlainText(insertion, in: text, range: range)
     }
 
     private static func toggleWrap(
@@ -142,12 +156,72 @@ enum MarkdownEditingSupport {
         return (newText, NSRange(location: clamped.location + (open as NSString).length, length: 0))
     }
 
+    private static func toggleBold(
+        in text: String,
+        range: NSRange
+    ) -> (text: String, selectedRange: NSRange) {
+        let ns = text as NSString
+        let clamped = expandInlineSelection(in: text, range: range)
+
+        if clamped.length > 0 {
+            let selected = ns.substring(with: clamped)
+            if selected.hasPrefix("***"), selected.hasSuffix("***"), selected.count >= 6 {
+                let inner = String(selected.dropFirst(3).dropLast(3))
+                let result = "*" + inner + "*"
+                return replace(clamped, with: result, in: text, selectLength: (result as NSString).length)
+            }
+            if selected.hasPrefix("**"), selected.hasSuffix("**"), selected.count >= 4 {
+                let inner = String(selected.dropFirst(2).dropLast(2))
+                return replace(clamped, with: inner, in: text, selectLength: (inner as NSString).length)
+            }
+            if selected.hasPrefix("*"), selected.hasSuffix("*"),
+               !selected.hasPrefix("**"), selected.count >= 2 {
+                let inner = String(selected.dropFirst(1).dropLast(1))
+                let result = "***" + inner + "***"
+                return replace(clamped, with: result, in: text, selectLength: (result as NSString).length)
+            }
+            return toggleWrap(open: "**", close: "**", in: text, range: clamped)
+        }
+
+        return toggleWrap(open: "**", close: "**", in: text, range: clamped)
+    }
+
+    private static func toggleItalic(
+        in text: String,
+        range: NSRange
+    ) -> (text: String, selectedRange: NSRange) {
+        let ns = text as NSString
+        let clamped = expandInlineSelection(in: text, range: range)
+
+        if clamped.length > 0 {
+            let selected = ns.substring(with: clamped)
+            if selected.hasPrefix("***"), selected.hasSuffix("***"), selected.count >= 6 {
+                let inner = String(selected.dropFirst(3).dropLast(3))
+                let result = "**" + inner + "**"
+                return replace(clamped, with: result, in: text, selectLength: (result as NSString).length)
+            }
+            if selected.hasPrefix("**"), selected.hasSuffix("**"), selected.count >= 4 {
+                let inner = String(selected.dropFirst(2).dropLast(2))
+                let result = "***" + inner + "***"
+                return replace(clamped, with: result, in: text, selectLength: (result as NSString).length)
+            }
+            if selected.hasPrefix("*"), selected.hasSuffix("*"),
+               !selected.hasPrefix("**"), selected.count >= 2 {
+                let inner = String(selected.dropFirst(1).dropLast(1))
+                return replace(clamped, with: inner, in: text, selectLength: (inner as NSString).length)
+            }
+            return toggleWrap(open: "*", close: "*", in: text, range: clamped)
+        }
+
+        return toggleWrap(open: "*", close: "*", in: text, range: clamped)
+    }
+
     private static func clearFormatting(in text: String, range: NSRange) -> (text: String, selectedRange: NSRange) {
         let ns = text as NSString
         let lineRange = ns.lineRange(for: clamp(range, in: ns.length))
         let block = ns.substring(with: lineRange)
         var cleaned = block
-        let wrappers = ["**", "~~", "==", "*", "`"]
+        let wrappers = ["***", "**", "~~", "==", "*", "`"]
         for wrapper in wrappers {
             cleaned = cleaned.replacingOccurrences(of: wrapper, with: "")
         }
@@ -260,6 +334,22 @@ enum MarkdownEditingSupport {
         return (newText, NSRange(location: clamped.location + 2, length: 0))
     }
 
+    private static func insertEmbed(
+        in text: String,
+        range: NSRange
+    ) -> (text: String, selectedRange: NSRange) {
+        let ns = text as NSString
+        let clamped = clamp(range, in: ns.length)
+        if clamped.length > 0 {
+            let selected = ns.substring(with: clamped)
+            let embed = "![[\(selected)]]"
+            return replace(clamped, with: embed, in: text, selectLength: (embed as NSString).length)
+        }
+        let embed = "![[]]"
+        let newText = ns.replacingCharacters(in: clamped, with: embed)
+        return (newText, NSRange(location: clamped.location + 3, length: 0))
+    }
+
     private static func insertExternalLink(
         in text: String,
         range: NSRange
@@ -351,6 +441,29 @@ enum MarkdownEditingSupport {
         }
         let updated = adjusted.joined(separator: "\n")
         return replace(blockRange, with: updated, in: text, selectLength: clamped.length)
+    }
+
+    /// If the selection covers only inner text, include surrounding `*…*` / `**…**` / `***…***` markers.
+    private static func expandInlineSelection(in text: String, range: NSRange) -> NSRange {
+        let ns = text as NSString
+        let clamped = clamp(range, in: ns.length)
+        guard clamped.length > 0 else { return clamped }
+
+        for (open, close) in [("***", "***"), ("**", "**"), ("*", "*")] {
+            let openLength = (open as NSString).length
+            let closeLength = (close as NSString).length
+            let beforeStart = clamped.location - openLength
+            let afterStart = clamped.location + clamped.length
+            guard beforeStart >= 0, afterStart + closeLength <= ns.length else { continue }
+
+            let before = ns.substring(with: NSRange(location: beforeStart, length: openLength))
+            let after = ns.substring(with: NSRange(location: afterStart, length: closeLength))
+            if before == open, after == close {
+                return NSRange(location: beforeStart, length: openLength + clamped.length + closeLength)
+            }
+        }
+
+        return clamped
     }
 
     private static func replace(

@@ -12,6 +12,8 @@ final class NoteFormattingToolbarBridge: ObservableObject {
 
     weak var textView: UITextView?
     var applyAction: ((MarkdownEditAction) -> Void)?
+    var onInsertAttachment: (() -> Void)?
+    var insertSnippetHandler: ((String) -> Void)?
     private var refreshScheduled = false
     private var accessoryContainer: NoteFormattingToolbarAccessoryContainer?
 
@@ -76,11 +78,36 @@ final class NoteFormattingToolbarBridge: ObservableObject {
         textView?.resignFirstResponder()
         scheduleRefresh()
     }
+
+    func requestAttachment() {
+        onInsertAttachment?()
+    }
+
+    func insertSnippet(_ snippet: String) {
+        insertSnippetHandler?(snippet)
+    }
 }
 
-#else
+#elseif os(macOS)
+import AppKit
 
 @MainActor
-final class NoteFormattingToolbarBridge: ObservableObject {}
+final class NoteFormattingToolbarBridge: ObservableObject {
+    weak var textView: NSTextView?
+    var onInsertAttachment: (() -> Void)?
+    var insertSnippetHandler: ((String) -> Void)?
+
+    func dismissKeyboard() {
+        textView?.window?.makeFirstResponder(nil)
+    }
+
+    func requestAttachment() {
+        onInsertAttachment?()
+    }
+
+    func insertSnippet(_ snippet: String) {
+        insertSnippetHandler?(snippet)
+    }
+}
 
 #endif

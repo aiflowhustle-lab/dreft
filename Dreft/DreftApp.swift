@@ -13,6 +13,7 @@ struct DreftApp: App {
     var body: some Scene {
         WindowGroup {
             AppRootView()
+                .background(AppColors.canvasBackground)
         }
         #if os(macOS)
         .windowStyle(.hiddenTitleBar)

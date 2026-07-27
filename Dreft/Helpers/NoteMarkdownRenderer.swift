@@ -77,12 +77,11 @@ enum NoteMarkdownRenderer {
         return attributed
     }
 
-    /// Canvas cards sit on `noteCardBackground`; delimiters must match that surface.
+    /// Canvas cards sit on `noteCardBackground`; delimiters are removed for SwiftUI preview text.
     static func canvasCardPreviewAttributedString(from content: String) -> AttributedString {
-        let ns = WikilinkEditorSupport.attributedString(
-            for: content,
-            selectedRange: NSRange(location: NSNotFound, length: 0),
-            fontSize: 13,
+        let ns = WikilinkEditorSupport.displayAttributedString(
+            from: content,
+            fontSize: CanvasConstants.noteCardFontSize,
             hiddenDelimiterOn: AppColors.noteCardBackground
         )
         var attributed = AttributedString(ns)

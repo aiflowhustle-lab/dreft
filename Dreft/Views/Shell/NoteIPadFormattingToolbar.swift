@@ -63,68 +63,91 @@ struct NoteIPadFormattingToolbar: View {
     var onAction: (MarkdownEditAction) -> Void
     var onDismissKeyboard: () -> Void
 
+    private let buttonSize = CanvasFloatingToolbarChrome.keyboardAccessoryButtonSize
+
     var body: some View {
-        CanvasFloatingToolbarChrome.bottomBar {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    toolbarButton("arrow.uturn.backward", enabled: canUndo, action: onUndo)
-                    toolbarButton("arrow.uturn.forward", enabled: canRedo, action: onRedo)
+        HStack(spacing: 8) {
+            CanvasFloatingToolbarChrome.keyboardAccessoryBar {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        toolbarButton("arrow.uturn.backward", label: "Undo", enabled: canUndo, action: onUndo)
+                        toolbarButton("arrow.uturn.forward", label: "Redo", enabled: canRedo, action: onRedo)
 
-                    toolbarDivider
+                        wikilinkButton
+                        toolbarButton("doc.plaintext", label: "Add embed") { onAction(.embed) }
+                        toolbarButton("tag", label: "Add tag") { onAction(.tag) }
+                        toolbarButton("paperclip", label: "Insert attachment") { onAction(.attachment) }
 
-                    textButton("[ ]") { onAction(.wikilink) }
-                    toolbarButton("doc.plaintext") { onAction(.wikilink) }
-                    toolbarButton("tag") { onAction(.tag) }
-                    toolbarButton("paperclip") { }
-                        .disabled(true)
-                        .opacity(0.32)
+                        headingMenu
+                        toolbarButton("bold", label: "Bold") { onAction(.bold) }
+                        toolbarButton("italic", label: "Italic") { onAction(.italic) }
+                        toolbarButton("strikethrough", label: "Strikethrough") { onAction(.strikethrough) }
+                        toolbarButton("highlighter", label: "Highlight") { onAction(.highlight) }
+                        toolbarButton("chevron.left.forwardslash.chevron.right", label: "Code") { onAction(.inlineCode) }
+                        toolbarButton("text.quote", label: "Blockquote") { onAction(.quote) }
 
-                    toolbarDivider
+                        toolbarButton("link", label: "Insert link") { onAction(.externalLink) }
+                        toolbarButton("list.bullet", label: "Bullet list") { onAction(.bulletList) }
+                        toolbarButton("list.number", label: "Numbered list") { onAction(.numberedList) }
+                        toolbarButton("checklist", label: "Checklist") { onAction(.taskList) }
+                        toolbarButton("increase.indent", label: "Indent") { onAction(.indent) }
+                        toolbarButton("decrease.indent", label: "Outdent") { onAction(.outdent) }
 
-                    headingMenu
-                    textButton("B", weight: .bold) { onAction(.bold) }
-                    textButton("I", weight: .regular) { onAction(.italic) }
-                    textButton("S", weight: .regular) { onAction(.strikethrough) }
-                    textButton("&", weight: .semibold) { onAction(.highlight) }
-                    toolbarButton("chevron.left.forwardslash.chevron.right") { onAction(.inlineCode) }
-                    toolbarButton("quote.opening") { onAction(.quote) }
-
-                    toolbarDivider
-
-                    toolbarButton("link") { onAction(.externalLink) }
-                    toolbarButton("list.bullet") { onAction(.bulletList) }
-                    toolbarButton("list.number") { onAction(.numberedList) }
-                    toolbarButton("checklist") { onAction(.taskList) }
-                    toolbarButton("decrease.indent") { onAction(.outdent) }
-                    toolbarButton("increase.indent") { onAction(.indent) }
-
-                    toolbarDivider
-
-                    moreMenu
-                    toolbarButton("keyboard.chevron.compact.down", action: onDismissKeyboard)
+                        moreMenu
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
-                .padding(.horizontal, 2)
             }
-            .frame(maxWidth: .infinity)
+            .fixedSize(horizontal: true, vertical: false)
+
+            CanvasFloatingToolbarChrome.keyboardDismissButton {
+                Button(action: onDismissKeyboard) {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide keyboard")
+            }
         }
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private var wikilinkButton: some View {
+        Button(action: { onAction(.wikilink) }) {
+            Text("[ ]")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppColors.textSecondary)
+                .frame(width: buttonSize, height: buttonSize)
+                .contentShape(Circle())
+        }
+        .buttonStyle(ToolbarIconButtonStyle())
+        .accessibilityLabel("Add internal link")
     }
 
     private var headingMenu: some View {
         Menu {
+            Button("No heading") { onAction(.body) }
             Button("Heading 1") { onAction(.heading1) }
             Button("Heading 2") { onAction(.heading2) }
             Button("Heading 3") { onAction(.heading3) }
             Button("Heading 4") { onAction(.heading4) }
             Button("Heading 5") { onAction(.heading5) }
             Button("Heading 6") { onAction(.heading6) }
-            Divider()
-            Button("Body") { onAction(.body) }
         } label: {
-            textLabel("H", weight: .semibold)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
+            Image(systemName: "textformat.size")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(AppColors.textSecondary)
+                .frame(width: buttonSize, height: buttonSize)
+                .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
+        .accessibilityLabel("Toggle heading")
     }
 
     private var moreMenu: some View {
@@ -136,54 +159,42 @@ struct NoteIPadFormattingToolbar: View {
             Button("Clear formatting") { onAction(.clearFormatting) }
         } label: {
             Image(systemName: "wrench")
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(AppColors.textSecondary)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
+                .frame(width: buttonSize, height: buttonSize)
+                .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
-    }
-
-    private var toolbarDivider: some View {
-        Rectangle()
-            .fill(AppColors.borderSubtle)
-            .frame(width: 1, height: 20)
-            .padding(.horizontal, 6)
+        .accessibilityLabel("More tools")
     }
 
     private func toolbarButton(
         _ systemName: String,
+        label: String,
         enabled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(enabled ? AppColors.textSecondary : AppColors.textMuted)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
+                .frame(width: buttonSize, height: buttonSize)
+                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ToolbarIconButtonStyle())
         .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
+        .accessibilityLabel(label)
     }
+}
 
-    private func textButton(
-        _ label: String,
-        weight: Font.Weight = .medium,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            textLabel(label, weight: weight)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func textLabel(_ text: String, weight: Font.Weight) -> some View {
-        Text(text)
-            .font(.system(size: 15, weight: weight, design: .rounded))
-            .foregroundStyle(AppColors.textSecondary)
+private struct ToolbarIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                Circle()
+                    .fill(configuration.isPressed ? AppColors.borderSubtle.opacity(0.55) : .clear)
+            )
     }
 }
 
@@ -199,14 +210,11 @@ private struct NoteIPadFormattingToolbarHost: View {
             onAction: { bridge.applyAction?($0) },
             onDismissKeyboard: { bridge.dismissKeyboard() }
         )
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity)
     }
 }
 
 final class NoteFormattingToolbarAccessoryContainer: UIView {
-    static let preferredHeight: CGFloat = 48
+    static let preferredHeight: CGFloat = 64
 
     private let bridge: NoteFormattingToolbarBridge
     private var hostingController: UIHostingController<NoteIPadFormattingToolbarHost>?
@@ -235,8 +243,9 @@ final class NoteFormattingToolbarAccessoryContainer: UIView {
         host.view.translatesAutoresizingMaskIntoConstraints = false
         addSubview(host.view)
         NSLayoutConstraint.activate([
-            host.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-            host.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            host.view.centerXAnchor.constraint(equalTo: centerXAnchor),
+            host.view.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor),
+            host.view.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             host.view.topAnchor.constraint(equalTo: topAnchor),
             host.view.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])

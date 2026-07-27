@@ -42,6 +42,8 @@ struct WorkspaceShellView: View {
     @State private var vaultFolderPickerHandler: ((URL, VaultFolderPickerPurpose) -> Void)?
     #endif
     @State private var showOnboardingPreview = false
+    @State private var didLoadPersistence = false
+    @State private var isShellReady = false
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -56,19 +58,6 @@ struct WorkspaceShellView: View {
             if let vaultURL = workspace.activeVaultURL {
                 registry.migrateEmbeddedImages(vaultURL: vaultURL)
             }
-        }
-
-        let loadResult = WorkspacePersistence.load()
-        if let saved = loadResult.state {
-            workspace.restore(from: saved)
-            if loadResult.restoredFromBackup {
-                workspace.reportVaultError(
-                    title: "Couldn't read settings",
-                    message: "Restored your workspace from the last backup."
-                )
-            }
-        } else {
-            workspace.bootstrapDefaultVaultIfNeeded()
         }
 
         _workspace = State(initialValue: workspace)
@@ -101,8 +90,33 @@ struct WorkspaceShellView: View {
     }
 
     private func bootstrapShellIfNeeded() {
+        if !didLoadPersistence {
+            didLoadPersistence = true
+            let loadResult = WorkspacePersistence.load()
+            if let saved = loadResult.state {
+                workspace.restore(from: saved)
+                if loadResult.restoredFromBackup {
+                    workspace.reportVaultError(
+                        title: "Couldn't read settings",
+                        message: "Restored your workspace from the last backup."
+                    )
+                }
+            } else {
+                workspace.bootstrapDefaultVaultIfNeeded()
+            }
+            if workspace.tabs.isEmpty {
+                workspace.openFirstCanvasIfAvailable()
+            }
+        }
+
         startPersistenceIfNeeded()
         sidebarWidth = SidebarLayout.clamped(CGFloat(sidebarWidthStorage))
+        if workspace.vaults.isEmpty {
+            workspace.bootstrapDefaultVaultIfNeeded()
+        }
+        if workspace.tabs.isEmpty {
+            workspace.openFirstCanvasIfAvailable()
+        }
         workspace.checkActiveVaultAccessibility()
     }
 
@@ -113,8 +127,12 @@ struct WorkspaceShellView: View {
             macShell
                 .vaultErrorAlert(workspace: workspace)
             #else
-            iosShell
-                .vaultErrorAlert(workspace: workspace)
+            if isShellReady {
+                iosShell
+                    .vaultErrorAlert(workspace: workspace)
+            } else {
+                shellLoadingView
+            }
             #endif
             }
             .onboardingGuidedFirstAction(workspace: workspace)
@@ -144,7 +162,24 @@ struct WorkspaceShellView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showOnboardingPreview)
+        .task {
+            bootstrapShellIfNeeded()
+            isShellReady = true
+        }
     }
+
+    #if os(iOS)
+    private var shellLoadingView: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Loading workspace…")
+                .font(.system(size: 14))
+                .foregroundStyle(AppColors.textSecondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppColors.shellBackground)
+    }
+    #endif
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -1149,6 +1184,8 @@ struct WorkspaceShellView: View {
                 .onAppear {
                     canvasDocuments.store(for: fileID).setVaultFiles(workspace.files)
                 }
+            } else {
+                newTabPlaceholder(paneID: paneID)
             }
         case .note:
             if let fileID = tab?.fileID {
@@ -1288,7 +1325,6 @@ struct WorkspaceShellView: View {
         .background(AppColors.canvasBackground)
         .foregroundStyle(AppColors.textPrimary)
         .ignoresSafeArea(.container, edges: .top)
-        .onAppear(perform: bootstrapShellIfNeeded)
         .onChange(of: workspace.activeTabID) { _, _ in
             noteIsReading = false
             noteSplitLayout = .none
@@ -1364,7 +1400,6 @@ struct WorkspaceShellView: View {
         .background(AppColors.canvasBackground)
         .foregroundStyle(AppColors.textPrimary)
         .toolbar(.hidden, for: .navigationBar)
-        .onAppear(perform: bootstrapShellIfNeeded)
         .onChange(of: workspace.activeTabID) { _, _ in
             noteIsReading = false
             noteSplitLayout = .none

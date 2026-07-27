@@ -15,7 +15,7 @@ enum NoteEditingMenuBuilder {
     }
 
     static var insertActions: [MarkdownEditAction] {
-        [.wikilink, .externalLink, .codeBlock, .horizontalRule, .callout]
+        [.wikilink, .embed, .attachment, .externalLink, .codeBlock, .horizontalRule, .callout]
     }
 
     #if os(macOS)

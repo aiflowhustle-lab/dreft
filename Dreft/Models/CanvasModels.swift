@@ -40,6 +40,8 @@ struct CanvasCard: Identifiable, Codable, Equatable {
     var title: String?
     var colorHex: String?
     var createdAt: Date?
+    /// When true, auto-fit won't shrink the card below this height (manual resize).
+    var usesManualHeight: Bool? = nil
 
     static func make(kind: CardKind, at center: CGPoint) -> CanvasCard {
         let size: (CGFloat, CGFloat, String) = switch kind {
@@ -221,6 +223,8 @@ enum CanvasConstants {
     /// Default compact note size (image-card connection / canvas click).
     static let compactNoteWidth: CGFloat = 180
     static let compactNoteHeight: CGFloat = 56
+    /// Base note body size in card/world space — multiplied by canvas zoom for screen rendering.
+    static let noteCardFontSize: CGFloat = 13
     /// Default dangling connector length when clicking a handle without dragging.
     static let defaultConnectDistance: CGFloat = 150
 }

@@ -12,6 +12,8 @@ enum OnboardingMotion {
     static let typewriterCharacterDelayMs: Int = 34
     static let typewriterSubtitleDelayMs: Int = 180
     static let typewriterContentDelayMs: Int = 220
+    static let genreChipStaggerDelayMs: Int = 55
+    static let genreChipFadeDuration: Double = 0.45
 
     static var screenSlide: Animation {
         .easeInOut(duration: screenSlideDuration)

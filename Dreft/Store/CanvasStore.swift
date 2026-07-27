@@ -148,11 +148,16 @@ final class CanvasStore {
     }
 
     func endContentEdit(skipPersist: Bool = false) {
-        let hadSession = contentEditSessionCardID != nil
+        let editingID = contentEditSessionCardID
         contentEditPersistTask?.cancel()
         contentEditSessionCardID = nil
         contentEditLastChange = nil
-        if hadSession, !skipPersist {
+        if editingID != nil, !skipPersist {
+            if let editingID,
+               let card = cards.first(where: { $0.id == editingID }),
+               card.usesManualHeight != true {
+                fitNoteCardToContent(for: editingID)
+            }
             notifyMutated()
         }
     }
@@ -638,8 +643,68 @@ final class CanvasStore {
         contentEditPersistTask?.cancel()
         contentEditPersistTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard !Task.isCancelled, self?.contentEditSessionCardID != nil else { return }
-            self?.notifyMutated()
+            guard !Task.isCancelled, let self, let id = self.contentEditSessionCardID else { return }
+            if self.cards.first(where: { $0.id == id })?.usesManualHeight != true {
+                self.fitNoteCardToContent(for: id)
+            }
+            self.notifyMutated()
+        }
+    }
+
+    /// Commits debounced note-card edits immediately (e.g. after inserting an attachment).
+    func flushPendingContentEdit() {
+        contentEditPersistTask?.cancel()
+        if let id = contentEditSessionCardID,
+           cards.first(where: { $0.id == id })?.usesManualHeight != true {
+            fitNoteCardToContent(for: id)
+            notifyMutated()
+        }
+    }
+
+    /// Grows or shrinks a note card vertically so embedded images and text stay inside the frame.
+    func fitNoteCardToContent(for id: String) {
+        guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+        guard cards[index].kind == .note || cards[index].kind == .text else { return }
+
+        let card = cards[index]
+        let markdown = CanvasCardContent.markdownBody(
+            for: card,
+            vaultURL: vaultURL,
+            vaultFiles: vaultFiles
+        )
+        let innerWidth = max(1, card.width - NoteCardContentLayout.contentHorizontalPadding)
+        let targetHeight = NoteCardContentLayout.requiredCardHeight(
+            content: markdown,
+            vaultURL: vaultURL,
+            cardWidth: card.width,
+            imageSizeForPath: { path in
+                NoteCardInlineImageMetrics.estimatedSize(
+                    for: path,
+                    vaultURL: vaultURL,
+                    maxWidth: innerWidth
+                )
+            }
+        )
+        guard abs(cards[index].height - targetHeight) > 0.5 else { return }
+        if cards[index].usesManualHeight == true {
+            return
+        }
+        cards[index].height = targetHeight
+    }
+
+    /// Ensures note cards on disk match their text + embed layout (e.g. after opening older canvases).
+    func fitAllNoteCardsToContent(persist: Bool = false) {
+        var changed = false
+        for card in cards where card.kind == .note || card.kind == .text {
+            if card.usesManualHeight == true { continue }
+            let before = card.height
+            fitNoteCardToContent(for: card.id)
+            if let updated = cards.first(where: { $0.id == card.id }), updated.height != before {
+                changed = true
+            }
+        }
+        if changed {
+            notifyMutated(persistToDisk: persist)
         }
     }
 
@@ -704,6 +769,9 @@ final class CanvasStore {
             cards[index].y = resolved.origin.y
             cards[index].width = resolved.width
             cards[index].height = resolved.height
+            if cards[index].kind == .note || cards[index].kind == .text {
+                cards[index].usesManualHeight = true
+            }
         }
         notifyMutated()
     }

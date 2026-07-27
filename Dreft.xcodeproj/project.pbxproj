@@ -106,6 +106,15 @@
 		SM000104 /* OnboardingSeamlessComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100104 /* OnboardingSeamlessComponents.swift */; };
 		SM000105 /* OnboardingTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100105 /* OnboardingTypography.swift */; };
 		SM000106 /* SpaceGrotesk.ttf in Resources */ = {isa = PBXBuildFile; fileRef = SM200003 /* SpaceGrotesk.ttf */; };
+		SM000107 /* MarkdownEditingSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100107 /* MarkdownEditingSupportTests.swift */; };
+		SM000108 /* CanvasCardColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100108 /* CanvasCardColors.swift */; };
+		SM000109 /* NoteCardEmbedSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100109 /* NoteCardEmbedSupport.swift */; };
+		SM000112 /* NoteImageDropSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100112 /* NoteImageDropSupport.swift */; };
+		SM000115 /* CanvasNoteCardPreviewScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100115 /* CanvasNoteCardPreviewScroller.swift */; };
+		SM000114 /* CanvasNoteCardScrollBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100114 /* CanvasNoteCardScrollBridge.swift */; };
+		SM000113 /* CanvasNoteCardScrollIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100113 /* CanvasNoteCardScrollIndicator.swift */; };
+		SM000111 /* NoteCardContentLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100111 /* NoteCardContentLayout.swift */; };
+		SM000110 /* CanvasNoteCardBodyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100110 /* CanvasNoteCardBodyView.swift */; };
 		SM000086 /* GraphDocumentOptionsMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100086 /* GraphDocumentOptionsMenu.swift */; };
 		SM000087 /* NoteIPadFormattingToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100087 /* NoteIPadFormattingToolbar.swift */; };
 		SM000088 /* NoteFormattingToolbarBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100088 /* NoteFormattingToolbarBridge.swift */; };
@@ -219,6 +228,15 @@
 		SM100103 /* OnboardingMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingMotion.swift; sourceTree = "<group>"; };
 		SM100104 /* OnboardingSeamlessComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSeamlessComponents.swift; sourceTree = "<group>"; };
 		SM100105 /* OnboardingTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTypography.swift; sourceTree = "<group>"; };
+		SM100107 /* MarkdownEditingSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditingSupportTests.swift; sourceTree = "<group>"; };
+		SM100108 /* CanvasCardColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardColors.swift; sourceTree = "<group>"; };
+		SM100109 /* NoteCardEmbedSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCardEmbedSupport.swift; sourceTree = "<group>"; };
+		SM100115 /* CanvasNoteCardPreviewScroller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteCardPreviewScroller.swift; sourceTree = "<group>"; };
+		SM100114 /* CanvasNoteCardScrollBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteCardScrollBridge.swift; sourceTree = "<group>"; };
+		SM100113 /* CanvasNoteCardScrollIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteCardScrollIndicator.swift; sourceTree = "<group>"; };
+		SM100112 /* NoteImageDropSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteImageDropSupport.swift; sourceTree = "<group>"; };
+		SM100111 /* NoteCardContentLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCardContentLayout.swift; sourceTree = "<group>"; };
+		SM100110 /* CanvasNoteCardBodyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteCardBodyView.swift; sourceTree = "<group>"; };
 		SM200003 /* SpaceGrotesk.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = SpaceGrotesk.ttf; sourceTree = "<group>"; };
 		SM100086 /* GraphDocumentOptionsMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphDocumentOptionsMenu.swift; sourceTree = "<group>"; };
 		SM100087 /* NoteIPadFormattingToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteIPadFormattingToolbar.swift; sourceTree = "<group>"; };
@@ -347,6 +365,7 @@
 				SM100071 /* CanvasEdgeLabelLayer.swift */,
 				SM100072 /* CanvasEdgeHitOverlay.swift */,
 				SM100075 /* CanvasNoteEditOverlay.swift */,
+				SM100110 /* CanvasNoteCardBodyView.swift */,
 			);
 			path = Canvas;
 			sourceTree = "<group>";
@@ -396,6 +415,13 @@
 				SM100029 /* WikilinkParser.swift */,
 				SM100095 /* NoteTagParser.swift */,
 				SM100054 /* WikilinkEditorSupport.swift */,
+				SM100108 /* CanvasCardColors.swift */,
+				SM100109 /* NoteCardEmbedSupport.swift */,
+				SM100115 /* CanvasNoteCardPreviewScroller.swift */,
+				SM100114 /* CanvasNoteCardScrollBridge.swift */,
+				SM100113 /* CanvasNoteCardScrollIndicator.swift */,
+				SM100112 /* NoteImageDropSupport.swift */,
+				SM100111 /* NoteCardContentLayout.swift */,
 				SM100031 /* AdvancedColorPickerPopover.swift */,
 				SM100032 /* GraphLinkIndex.swift */,
 				SM100044 /* GraphLayoutPersistence.swift */,
@@ -424,6 +450,7 @@
 			isa = PBXGroup;
 			children = (
 				SM100051 /* DataSafetyUpgradeTests.swift */,
+				SM100107 /* MarkdownEditingSupportTests.swift */,
 			);
 			path = DreftTests;
 			sourceTree = "<group>";
@@ -603,6 +630,14 @@
 				SM000053 /* DreftBrandMark.swift in Sources */,
 				SM000054 /* DreftHelpView.swift in Sources */,
 				SM000055 /* WikilinkEditorSupport.swift in Sources */,
+				SM000108 /* CanvasCardColors.swift in Sources */,
+				SM000109 /* NoteCardEmbedSupport.swift in Sources */,
+				SM000115 /* CanvasNoteCardPreviewScroller.swift in Sources */,
+				SM000114 /* CanvasNoteCardScrollBridge.swift in Sources */,
+				SM000113 /* CanvasNoteCardScrollIndicator.swift in Sources */,
+				SM000112 /* NoteImageDropSupport.swift in Sources */,
+				SM000111 /* NoteCardContentLayout.swift in Sources */,
+				SM000110 /* CanvasNoteCardBodyView.swift in Sources */,
 				SM000056 /* NoteBodyTextView.swift in Sources */,
 				SM000057 /* WikilinkSuggestPopover.swift in Sources */,
 				SM000058 /* AddBookmarkSheet.swift in Sources */,
@@ -652,6 +687,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				SM000051 /* DataSafetyUpgradeTests.swift in Sources */,
+				SM000107 /* MarkdownEditingSupportTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -3,18 +3,24 @@ import SwiftUI
 
 /// Caches rendered note previews so undo/redo does not re-parse markdown for every card.
 enum NotePreviewCache {
+    private static let rendererVersion = 3
     private static var cache: [String: AttributedString] = [:]
     private static var order: [String] = []
     private static let maxEntries = 96
 
+    private static func cacheKey(for content: String) -> String {
+        "\(rendererVersion)|\(content)"
+    }
+
     static func canvasCardPreview(for content: String) -> AttributedString {
-        if let cached = cache[content] {
+        let key = cacheKey(for: content)
+        if let cached = cache[key] {
             return cached
         }
 
         let rendered = NoteMarkdownRenderer.canvasCardPreviewAttributedString(from: content)
-        cache[content] = rendered
-        order.append(content)
+        cache[key] = rendered
+        order.append(key)
         if order.count > maxEntries, let oldest = order.first {
             order.removeFirst()
             cache.removeValue(forKey: oldest)

@@ -45,11 +45,15 @@ struct InfiniteCanvasView: View {
   @State private var hoverEdgeID: String?
   @State private var editingEdgeLabelID: String?
   @State private var edgeLabelDraft = ""
-  #if os(iOS)
   @StateObject private var canvasNoteToolbarBridge = NoteFormattingToolbarBridge()
+  #if os(iOS)
+  @State private var showNoteAttachmentDialog = false
+  @State private var showNotePhotoPicker = false
+  @State private var showNoteFileImporter = false
   #endif
   #if canImport(PhotosUI)
   @State private var photoItems: [PhotosPickerItem] = []
+  @State private var noteAttachmentPhotoItem: PhotosPickerItem?
   #endif
   @State private var timelapsePlaying = false
   @State private var timelapseVisibleCardIDs: Set<String>?
@@ -61,119 +65,169 @@ struct InfiniteCanvasView: View {
   @State private var mountedCardIDs: Set<String> = []
   @State private var mountedEdgeIDs: Set<String> = []
   @State private var cullingDebounceTask: Task<Void, Never>?
+  /// Locks note edit typography when a card enters edit mode so typing stays the same size.
+  @State private var noteEditFontSize: CGFloat?
+  @State private var noteEditImageInserter: NoteImageInserter?
+
+  private var effectiveVaultURL: URL? {
+    vaultURL ?? store.vaultURL
+  }
 
   var body: some View {
     GeometryReader { geo in
-      let size = geo.size
-      let safeBottom = geo.safeAreaInsets.bottom
-      let vaultFiles = VaultFile.openableFiles(from: workspace.files)
-      let edgesInView = mountedEdges(for: size)
-      ZStack {
-        AppColors.canvasBackground
+      canvasGeometryContent(geo: geo)
+    }
+  }
 
-        if showCanvasGrid {
-          DotGridBackground(
-            panOffset: CGSize(width: displayTransform.x, height: displayTransform.y),
-            dotColor: AppColors.gridDotColor
-          )
-        }
+  @ViewBuilder
+  private func canvasGeometryContent(geo: GeometryProxy) -> some View {
+    let size = geo.size
+    let safeBottom = geo.safeAreaInsets.bottom
+    let vaultFiles = VaultFile.openableFiles(from: workspace.files)
+    let edgesInView = mountedEdges(for: size)
 
-        canvasInteractionBackground(canvasSize: size)
-
-        canvasCardsLayer(canvasSize: size, vaultFiles: vaultFiles)
-          .zIndex(3)
-
-        CanvasEdgeHitOverlay(
-          transform: displayTransform,
-          cardIndex: cardIndex,
-          edges: edgesInView,
-          positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides,
-          edgeEndpoint: { edge in
-            store.edgeEndpoint(
-              for: edge,
-              positionOverrides: cardDragOverrides,
-              resizeOverrides: cardResizeOverrides
+    canvasImportAndPlatformModifiers(size: size) {
+      canvasGestureAndLifecycleModifiers(size: size) {
+        canvasChromeOverlays(
+          size: size,
+          safeBottom: safeBottom,
+          vaultFiles: vaultFiles
+        ) {
+          canvasSelectionChangeHandlers(size: size) {
+            canvasLayerStack(
+              size: size,
+              vaultFiles: vaultFiles,
+              edgesInView: edgesInView
             )
-          },
-          onHoverEdge: { edgeID in
-            Task { @MainActor in
-              hoverEdgeID = edgeID
-            }
+            .frame(width: size.width, height: size.height)
+            .clipped()
           }
-        )
-        .zIndex(4)
-        #if os(macOS)
-        .allowsHitTesting(!timelapsePlaying && store.selectedCardID == nil)
-        #else
-        .allowsHitTesting(false)
-        #endif
-        #if os(macOS)
-        .canvasEdgeHandCursor(
-          isActive: hoverEdgeID != nil
-            || store.selectedEdgeID != nil
-            || edgeInteractionActive
-            || pendingEdgeInteractionID != nil
-            || store.editingEdgeID != nil,
-          isGrabbing: edgeInteractionActive
-            || pendingEdgeInteractionID != nil
-            || store.editingEdgeID != nil
-        )
-        #endif
-
-        CanvasEdgesScreenOverlay(
-          transform: displayTransform,
-          cardIndex: cardIndex,
-          edges: edgesInView,
-          connectingFrom: store.connectingFrom,
-          positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides,
-          selectedEdgeID: store.selectedEdgeID,
-          editingEdgeID: editingEdgeLabelID,
-          editingLabelDraft: edgeLabelDraft
-        )
-        .zIndex(5)
-
-        CanvasEdgeLabelLayer(
-          transform: displayTransform,
-          cardIndex: cardIndex,
-          edges: edgesInView,
-          positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides,
-          editingEdgeID: editingEdgeLabelID,
-          labelDraft: $edgeLabelDraft,
-          onCommit: { edgeID, label in
-            store.setEdgeLabel(edgeID, label: label)
-            editingEdgeLabelID = nil
-          },
-          onBeginEdit: { edgeID in
-            editingEdgeLabelID = edgeID
-          }
-        )
-        .zIndex(6)
-
-        canvasCardToolbarLayer(canvasSize: size)
-          .zIndex(110)
-
-        if store.isDragOver { dropOverlay }
-
-        if store.contextMenu != nil {
-          Color.clear
-            .contentShape(Rectangle())
-            .onTapGesture {
-              store.dismissPendingEndpoint()
-              store.selectedCardID = nil
-              store.focusCardID = nil
-            }
-            .zIndex(99)
-        }
-
-        if let menu = store.contextMenu {
-          contextMenuOverlay(menu, canvasSize: size)
         }
       }
-      .frame(width: size.width, height: size.height)
-      .clipped()
+    }
+  }
+
+  @ViewBuilder
+  private func canvasLayerStack(
+    size: CGSize,
+    vaultFiles: [VaultFile],
+    edgesInView: [CanvasEdge]
+  ) -> some View {
+    ZStack {
+      AppColors.canvasBackground
+
+      if showCanvasGrid {
+        DotGridBackground(
+          panOffset: CGSize(width: displayTransform.x, height: displayTransform.y),
+          dotColor: AppColors.gridDotColor
+        )
+      }
+
+      canvasInteractionBackground(canvasSize: size)
+
+      canvasCardsLayer(canvasSize: size, vaultFiles: vaultFiles)
+        .zIndex(3)
+
+      canvasEdgeHitOverlay(edgesInView: edgesInView)
+        .zIndex(4)
+
+      CanvasEdgesScreenOverlay(
+        transform: displayTransform,
+        cardIndex: cardIndex,
+        edges: edgesInView,
+        connectingFrom: store.connectingFrom,
+        positionOverrides: cardDragOverrides,
+        resizeOverrides: cardResizeOverrides,
+        selectedEdgeID: store.selectedEdgeID,
+        editingEdgeID: editingEdgeLabelID,
+        editingLabelDraft: edgeLabelDraft
+      )
+      .zIndex(5)
+
+      CanvasEdgeLabelLayer(
+        transform: displayTransform,
+        cardIndex: cardIndex,
+        edges: edgesInView,
+        positionOverrides: cardDragOverrides,
+        resizeOverrides: cardResizeOverrides,
+        editingEdgeID: editingEdgeLabelID,
+        labelDraft: $edgeLabelDraft,
+        onCommit: { edgeID, label in
+          store.setEdgeLabel(edgeID, label: label)
+          editingEdgeLabelID = nil
+        },
+        onBeginEdit: { edgeID in
+          editingEdgeLabelID = edgeID
+        }
+      )
+      .zIndex(6)
+
+      if store.isDragOver { dropOverlay }
+
+      if store.contextMenu != nil {
+        Color.clear
+          .contentShape(Rectangle())
+          .onTapGesture {
+            store.dismissPendingEndpoint()
+            store.selectedCardID = nil
+            store.focusCardID = nil
+          }
+          .zIndex(99)
+      }
+
+      if let menu = store.contextMenu {
+        contextMenuOverlay(menu, canvasSize: size)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func canvasEdgeHitOverlay(edgesInView: [CanvasEdge]) -> some View {
+    let overlay = CanvasEdgeHitOverlay(
+      transform: displayTransform,
+      cardIndex: cardIndex,
+      edges: edgesInView,
+      positionOverrides: cardDragOverrides,
+      resizeOverrides: cardResizeOverrides,
+      edgeEndpoint: { edge in
+        store.edgeEndpoint(
+          for: edge,
+          positionOverrides: cardDragOverrides,
+          resizeOverrides: cardResizeOverrides
+        )
+      },
+      onHoverEdge: { edgeID in
+        Task { @MainActor in
+          hoverEdgeID = edgeID
+        }
+      }
+    )
+
+    #if os(macOS)
+    overlay
+      .allowsHitTesting(!timelapsePlaying && store.selectedCardID == nil)
+      .canvasEdgeHandCursor(
+        isActive: hoverEdgeID != nil
+          || store.selectedEdgeID != nil
+          || edgeInteractionActive
+          || pendingEdgeInteractionID != nil
+          || store.editingEdgeID != nil,
+        isGrabbing: edgeInteractionActive
+          || pendingEdgeInteractionID != nil
+          || store.editingEdgeID != nil
+      )
+    #else
+    overlay
+      .allowsHitTesting(false)
+    #endif
+  }
+
+  @ViewBuilder
+  private func canvasSelectionChangeHandlers<Content: View>(
+    size: CGSize,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    content()
       .onChange(of: store.selectedCardID) { _, _ in
         cardToolbarColorRowOpen = false
         cardToolbarCustomColorOpen = false
@@ -197,54 +251,45 @@ struct InfiniteCanvasView: View {
       .onChange(of: imageTitleRenameTokens) { _, _ in
         clearCardInteractionState()
       }
-      #if os(iOS)
-      .overlay {
-        CanvasTouchCaptureView(
-          passesThroughHits: true,
-          isEnabled: canvasPanZoomEnabled,
-          blocksNavigationAt: { point in
-            blocksCanvasNavigation(at: point, canvasSize: size)
-          },
-          onPan: { delta in
-            isCanvasInteracting = true
-            displayTransform.x += delta.width
-            displayTransform.y += delta.height
-          },
-          onPanBegan: {
-            isCanvasInteracting = true
-            panActive = true
-            cancelPendingEdgeInteraction()
-          },
-          onPanEnded: {
-            panActive = false
-            finishCanvasInteraction()
-          },
-          onPinchBegan: { _ in
-            guard !isCardDragging, !isCardResizing else { return }
-            isCanvasInteracting = true
-            pinchStartZoom = displayTransform.zoom
-          },
-          onPinchChanged: { scale, anchor in
-            guard !isCardDragging, !isCardResizing else { return }
-            let startZoom = pinchStartZoom ?? displayTransform.zoom
-            let newZoom = min(
-              CanvasViewTransform.maxZoom,
-              max(CanvasViewTransform.minZoom, startZoom * scale)
-            )
-            applyZoom(at: anchor, targetZoom: newZoom)
-          },
-          onPinchEnded: {
-            pinchStartZoom = nil
-            finishCanvasInteraction()
-          },
-          onLongPress: { location in
-            handleCanvasLongPress(at: location, canvasSize: size)
-          }
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(false)
+  }
+
+  @ViewBuilder
+  private func canvasChromeOverlays<Content: View>(
+    size: CGSize,
+    safeBottom: CGFloat,
+    vaultFiles: [VaultFile],
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    canvasFloatingToolbarOverlays(size: size, safeBottom: safeBottom, vaultFiles: vaultFiles) {
+      canvasTouchOverlayIfNeeded(canvasSize: size) {
+        content()
       }
-      #endif
+    }
+  }
+
+  @ViewBuilder
+  private func canvasTouchOverlayIfNeeded<Content: View>(
+    canvasSize: CGSize,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    #if os(iOS)
+    content()
+      .overlay {
+        canvasTouchCaptureOverlay(canvasSize: canvasSize)
+      }
+    #else
+    content()
+    #endif
+  }
+
+  @ViewBuilder
+  private func canvasFloatingToolbarOverlays<Content: View>(
+    size: CGSize,
+    safeBottom: CGFloat,
+    vaultFiles: [VaultFile],
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    content()
       .overlay(alignment: .topTrailing) {
         canvasRightToolbar(canvasSize: size)
           .zIndex(300)
@@ -270,6 +315,10 @@ struct InfiniteCanvasView: View {
           .zIndex(250)
       }
       .overlay {
+        canvasCardToolbarLayer(canvasSize: size)
+          .zIndex(260)
+      }
+      .overlay {
         if store.isVaultOpen {
           VaultSearchSheet(store: store, workspace: workspace, canvasSize: size)
             .zIndex(200)
@@ -283,9 +332,105 @@ struct InfiniteCanvasView: View {
           .zIndex(400)
       }
       .background(AppColors.canvasBackground)
-      #if os(macOS)
-      .onCanvasScroll { delta, location, zoomRequested, phaseEnded in
-        if store.contextMenu != nil || store.isVaultOpen || store.focusCardID != nil { return }
+  }
+
+  #if os(iOS)
+  private func canvasTouchCaptureOverlay(canvasSize: CGSize) -> some View {
+    CanvasTouchCaptureView(
+      passesThroughHits: true,
+      isEnabled: canvasPanZoomEnabled,
+      blocksNavigationAt: { point in
+        blocksCanvasNavigation(at: point, canvasSize: canvasSize)
+      },
+      onPan: { delta in
+        isCanvasInteracting = true
+        displayTransform.x += delta.width
+        displayTransform.y += delta.height
+      },
+      onPanBegan: {
+        isCanvasInteracting = true
+        panActive = true
+        cancelPendingEdgeInteraction()
+      },
+      onPanEnded: {
+        panActive = false
+        finishCanvasInteraction()
+      },
+      onPinchBegan: { _ in
+        guard !isCardDragging, !isCardResizing else { return }
+        isCanvasInteracting = true
+        pinchStartZoom = displayTransform.zoom
+      },
+      onPinchChanged: { scale, anchor in
+        guard !isCardDragging, !isCardResizing else { return }
+        let startZoom = pinchStartZoom ?? displayTransform.zoom
+        let newZoom = min(
+          CanvasViewTransform.maxZoom,
+          max(CanvasViewTransform.minZoom, startZoom * scale)
+        )
+        applyZoom(at: anchor, targetZoom: newZoom)
+      },
+      onPinchEnded: {
+        pinchStartZoom = nil
+        finishCanvasInteraction()
+      },
+      onLongPress: { location in
+        handleCanvasLongPress(at: location, canvasSize: canvasSize)
+      }
+    )
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .allowsHitTesting(false)
+  }
+  #endif
+
+  @ViewBuilder
+  private func canvasGestureAndLifecycleModifiers<Content: View>(
+    size: CGSize,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    canvasMacScrollModifiers(size: size) {
+      content()
+        .simultaneousGesture(edgeInteractionGesture(canvasSize: size))
+        .onAppear {
+          displayTransform = store.transform
+          store.vaultURL = vaultURL
+          store.viewportSize = size
+          store.fitAllNoteCardsToContent()
+          replaceMountedContent(for: size)
+          scheduleOnboardingTimelapseIfNeeded(canvasSize: size)
+        }
+        .onDisappear {
+          stopCanvasTimelapse(showAll: true)
+          CanvasImageCache.shared.setPinnedKeys([])
+        }
+        .onChange(of: size) { _, newSize in
+          store.viewportSize = newSize
+          replaceMountedContent(for: newSize)
+        }
+        .onChange(of: vaultURL) { _, newURL in
+          store.vaultURL = newURL
+        }
+        .onChange(of: store.transform) { _, newValue in
+          guard !independentCamera, !isCanvasInteracting, !isCardDragging else { return }
+          displayTransform = newValue
+        }
+        .onDrop(of: [.image, .fileURL], isTargeted: $store.isDragOver) { providers, location in
+          importDroppedImages(providers, at: location, canvasSize: size)
+        }
+    }
+  }
+
+  @ViewBuilder
+  private func canvasMacScrollModifiers<Content: View>(
+    size: CGSize,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    #if os(macOS)
+    content()
+      .onCanvasScroll(shouldPassToContent: { location in
+        shouldPassScrollToNoteCard(at: location, canvasSize: size)
+      }) { delta, location, zoomRequested, phaseEnded in
+        if store.contextMenu != nil || store.isVaultOpen { return }
         isCanvasInteracting = true
         if zoomRequested {
           applyZoom(at: location, factor: exp(-delta.height * 0.0015))
@@ -297,43 +442,98 @@ struct InfiniteCanvasView: View {
           finishCanvasInteraction()
         }
       }
-      #endif
-      #if os(macOS)
       .simultaneousGesture(store.contextMenu == nil ? pinchGesture(in: size) : nil)
-      #endif
-      .simultaneousGesture(edgeInteractionGesture(canvasSize: size))
+    #else
+    content()
+    #endif
+  }
+
+  @ViewBuilder
+  private func canvasImportAndPlatformModifiers<Content: View>(
+    size: CGSize,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    canvasMacPlatformModifiers(size: size) {
+      canvasFileImportModifiers {
+        canvasPhotoImportModifiers(size: size, content: content)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func canvasPhotoImportModifiers<Content: View>(
+    size: CGSize,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    #if canImport(PhotosUI)
+    canvasNoteAttachmentModifiers(size: size, content: {
+      content()
+        .photosPicker(isPresented: $showImagePicker, selection: $photoItems, maxSelectionCount: 10, matching: .images)
+        .onChange(of: photoItems) { _, items in
+          Task { await importPickedPhotos(items, canvasSize: size) }
+        }
+    })
+    #elseif os(macOS)
+    canvasNoteAttachmentModifiers(size: size, content: content)
+    #else
+    content()
+    #endif
+  }
+
+  #if os(iOS)
+  @ViewBuilder
+  private func canvasNoteAttachmentModifiers<Content: View>(
+    size: CGSize,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    content()
+      .photosPicker(isPresented: $showNotePhotoPicker, selection: $noteAttachmentPhotoItem, matching: .images)
+      .onChange(of: noteAttachmentPhotoItem) { _, item in
+        guard let item else { return }
+        Task { await importNoteAttachmentPhoto(item) }
+      }
+      .confirmationDialog(
+        "Insert attachment",
+        isPresented: $showNoteAttachmentDialog,
+        titleVisibility: .visible
+      ) {
+        Button("Photo Library") { showNotePhotoPicker = true }
+        Button("Choose File") { showNoteFileImporter = true }
+        Button("Cancel", role: .cancel) {}
+      }
+      .fileImporter(
+        isPresented: $showNoteFileImporter,
+        allowedContentTypes: [.image],
+        allowsMultipleSelection: false
+      ) { result in
+        importNoteAttachmentFile(from: result)
+      }
       .onAppear {
-        displayTransform = store.transform
-        store.vaultURL = vaultURL
-        store.viewportSize = size
-        replaceMountedContent(for: size)
-        scheduleOnboardingTimelapseIfNeeded(canvasSize: size)
+        canvasNoteToolbarBridge.onInsertAttachment = {
+          showNoteAttachmentDialog = true
+        }
       }
-      .onDisappear {
-        stopCanvasTimelapse(showAll: true)
-        CanvasImageCache.shared.setPinnedKeys([])
+  }
+  #elseif os(macOS)
+  @ViewBuilder
+  private func canvasNoteAttachmentModifiers<Content: View>(
+    size: CGSize,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    content()
+      .onAppear {
+        canvasNoteToolbarBridge.onInsertAttachment = {
+          openMacNoteAttachmentPanel()
+        }
       }
-      .onChange(of: size) { _, newSize in
-        store.viewportSize = newSize
-        replaceMountedContent(for: newSize)
-      }
-      .onChange(of: vaultURL) { _, newURL in
-        store.vaultURL = newURL
-      }
-      .onChange(of: store.transform) { _, newValue in
-        // Split panes keep independent cameras; only the primary document owner syncs.
-        guard !independentCamera, !isCanvasInteracting, !isCardDragging else { return }
-        displayTransform = newValue
-      }
-      .onDrop(of: [.image, .fileURL], isTargeted: $store.isDragOver) { providers, location in
-        importDroppedImages(providers, at: location, canvasSize: size)
-      }
-      #if canImport(PhotosUI)
-      .photosPicker(isPresented: $showImagePicker, selection: $photoItems, maxSelectionCount: 10, matching: .images)
-      .onChange(of: photoItems) { _, items in
-        Task { await importPickedPhotos(items, canvasSize: size) }
-      }
-      #endif
+  }
+  #endif
+
+  @ViewBuilder
+  private func canvasFileImportModifiers<Content: View>(
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    content()
       .fileImporter(
         isPresented: $showImageSwapPicker,
         allowedContentTypes: [.image],
@@ -341,31 +541,46 @@ struct InfiniteCanvasView: View {
       ) { result in
         importSwappedImage(from: result)
       }
-      #if os(macOS)
+  }
+
+  @ViewBuilder
+  private func canvasMacPlatformModifiers<Content: View>(
+    size: CGSize,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    #if os(macOS)
+    content()
       .onReceive(NotificationCenter.default.publisher(for: .openImagePanel)) { _ in
         openMacImagePanel(canvasSize: size)
       }
       .focusable()
       .focusEffectDisabled()
       .background {
-        Group {
-          Button("") { store.undo() }
-            .keyboardShortcut("z", modifiers: .command)
-            .disabled(!store.canUndo)
-          Button("") { store.redo() }
-            .keyboardShortcut("z", modifiers: [.command, .shift])
-            .disabled(!store.canRedo)
-          Button("") { zoomToFitAll(canvasSize: size) }
-            .keyboardShortcut("1", modifiers: .shift)
-          Button("") { zoomToSelection(canvasSize: size) }
-            .keyboardShortcut("2", modifiers: .shift)
-        }
-        .opacity(0)
-        .frame(width: 0, height: 0)
+        canvasKeyboardShortcuts(canvasSize: size)
       }
-      #endif
-    }
+    #else
+    content()
+    #endif
   }
+
+  #if os(macOS)
+  private func canvasKeyboardShortcuts(canvasSize: CGSize) -> some View {
+    Group {
+      Button("") { store.undo() }
+        .keyboardShortcut("z", modifiers: .command)
+        .disabled(!store.canUndo)
+      Button("") { store.redo() }
+        .keyboardShortcut("z", modifiers: [.command, .shift])
+        .disabled(!store.canRedo)
+      Button("") { zoomToFitAll(canvasSize: canvasSize) }
+        .keyboardShortcut("1", modifiers: .shift)
+      Button("") { zoomToSelection(canvasSize: canvasSize) }
+        .keyboardShortcut("2", modifiers: .shift)
+    }
+    .opacity(0)
+    .frame(width: 0, height: 0)
+  }
+  #endif
 
   // MARK: - World
 
@@ -396,7 +611,7 @@ struct InfiniteCanvasView: View {
   }
 
   private func canvasViewportPadding() -> CGFloat {
-    if isCanvasInteracting || isCardResizing {
+    if isCardResizing || isCardDragging {
       return CanvasConstants.interactionViewportPadding
     }
     return CanvasConstants.viewportPadding
@@ -524,9 +739,7 @@ struct InfiniteCanvasView: View {
         store.endContentEdit()
         store.focusCardID = nil
         editingEdgeLabelID = nil
-        #if os(iOS)
         canvasNoteToolbarBridge.dismissKeyboard()
-        #endif
       }
   }
 
@@ -598,6 +811,41 @@ struct InfiniteCanvasView: View {
       y: origin.y + (liveFrame.height * zoom) / 2
     )
   }
+
+  private func noteCardScreenRect(for card: CanvasCard) -> CGRect {
+    let worldFrame = cardDisplayFrame(card)
+    let transform = cardRenderTransform
+    let origin = cardScreenOrigin(for: worldFrame, transform: transform)
+    let zoom = transform.zoom
+    return CGRect(
+      x: origin.x,
+      y: origin.y,
+      width: worldFrame.width * zoom,
+      height: worldFrame.height * zoom
+    )
+  }
+
+  #if os(macOS)
+  /// Let note-card scroll views consume the wheel when the pointer is over editable/selected card content.
+  private func shouldPassScrollToNoteCard(at location: CGPoint, canvasSize: CGSize) -> Bool {
+    _ = canvasSize
+    if store.contextMenu != nil || store.isVaultOpen { return false }
+
+    if let focusID = store.focusCardID,
+       let card = cardIndex[focusID],
+       card.kind != .image {
+      return noteCardScreenRect(for: card).contains(location)
+    }
+
+    if let selectedID = store.selectedCardID,
+       let card = cardIndex[selectedID],
+       card.kind != .image {
+      return noteCardScreenRect(for: card).contains(location)
+    }
+
+    return false
+  }
+  #endif
 
   private var cardRenderTransform: CanvasViewTransform {
     if isCardDragging || isCardResizing, let frozen = cardInteractionFrozenTransform {
@@ -734,10 +982,26 @@ struct InfiniteCanvasView: View {
       let loaded = await CanvasImageCache.shared.prepareDisplayImageIfNeeded(
         forCardID: card.id,
         content: card.content,
-        vaultURL: vaultURL
+        vaultURL: effectiveVaultURL
       )
       if loaded {
         await MainActor.run { store.imageCacheRevision += 1 }
+      }
+    }
+
+    let visibleNotes = store.cards.filter { prefetchIDs.contains($0.id) && $0.kind != .image }
+    for card in visibleNotes {
+      guard let vault = effectiveVaultURL else { continue }
+      let markdown = CanvasCardContent.markdownBody(for: card, vaultURL: vault, vaultFiles: [])
+      for path in NoteCardEmbedSupport.imagePaths(from: markdown, vaultURL: vault) {
+        let loaded = await CanvasImageCache.shared.prepareDisplayImageIfNeeded(
+          forCardID: "note-embed|\(path)",
+          content: path,
+          vaultURL: vault
+        )
+        if loaded {
+          await MainActor.run { store.imageCacheRevision += 1 }
+        }
       }
     }
   }
@@ -811,12 +1075,17 @@ struct InfiniteCanvasView: View {
       card: card,
       displayFrame: displayFrame,
       zoom: cardRenderTransform.zoom,
-      vaultURL: vaultURL,
+      vaultURL: effectiveVaultURL,
       vaultFiles: vaultFiles,
       isLinkTarget: store.hoverCardID == card.id,
       isConnectingLine: store.isConnectingLine,
       imageCacheRevision: store.imageCacheRevision,
-      onImageLoaded: { store.imageCacheRevision += 1 },
+      onImageLoaded: {
+        store.imageCacheRevision += 1
+        if card.kind != .image {
+          store.fitNoteCardToContent(for: card.id)
+        }
+      },
       onSelect: { store.selectCard(card.id) },
       onDragBegan: { handleCardDragBegan() },
       onMove: { handleCardMove(cardID: card.id, preview: $0) },
@@ -870,7 +1139,7 @@ struct InfiniteCanvasView: View {
       isLinkTarget: store.hoverCardID == card.id,
       isConnectingLine: store.isConnectingLine,
       zoom: cardRenderTransform.zoom,
-      vaultURL: vaultURL,
+      vaultURL: effectiveVaultURL,
       vaultFiles: vaultFiles,
       onSelect: {
         store.selectCard(card.id)
@@ -933,7 +1202,12 @@ struct InfiniteCanvasView: View {
       isEditing: store.focusCardID == card.id,
       isColorPickerOpen: store.selectedCardID == card.id && cardToolbarColorRowOpen,
       imageCacheRevision: store.imageCacheRevision,
-      onImageLoaded: { store.imageCacheRevision += 1 },
+      onImageLoaded: {
+        store.imageCacheRevision += 1
+        if card.kind != .image {
+          store.fitNoteCardToContent(for: card.id)
+        }
+      },
       onRequestEdit: {
         store.selectedCardID = card.id
         store.selectedEdgeID = nil
@@ -980,53 +1254,102 @@ struct InfiniteCanvasView: View {
     if let focusID = store.focusCardID,
        let card = cardIndex[focusID],
        card.kind != .image {
-      let worldFrame = cardDisplayFrame(card)
-      let zoom = displayTransform.zoom
-      let screenOrigin = cardScreenOrigin(for: worldFrame, transform: displayTransform)
-      let screenW = worldFrame.width * zoom
-      let screenH = worldFrame.height * zoom
-      let screenCenter = CGPoint(x: screenOrigin.x + screenW / 2, y: screenOrigin.y + screenH / 2)
-
-      Group {
-        #if os(iOS)
-        CanvasNoteEditOverlay(
-          initialText: CanvasCardContent.markdownBody(
-            for: card,
-            vaultURL: vaultURL,
-            vaultFiles: vaultFiles
-          ),
-          cardSize: CGSize(width: screenW, height: screenH),
-          colorHex: card.colorHex,
-          files: workspace.files,
-          onTextEdited: { store.updateContent(for: focusID, content: $0, fromTextUndo: $1) },
-          onDismiss: {
-            store.endContentEdit()
-            store.focusCardID = nil
-          },
-          toolbarBridge: canvasNoteToolbarBridge
-        )
-        #else
-        CanvasNoteEditOverlay(
-          initialText: CanvasCardContent.markdownBody(
-            for: card,
-            vaultURL: vaultURL,
-            vaultFiles: vaultFiles
-          ),
-          cardSize: CGSize(width: screenW, height: screenH),
-          colorHex: card.colorHex,
-          files: workspace.files,
-          onTextEdited: { store.updateContent(for: focusID, content: $0, fromTextUndo: $1) },
-          onDismiss: {
-            store.endContentEdit()
-            store.focusCardID = nil
-          }
-        )
-        #endif
-      }
-      .frame(width: screenW, height: screenH)
-      .position(screenCenter)
-      .zIndex(250)
+      noteEditOverlay(for: card, focusID: focusID, vaultFiles: vaultFiles)
     }
+  }
+
+  @ViewBuilder
+  private func noteEditOverlay(
+    for card: CanvasCard,
+    focusID: String,
+    vaultFiles: [VaultFile]
+  ) -> some View {
+    let worldFrame = cardDisplayFrame(card)
+    let zoom = displayTransform.zoom
+    let screenOrigin = cardScreenOrigin(for: worldFrame, transform: displayTransform)
+    let screenW = worldFrame.width * zoom
+    let screenH = worldFrame.height * zoom
+    let screenCenter = CGPoint(x: screenOrigin.x + screenW / 2, y: screenOrigin.y + screenH / 2)
+    let editFontSize = noteEditFontSize ?? (CanvasConstants.noteCardFontSize * zoom)
+    let markdownBody = CanvasCardContent.markdownBody(
+      for: card,
+      vaultURL: effectiveVaultURL,
+      vaultFiles: vaultFiles
+    )
+    let cardSize = CGSize(width: screenW, height: screenH)
+    let onTextEdited: (String, Bool) -> Void = { content, fromUndo in
+      store.updateContent(for: focusID, content: content, fromTextUndo: fromUndo)
+    }
+    let onDismiss: () -> Void = {
+      store.endContentEdit()
+      store.focusCardID = nil
+    }
+
+    noteEditOverlayView(
+      markdownBody: markdownBody,
+      cardSize: cardSize,
+      colorHex: card.colorHex,
+      fontSize: editFontSize,
+      vaultURL: effectiveVaultURL,
+      onTextEdited: onTextEdited,
+      onDismiss: onDismiss
+    )
+    .frame(width: screenW, height: screenH)
+    .position(screenCenter)
+    .zIndex(250)
+    .onAppear {
+      noteEditFontSize = CanvasConstants.noteCardFontSize * zoom
+    }
+    .onChange(of: store.focusCardID) { _, newID in
+      if newID == nil {
+        noteEditFontSize = nil
+      } else if noteEditFontSize == nil {
+        noteEditFontSize = CanvasConstants.noteCardFontSize * displayTransform.zoom
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func noteEditOverlayView(
+    markdownBody: String,
+    cardSize: CGSize,
+    colorHex: String?,
+    fontSize: CGFloat,
+    vaultURL: URL?,
+    onTextEdited: @escaping (String, Bool) -> Void,
+    onDismiss: @escaping () -> Void
+  ) -> some View {
+    CanvasNoteEditOverlay(
+      initialText: markdownBody,
+      cardSize: cardSize,
+      colorHex: colorHex,
+      files: workspace.files,
+      vaultURL: vaultURL,
+      fontSize: fontSize,
+      imageCacheRevision: store.imageCacheRevision,
+      onTextEdited: onTextEdited,
+      onDismiss: onDismiss,
+      toolbarBridge: canvasNoteToolbarBridge,
+      onImageEmbedSaved: { path in
+        Task {
+          _ = await CanvasImageCache.shared.prepareDisplayImageIfNeeded(
+            forCardID: "note-embed|\(path)",
+            content: path,
+            vaultURL: vaultURL
+          )
+          await MainActor.run {
+            store.imageCacheRevision += 1
+            if let focusID = store.focusCardID {
+              store.fitNoteCardToContent(for: focusID)
+            }
+            store.flushPendingContentEdit()
+          }
+        }
+      },
+      onRegisterImageInserter: { inserter in
+        noteEditImageInserter = inserter
+      }
+    )
   }
 
   private func cardDisplayFrame(_ card: CanvasCard) -> CGRect {
@@ -1307,6 +1630,10 @@ struct InfiniteCanvasView: View {
   // MARK: - Image import
 
   private func importDroppedImages(_ providers: [NSItemProvider], at location: CGPoint, canvasSize: CGSize) -> Bool {
+    if store.focusCardID != nil {
+      return importDroppedImagesIntoFocusedNote(providers)
+    }
+
     let topLeft = store.screenToWorld(location, in: canvasSize, transform: displayTransform)
     var offset: CGFloat = 0
     var handled = false
@@ -1321,6 +1648,20 @@ struct InfiniteCanvasView: View {
         guard let data else { return }
         DispatchQueue.main.async {
           store.addImageCard(data: data, title: nil, topLeft: place)
+        }
+      }
+    }
+    return handled
+  }
+
+  private func importDroppedImagesIntoFocusedNote(_ providers: [NSItemProvider]) -> Bool {
+    var handled = false
+    for provider in providers {
+      if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+          || provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+        handled = true
+        NoteImageDropSupport.loadData(from: provider) { data, name in
+          insertNoteAttachment(data: data, suggestedName: name)
         }
       }
     }
@@ -1346,9 +1687,68 @@ struct InfiniteCanvasView: View {
     }
     await MainActor.run { photoItems = [] }
   }
+
+  #if os(iOS)
+  private func importNoteAttachmentPhoto(_ item: PhotosPickerItem) async {
+    defer {
+      Task { @MainActor in
+        noteAttachmentPhotoItem = nil
+      }
+    }
+    guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+    await MainActor.run {
+      insertNoteAttachment(data: data, suggestedName: item.itemIdentifier)
+    }
+  }
+
+  private func importNoteAttachmentFile(from result: Result<[URL], Error>) {
+    guard case .success(let urls) = result, let url = urls.first else { return }
+    let accessed = url.startAccessingSecurityScopedResource()
+    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+    guard let data = try? Data(contentsOf: url) else { return }
+    insertNoteAttachment(data: data, suggestedName: url.lastPathComponent)
+  }
+  #endif
   #endif
 
+  private func insertNoteAttachment(data: Data, suggestedName: String?) {
+    guard store.focusCardID != nil else { return }
+    if let noteEditImageInserter, noteEditImageInserter(data, suggestedName) {
+      return
+    }
+    guard let vault = effectiveVaultURL else { return }
+    guard let path = try? VaultFilesystem.saveCanvasImage(
+      data: data,
+      vaultURL: vault,
+      suggestedName: suggestedName
+    ) else { return }
+    canvasNoteToolbarBridge.insertSnippet("![[\(path)]]")
+    Task {
+      _ = await CanvasImageCache.shared.prepareDisplayImageIfNeeded(
+        forCardID: "note-embed|\(path)",
+        content: path,
+        vaultURL: vault
+      )
+      await MainActor.run {
+        store.imageCacheRevision += 1
+        if let focusID = store.focusCardID {
+          store.fitNoteCardToContent(for: focusID)
+        }
+        store.flushPendingContentEdit()
+      }
+    }
+  }
+
   #if os(macOS)
+  private func openMacNoteAttachmentPanel() {
+    guard store.focusCardID != nil else { return }
+    let panel = NSOpenPanel()
+    panel.allowedContentTypes = [.image]
+    panel.allowsMultipleSelection = false
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    guard let data = try? Data(contentsOf: url) else { return }
+    insertNoteAttachment(data: data, suggestedName: url.lastPathComponent)
+  }
   private func openMacImagePanel(canvasSize: CGSize) {
     let panel = NSOpenPanel()
     panel.allowedContentTypes = [.image]
@@ -1446,7 +1846,7 @@ struct InfiniteCanvasView: View {
       cards: store.cards,
       edges: store.edges,
       files: workspace.files,
-      vaultURL: vaultURL,
+      vaultURL: effectiveVaultURL,
       canvasRelativePath: store.documentRelativePath,
       canvasCreatedAt: activeCanvasFile?.createdAt
     )
@@ -2207,30 +2607,38 @@ extension Notification.Name {
 import AppKit
 
 struct CanvasScrollModifier: ViewModifier {
+  var shouldPassScrollToContent: (CGPoint) -> Bool
   var onScroll: (CGSize, CGPoint, Bool, Bool) -> Void
 
   func body(content: Content) -> some View {
     content.overlay {
-      CanvasScrollCaptureView(onScroll: onScroll)
+      CanvasScrollCaptureView(
+        shouldPassScrollToContent: shouldPassScrollToContent,
+        onScroll: onScroll
+      )
     }
   }
 }
 
 private struct CanvasScrollCaptureView: NSViewRepresentable {
+  var shouldPassScrollToContent: (CGPoint) -> Bool
   var onScroll: (CGSize, CGPoint, Bool, Bool) -> Void
 
   func makeNSView(context: Context) -> CanvasScrollNSView {
     let view = CanvasScrollNSView()
+    view.shouldPassScrollToContent = shouldPassScrollToContent
     view.onScroll = onScroll
     return view
   }
 
   func updateNSView(_ nsView: CanvasScrollNSView, context: Context) {
+    nsView.shouldPassScrollToContent = shouldPassScrollToContent
     nsView.onScroll = onScroll
   }
 }
 
 private final class CanvasScrollNSView: NSView {
+  var shouldPassScrollToContent: ((CGPoint) -> Bool)?
   var onScroll: ((CGSize, CGPoint, Bool, Bool) -> Void)?
   private var scrollMonitor: Any?
 
@@ -2258,10 +2666,29 @@ private final class CanvasScrollNSView: NSView {
     return bounds.contains(point)
   }
 
+  private func scrollDelta(from event: NSEvent) -> CGSize {
+    if event.hasPreciseScrollingDeltas {
+      return CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
+    }
+    return CGSize(width: event.deltaX * 10, height: event.deltaY * 10)
+  }
+
   private func installScrollMonitor() {
     removeScrollMonitor()
     scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
       guard let self, self.window != nil, self.isPointerInsideView else { return event }
+      let location = self.convert(event.locationInWindow, from: nil)
+      if self.shouldPassScrollToContent?(location) == true {
+        if CanvasNoteCardScrollBridge.applyScrollDelta != nil {
+          let delta = self.scrollDelta(from: event)
+          let result = CanvasNoteCardScrollBridge.apply(delta)
+          if result.consumed {
+            return nil
+          }
+        } else {
+          return event
+        }
+      }
       self.processScrollEvent(event)
       return nil
     }
@@ -2274,16 +2701,10 @@ private final class CanvasScrollNSView: NSView {
     }
   }
 
-  private func processScrollEvent(_ event: NSEvent) {
+  private func processScrollEvent(_ event: NSEvent, deltaOverride: CGSize? = nil) {
     let location = convert(event.locationInWindow, from: nil)
     let zoomRequested = event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control)
-
-    let delta: CGSize
-    if event.hasPreciseScrollingDeltas {
-      delta = CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
-    } else {
-      delta = CGSize(width: event.deltaX * 10, height: event.deltaY * 10)
-    }
+    let delta = deltaOverride ?? scrollDelta(from: event)
 
     let isLegacyScroll = event.phase == [] && event.momentumPhase == []
     let phaseEnded = isLegacyScroll
@@ -2297,8 +2718,11 @@ private final class CanvasScrollNSView: NSView {
 }
 
 extension View {
-  func onCanvasScroll(_ handler: @escaping (CGSize, CGPoint, Bool, Bool) -> Void) -> some View {
-    modifier(CanvasScrollModifier(onScroll: handler))
+  func onCanvasScroll(
+    shouldPassToContent: @escaping (CGPoint) -> Bool = { _ in false },
+    _ handler: @escaping (CGSize, CGPoint, Bool, Bool) -> Void
+  ) -> some View {
+    modifier(CanvasScrollModifier(shouldPassScrollToContent: shouldPassToContent, onScroll: handler))
   }
 
   func canvasEdgeHandCursor(isActive: Bool, isGrabbing: Bool) -> some View {

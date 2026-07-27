@@ -110,7 +110,15 @@ struct OnboardingTypewriterText: View {
             .foregroundStyle(color)
             .multilineTextAlignment(alignment)
             .frame(maxWidth: .infinity, alignment: frameAlignment)
+            .onAppear {
+                if reduceMotion {
+                    visibleCount = text.count
+                    isTyping = false
+                    onComplete?()
+                }
+            }
             .task(id: text) {
+                guard !reduceMotion else { return }
                 await runAnimation()
             }
             .task(id: isTyping) {
@@ -119,6 +127,14 @@ struct OnboardingTypewriterText: View {
                     try? await Task.sleep(for: .milliseconds(530))
                     cursorVisible.toggle()
                 }
+            }
+            .task {
+                // Stage Manager / cold launch can delay the primary typewriter task.
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled, visibleCount < text.count else { return }
+                visibleCount = text.count
+                isTyping = false
+                onComplete?()
             }
     }
 
@@ -216,9 +232,18 @@ struct SeamlessStepShell<Content: View>: View {
         .frame(maxWidth: 600)
         .padding(.horizontal, 24)
         .onAppear {
-            guard reduceMotion else { return }
-            showSubtitle = true
-            showContent = true
+            if reduceMotion {
+                showSubtitle = true
+                showContent = true
+                return
+            }
+            // Safety net: never leave onboarding controls hidden if typewriter stalls.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2.5))
+                guard !showContent else { return }
+                showSubtitle = true
+                showContent = true
+            }
         }
     }
 
@@ -443,6 +468,17 @@ struct SeamlessWorldNameField: View {
 
     var body: some View {
         ZStack {
+            TextField("", text: $text)
+                .textFieldStyle(.plain)
+                .font(OnboardingTypography.display(size: fieldSize, weight: .medium))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(AppColors.textPrimary)
+                .tint(AppColors.textPrimary)
+                .focused($isFocused)
+                .onSubmit { onSubmit?() }
+                .accessibilityLabel(OnboardingCopy.worldNamePlaceholder)
+                .allowsHitTesting(!showsTypewriterPlaceholder)
+
             if showsTypewriterPlaceholder {
                 OnboardingTypewriterText(
                     text: OnboardingCopy.worldNamePlaceholder,
@@ -464,16 +500,6 @@ struct SeamlessWorldNameField: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
-
-            TextField("", text: $text)
-                .textFieldStyle(.plain)
-                .font(OnboardingTypography.display(size: fieldSize, weight: .medium))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(text.isEmpty && (showsTypewriterPlaceholder || showsStaticPlaceholder) ? .clear : AppColors.textPrimary)
-                .focused($isFocused)
-                .onSubmit { onSubmit?() }
-                .accessibilityLabel(OnboardingCopy.worldNamePlaceholder)
-                .allowsHitTesting(!showsTypewriterPlaceholder)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
@@ -490,6 +516,11 @@ struct SeamlessWorldNameField: View {
         }
         .onChange(of: text) { _, newValue in
             if !newValue.isEmpty {
+                skipToEditing()
+            }
+        }
+        .onChange(of: isFocused) { _, focused in
+            if focused, showTypewriterPlaceholder {
                 skipToEditing()
             }
         }

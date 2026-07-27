@@ -16,7 +16,12 @@ struct OnboardingFlowView: View {
     #endif
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var genreContentVisible = false
+    @State private var visibleGenreChipCount = 0
+    @State private var genreControlsVisible = false
+
+    private var genreChipCount: Int {
+        OnboardingConfig.genres.count + 1
+    }
     @State private var worldNameControlsVisible = false
 
     init(isPreview: Bool = false, onComplete: @escaping () -> Void) {
@@ -155,34 +160,24 @@ struct OnboardingFlowView: View {
                 text: OnboardingCopy.genreTitle,
                 font: OnboardingTypography.display(size: genreTitleSize, weight: .bold),
                 alignment: .center,
-                onComplete: { genreContentVisible = true }
+                onComplete: startGenreChipReveal
             )
             .frame(maxWidth: 880)
             .padding(.horizontal, 24)
 
             VStack(spacing: 10) {
-                genreRow(OnboardingConfig.genres.prefix(5))
-                genreRow(OnboardingConfig.genres.dropFirst(5).prefix(5))
+                genreRow(Array(OnboardingConfig.genres.prefix(5)), startIndex: 0)
+                genreRow(Array(OnboardingConfig.genres.dropFirst(5).prefix(5)), startIndex: 5)
 
                 HStack {
                     Spacer()
-                    SeamlessGenreChip(
-                        title: OnboardingConfig.mixGenre.title,
-                        isSelected: coordinator.state.worldGenre == .mix,
-                        action: { coordinator.selectGenre(.mix) }
-                    )
+                    animatedGenreChip(index: 10, genre: OnboardingConfig.mixGenre)
                     Spacer()
                 }
                 .padding(.top, 4)
             }
             .padding(.top, 32)
             .padding(.horizontal, 24)
-            .opacity(genreContentVisible || reduceMotion ? 1 : 0)
-            .offset(y: genreContentVisible || reduceMotion ? 0 : 14)
-            .animation(
-                reduceMotion ? nil : .timingCurve(0.16, 1, 0.3, 1, duration: 0.55),
-                value: genreContentVisible
-            )
 
             HStack(spacing: 8) {
                 SeamlessGhostButton(title: OnboardingCopy.backButton) {
@@ -196,16 +191,76 @@ struct OnboardingFlowView: View {
                 )
             }
             .padding(.top, 36)
-            .opacity(genreContentVisible || reduceMotion ? 1 : 0)
-            .offset(y: genreContentVisible || reduceMotion ? 0 : 10)
+            .opacity(genreControlsVisible || reduceMotion ? 1 : 0)
+            .offset(y: genreControlsVisible || reduceMotion ? 0 : 10)
             .animation(
-                reduceMotion ? nil : .timingCurve(0.16, 1, 0.3, 1, duration: 0.55).delay(0.08),
-                value: genreContentVisible
+                reduceMotion ? nil : .timingCurve(0.16, 1, 0.3, 1, duration: 0.55),
+                value: genreControlsVisible
             )
         }
         .frame(maxWidth: .infinity)
         .onAppear {
-            genreContentVisible = reduceMotion
+            resetGenreRevealState()
+        }
+    }
+
+    private func resetGenreRevealState() {
+        visibleGenreChipCount = reduceMotion ? genreChipCount : 0
+        genreControlsVisible = reduceMotion
+    }
+
+    private func startGenreChipReveal() {
+        guard !reduceMotion else {
+            visibleGenreChipCount = genreChipCount
+            genreControlsVisible = true
+            return
+        }
+
+        visibleGenreChipCount = 0
+        genreControlsVisible = false
+
+        Task { @MainActor in
+            for index in 1...genreChipCount {
+                try? await Task.sleep(for: .milliseconds(OnboardingMotion.genreChipStaggerDelayMs))
+                guard !Task.isCancelled else { return }
+                withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: OnboardingMotion.genreChipFadeDuration)) {
+                    visibleGenreChipCount = index
+                }
+            }
+
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.55)) {
+                genreControlsVisible = true
+            }
+        }
+    }
+
+    private func isGenreChipVisible(_ index: Int) -> Bool {
+        reduceMotion || index < visibleGenreChipCount
+    }
+
+    @ViewBuilder
+    private func animatedGenreChip(index: Int, genre: OnboardingGenreOption) -> some View {
+        SeamlessGenreChip(
+            title: genre.title,
+            symbolName: genre.symbolName,
+            isSelected: coordinator.state.worldGenre == genre.id,
+            action: { coordinator.selectGenre(genre.id) }
+        )
+        .opacity(isGenreChipVisible(index) ? 1 : 0)
+        .offset(y: isGenreChipVisible(index) ? 0 : 8)
+        .allowsHitTesting(isGenreChipVisible(index))
+    }
+
+    @ViewBuilder
+    private func genreRow(_ options: [OnboardingGenreOption], startIndex: Int) -> some View {
+        HStack(spacing: 10) {
+            Spacer(minLength: 0)
+            ForEach(Array(options.enumerated()), id: \.element.id) { offset, genre in
+                animatedGenreChip(index: startIndex + offset, genre: genre)
+            }
+            Spacer(minLength: 0)
         }
     }
 
@@ -215,22 +270,6 @@ struct OnboardingFlowView: View {
         #else
         32
         #endif
-    }
-
-    @ViewBuilder
-    private func genreRow<S: Sequence>(_ options: S) -> some View where S.Element == OnboardingGenreOption {
-        HStack(spacing: 10) {
-            Spacer(minLength: 0)
-            ForEach(Array(options)) { genre in
-                SeamlessGenreChip(
-                    title: genre.title,
-                    symbolName: genre.symbolName,
-                    isSelected: coordinator.state.worldGenre == genre.id,
-                    action: { coordinator.selectGenre(genre.id) }
-                )
-            }
-            Spacer(minLength: 0)
-        }
     }
 
     // MARK: - Step 5: World name

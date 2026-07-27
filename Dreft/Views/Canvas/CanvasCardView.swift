@@ -251,6 +251,13 @@ struct CanvasCardView: View {
             .onChanged { value in
                 guard !isResizing else { return }
                 if isEditing { return }
+
+                let dx = abs(value.translation.width)
+                let dy = abs(value.translation.height)
+                if !isImage, isSelected, !isDragging, dy > dx, dy > dragThreshold {
+                    return
+                }
+
                 isPressingCard = true
                 if dragOrigin == nil {
                     dragOrigin = displayOrigin
@@ -272,10 +279,9 @@ struct CanvasCardView: View {
                         onSelect()
                     } else if isEditing {
                         return
-                    } else if isSelected {
-                        beginEditingNote()
                     } else {
                         onSelect()
+                        beginEditingNote()
                     }
                 }
                 dragOrigin = nil
@@ -476,8 +482,7 @@ struct CanvasCardView: View {
             }
     }
 
-    /// Hand + drag for card interior. Image cards use the full frame; notes use the full frame too
-    /// so dragging stays reliable while resize/connect handles sit above this layer.
+    /// Hand + drag for card interior when selected.
     private var cardInteriorDragSurface: some View {
         Color.clear
             .frame(width: frameWidth, height: frameHeight)

@@ -3,6 +3,8 @@ import SwiftUI
 /// Shared border + body rendering for canvas cards (compact and interactive modes).
 struct CanvasCardSurface: View {
     @State private var themeState = AppThemeState.shared
+    @State private var previewScrollOffset: CGFloat = 0
+    @State private var previewContentHeight: CGFloat = 0
 
     let card: CanvasCard
     let frameWidth: CGFloat
@@ -52,6 +54,14 @@ struct CanvasCardSurface: View {
             isSelected: isSelected,
             isLinkTarget: isLinkTarget,
             isEditing: isEditing
+        )
+    }
+
+    private var previewScrollMetrics: CanvasNoteScrollMetrics {
+        CanvasNoteScrollMetrics(
+            offset: CGPoint(x: 0, y: previewScrollOffset),
+            contentHeight: previewContentHeight,
+            viewportHeight: max(1, frameHeight - 16)
         )
     }
 
@@ -129,31 +139,67 @@ struct CanvasCardSurface: View {
 
     @ViewBuilder
     private var noteRichPreviewBody: some View {
+        noteRichPreviewContent
+    }
+
+    @ViewBuilder
+    private var noteRichPreviewContent: some View {
         let displayMarkdown = CanvasCardContent.markdownBody(
             for: card,
             vaultURL: vaultURL,
             vaultFiles: vaultFiles
         )
-        let themeRevision = themeState.revision
+
         Group {
             if displayMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(" ")
-                    .font(.system(size: 13))
-                    .foregroundStyle(themeState.theme.textPrimary)
-            } else {
-                Text(NotePreviewCache.canvasCardPreview(for: displayMarkdown))
-                    .font(.system(size: 13))
-                    .foregroundStyle(themeState.theme.textPrimary)
-                    .tint(AppColors.noteLink)
+                if !isEditing {
+                    Text(" ")
+                        .font(.system(size: CanvasConstants.noteCardFontSize))
+                        .foregroundStyle(themeState.theme.textPrimary)
+                }
+            } else if !isEditing {
+                notePreviewBody(displayMarkdown: displayMarkdown)
             }
         }
-        .id(themeRevision)
         .multilineTextAlignment(.leading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
         .padding(.top, 8)
-        .allowsHitTesting(false)
+        .allowsHitTesting(isSelected && !isEditing)
+    }
+
+    @ViewBuilder
+    private func notePreviewBody(displayMarkdown: String) -> some View {
+        let body = CanvasNoteCardBodyView(
+            content: displayMarkdown,
+            vaultURL: vaultURL,
+            maxImageWidth: max(1, frameWidth - 16),
+            cacheRevision: imageCacheRevision,
+            onContentSizeChange: onImageLoaded
+        )
+        let scrollHeight = max(1, frameHeight - 16)
+
+        if isSelected {
+            CanvasNoteCardPreviewScrollContainer(
+                offsetY: $previewScrollOffset,
+                contentHeight: $previewContentHeight,
+                viewportHeight: scrollHeight
+            ) {
+                body
+            }
+            .overlay(alignment: .topTrailing) {
+                CanvasNoteCardScrollIndicator(metrics: previewScrollMetrics)
+            }
+            .onChange(of: isSelected) { _, selected in
+                if !selected {
+                    previewScrollOffset = 0
+                }
+            }
+        } else {
+            body
+                .frame(height: scrollHeight, alignment: .topLeading)
+                .clipped()
+        }
     }
 }
 
