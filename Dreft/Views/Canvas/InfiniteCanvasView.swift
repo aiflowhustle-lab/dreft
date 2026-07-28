@@ -229,11 +229,18 @@ struct InfiniteCanvasView: View {
   ) -> some View {
     content()
       .onChange(of: store.selectedCardID) { _, _ in
+        settleInFlightCardInteraction()
         cardToolbarColorRowOpen = false
         cardToolbarCustomColorOpen = false
         edgeToolbarColorRowOpen = false
         edgeToolbarCustomColorOpen = false
         replaceMountedContent(for: size)
+      }
+      .onChange(of: cardToolbarColorRowOpen) { _, isOpen in
+        if isOpen { settleInFlightCardInteraction() }
+      }
+      .onChange(of: cardToolbarCustomColorOpen) { _, isOpen in
+        if isOpen { settleInFlightCardInteraction() }
       }
       .onChange(of: store.selectedEdgeID) { _, newValue in
         if newValue != editingEdgeLabelID {
@@ -871,6 +878,33 @@ struct InfiniteCanvasView: View {
     cardInteractionFrozenTransform = nil
     cardDragOverrides.removeAll()
     cardResizeOverrides.removeAll()
+  }
+
+  /// Persist and clear card drag/resize when SwiftUI drops a gesture without onEnded (common on iPad toolbar/color UI).
+  private func settleInFlightCardInteraction() {
+    for cardID in Array(cardDragOverrides.keys) {
+      handleCardMoveEnd(cardID: cardID)
+    }
+    for cardID in Array(cardResizeOverrides.keys) {
+      if let frame = cardResizeOverrides[cardID] {
+        store.resizeCard(cardID, frame: frame)
+        cardResizeOverrides.removeValue(forKey: cardID)
+      }
+    }
+    if isCardResizing {
+      isCardResizing = false
+      endCardInteractionFreeze()
+    }
+    if isCardDragging {
+      isCardDragging = false
+      endCardInteractionFreeze()
+    }
+    if panActive {
+      panActive = false
+      finishCanvasInteraction()
+    } else if isCanvasInteracting {
+      finishCanvasInteraction()
+    }
   }
 
   #if os(iOS)

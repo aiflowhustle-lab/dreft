@@ -290,9 +290,21 @@ struct CanvasCardCompactView: View {
                 surface.gesture(cardDragGesture)
             }
         }
+        .onDisappear {
+            cancelActiveDrag()
+        }
         #if os(macOS)
         .modifier(CanvasCardCompactCursorModifier(isGrabbing: isPressingCard))
         #endif
+    }
+
+    /// DragGesture(minimumDistance: 0) may not receive onEnded when another control steals the touch — reset parent drag state.
+    private func cancelActiveDrag() {
+        guard dragOrigin != nil || isDragging || isPressingCard else { return }
+        dragOrigin = nil
+        isDragging = false
+        isPressingCard = false
+        onMoveEnd()
     }
 
     private var cardDragGesture: some Gesture {

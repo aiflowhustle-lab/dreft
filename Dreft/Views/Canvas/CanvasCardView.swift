@@ -172,6 +172,12 @@ struct CanvasCardView: View {
                 transaction.disablesAnimations = true
             }
         }
+        .onChange(of: isColorPickerOpen) { _, isOpen in
+            if isOpen { cancelActiveDrag() }
+        }
+        .onDisappear {
+            cancelActiveDrag()
+        }
     }
 
     private var imageDisplayTitle: String {
