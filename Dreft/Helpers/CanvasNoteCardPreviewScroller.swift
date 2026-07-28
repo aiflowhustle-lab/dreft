@@ -26,7 +26,7 @@ struct CanvasNoteCardPreviewScrollContainer<Content: View>: View {
         .frame(height: viewportHeight, alignment: .top)
         .clipped()
         .contentShape(Rectangle())
-        .gesture(previewDragGesture)
+        .highPriorityGesture(previewDragGesture)
         .onAppear {
             dragOriginOffset = offsetY
             registerScrollBridge()
@@ -50,8 +50,13 @@ struct CanvasNoteCardPreviewScrollContainer<Content: View>: View {
     }
 
     private var previewDragGesture: some Gesture {
-        DragGesture(minimumDistance: 4)
+        DragGesture(minimumDistance: 0)
             .onChanged { value in
+                let dx = abs(value.translation.width)
+                let dy = abs(value.translation.height)
+                guard maxOffset > 0.5 else { return }
+                guard isDragging || dy >= dx else { return }
+
                 if !isDragging {
                     isDragging = true
                     dragOriginOffset = offsetY

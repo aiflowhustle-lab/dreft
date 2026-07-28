@@ -20,7 +20,9 @@ struct NoteEditorView: View {
     @State private var replaceQuery = ""
     @State private var bodySelectedRange = NSRange(location: 0, length: 0)
     @State private var wikilinkCaretRect: CGRect = .zero
+    @State private var bodySelectionRects: [CGRect] = []
     @State private var wikilinkSuggestIndex = 0
+    @State private var titleCommitTask: Task<Void, Never>?
     @FocusState private var isTitleFocused: Bool
     @FocusState private var isBodyFocused: Bool
     #if os(iOS)
@@ -70,11 +72,16 @@ struct NoteEditorView: View {
             .onChange(of: fileID) { _, _ in
                 loadDraftIfNeeded()
             }
-            .onChange(of: draftTitle) { _, _ in commitTitle() }
+            .onChange(of: draftTitle) { _, _ in
+                scheduleTitleCommit()
+            }
             .onChange(of: draftContent) { _, newValue in
                 workspace.updateNoteContent(for: fileID, content: newValue)
             }
-            .onDisappear { flushDraft() }
+            .onDisappear {
+                titleCommitTask?.cancel()
+                flushDraft()
+            }
         } else {
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -183,14 +190,16 @@ struct NoteEditorView: View {
                     .textFieldStyle(.plain)
                     .foregroundStyle(AppColors.textPrimary)
                     .focused($isTitleFocused)
-                    .onSubmit { commitTitle() }
+                    .onSubmit {
+                        focusNoteBody()
+                    }
 
                 #if os(iOS)
                 NoteBodyTextView(
                     text: $draftContent,
                     selectedRange: $bodySelectedRange,
                     caretRect: $wikilinkCaretRect,
-                    selectionRects: .constant([]),
+                    selectionRects: $bodySelectionRects,
                     isFocused: $isBodyFocused,
                     files: workspace.files,
                     suggestSelectedIndex: $wikilinkSuggestIndex,
@@ -201,7 +210,7 @@ struct NoteEditorView: View {
                     text: $draftContent,
                     selectedRange: $bodySelectedRange,
                     caretRect: $wikilinkCaretRect,
-                    selectionRects: .constant([]),
+                    selectionRects: $bodySelectionRects,
                     isFocused: $isBodyFocused,
                     files: workspace.files,
                     suggestSelectedIndex: $wikilinkSuggestIndex
@@ -304,12 +313,34 @@ struct NoteEditorView: View {
         loadedFileID = fileID
     }
 
+    private func scheduleTitleCommit() {
+        titleCommitTask?.cancel()
+        titleCommitTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            commitTitle()
+        }
+    }
+
+    private func focusNoteBody() {
+        titleCommitTask?.cancel()
+        commitTitle()
+        isTitleFocused = false
+        Task { @MainActor in
+            isBodyFocused = true
+        }
+    }
+
     private func commitTitle() {
-        guard file != nil else { return }
+        guard let file else { return }
+        let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != file.name else { return }
         workspace.renameFile(fileID, to: draftTitle)
     }
 
     private func flushDraft() {
+        titleCommitTask?.cancel()
+        commitTitle()
         workspace.updateNoteContent(for: fileID, content: draftContent)
     }
 

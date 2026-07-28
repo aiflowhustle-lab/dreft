@@ -96,26 +96,30 @@ extension CanvasNoteCardScrollBridge {
 import UIKit
 
 extension CanvasNoteCardScrollBridge {
-    static func scroll(_ textView: UITextView, by delta: CGSize) -> CanvasNoteScrollConsumption {
+    static func scroll(_ scrollView: UIScrollView, by delta: CGSize) -> CanvasNoteScrollConsumption {
         let maxOffset = CGPoint(
-            x: max(0, textView.contentSize.width - textView.bounds.width),
-            y: max(0, textView.contentSize.height - textView.bounds.height)
+            x: max(0, scrollView.contentSize.width - scrollView.bounds.width),
+            y: max(0, scrollView.contentSize.height - scrollView.bounds.height)
         )
         if maxOffset.x <= 0.5 && maxOffset.y <= 0.5 {
             return .absorbed
         }
 
         let clamped = CanvasNoteCardScrollMath.clampedOffset(
-            current: textView.contentOffset,
+            current: scrollView.contentOffset,
             delta: delta,
             maxOffset: maxOffset
         )
 
-        if clamped.offset != textView.contentOffset {
-            textView.setContentOffset(clamped.offset, animated: false)
+        if clamped.offset != scrollView.contentOffset {
+            scrollView.setContentOffset(clamped.offset, animated: false)
         }
 
         return .absorbed
+    }
+
+    static func scroll(_ textView: UITextView, by delta: CGSize) -> CanvasNoteScrollConsumption {
+        scroll(textView as UIScrollView, by: delta)
     }
 }
 #endif

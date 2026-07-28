@@ -89,7 +89,7 @@ struct NoteIPadFormattingToolbar: View {
                         toolbarButton("link", label: "Insert link") { onAction(.externalLink) }
                         toolbarButton("list.bullet", label: "Bullet list") { onAction(.bulletList) }
                         toolbarButton("list.number", label: "Numbered list") { onAction(.numberedList) }
-                        toolbarButton("checklist", label: "Checklist") { onAction(.taskList) }
+                        checkboxButton
                         toolbarButton("increase.indent", label: "Indent") { onAction(.indent) }
                         toolbarButton("decrease.indent", label: "Outdent") { onAction(.outdent) }
 
@@ -120,14 +120,27 @@ struct NoteIPadFormattingToolbar: View {
 
     private var wikilinkButton: some View {
         Button(action: { onAction(.wikilink) }) {
-            Text("[ ]")
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+            Text("[[")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(AppColors.textSecondary)
                 .frame(width: buttonSize, height: buttonSize)
                 .contentShape(Circle())
         }
         .buttonStyle(ToolbarIconButtonStyle())
         .accessibilityLabel("Add internal link")
+    }
+
+    /// 4th from the right — toggles `- [ ]` / `- [x]` on the current line.
+    private var checkboxButton: some View {
+        Button(action: { onAction(.taskList) }) {
+            RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                .strokeBorder(AppColors.textSecondary, lineWidth: 1.6)
+                .frame(width: 16, height: 16)
+                .frame(width: buttonSize, height: buttonSize)
+                .contentShape(Circle())
+        }
+        .buttonStyle(ToolbarIconButtonStyle())
+        .accessibilityLabel("Checkbox")
     }
 
     private var headingMenu: some View {

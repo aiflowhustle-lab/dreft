@@ -63,6 +63,14 @@ final class CanvasImageCache {
     }
   }
 
+  /// Inserts a freshly saved embed thumbnail immediately so note-card text layout matches image height.
+  func cacheDisplayImageSync(data: Data, cardID: String, contentKey: String) {
+    let key = Self.keyString(forCardID: cardID, content: contentKey)
+    if lru.image(forKey: key) != nil { return }
+    guard let image = Self.decodeThumbnail(from: data) else { return }
+    lru.insert(key: key, image: image, cost: imageCost(image))
+  }
+
   /// Prefetch thumbnail off the main thread during import or viewport prefetch.
   func prepareDisplayImage(data: Data, cardID: String, contentKey: String) async {
     let key = Self.keyString(forCardID: cardID, content: contentKey)

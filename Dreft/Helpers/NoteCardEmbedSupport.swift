@@ -127,7 +127,8 @@ enum NoteCardEmbedEditingSupport {
         gap.allSatisfy { $0.isWhitespace }
     }
 
-    /// Wraps a freshly inserted image embed with newlines so the caret can sit on lines above and below.
+    /// Wraps a freshly inserted image embed. Leading newline when needed; no trailing newline —
+    /// the caret sits at the end of the embed line and Enter adds a row below.
     static func normalizedAttachmentSnippet(_ snippet: String, in text: String, range: NSRange) -> String {
         let trimmed = snippet.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("![["), trimmed.hasSuffix("]]") else { return snippet }
@@ -139,14 +140,6 @@ enum NoteCardEmbedEditingSupport {
             if previous != "\n" {
                 normalized = "\n" + normalized
             }
-        }
-        if range.location < ns.length {
-            let next = ns.substring(with: NSRange(location: range.location, length: 1))
-            if next != "\n" {
-                normalized += "\n"
-            }
-        } else if !normalized.hasSuffix("\n") {
-            normalized += "\n"
         }
         return normalized
     }
@@ -161,12 +154,30 @@ enum NoteCardEmbedEditingSupport {
         vaultURL: URL?,
         selectedRange: NSRange?
     ) -> (text: String, selectedRange: NSRange?) {
-        let embeds = NoteCardEmbedSupport.imageEmbedRanges(in: text, vaultURL: vaultURL)
-        guard !embeds.isEmpty else { return (text, selectedRange) }
-
         var mutable = text
         var cursor = selectedRange
         var cursorLocation = selectedRange.map { $0.location + $0.length } ?? 0
+
+        let initialEmbeds = NoteCardEmbedSupport.imageEmbedRanges(in: mutable, vaultURL: vaultURL)
+        if let firstEmbed = initialEmbeds.first, firstEmbed.location > 0 {
+            let prefix = String(mutable.prefix(firstEmbed.location))
+            if prefix.allSatisfy({ $0.isWhitespace }) {
+                mutable.removeFirst(firstEmbed.location)
+                if cursorLocation >= firstEmbed.location {
+                    cursorLocation -= firstEmbed.location
+                }
+            }
+        }
+
+        let embeds = NoteCardEmbedSupport.imageEmbedRanges(in: mutable, vaultURL: vaultURL)
+        guard !embeds.isEmpty else {
+            if selectedRange != nil {
+                let length = (mutable as NSString).length
+                let location = min(max(0, cursorLocation), length)
+                return (mutable, NSRange(location: location, length: 0))
+            }
+            return (mutable, selectedRange)
+        }
 
         for embed in embeds.reversed() {
             let after = embed.location + embed.length
@@ -179,19 +190,26 @@ enum NoteCardEmbedEditingSupport {
                 newlineEnd += 1
             }
 
-            if newlineEnd > after + 1 {
+            let trailingText = newlineEnd < ns.length
+                ? ns.substring(from: newlineEnd)
+                : ""
+            let trailingIsBlank = trailingText.isEmpty || trailingText.allSatisfy(\.isWhitespace)
+
+            if trailingIsBlank, newlineEnd > after + 1 {
+                // Drop extra blank lines after an embed, but keep one newline for typing below the image.
+                let extraStart = mutable.index(mutable.startIndex, offsetBy: after)
+                let extraEnd = mutable.index(mutable.startIndex, offsetBy: newlineEnd)
+                mutable.removeSubrange(extraStart..<extraEnd)
+                if cursorLocation > after {
+                    cursorLocation = max(after, cursorLocation - (newlineEnd - after))
+                }
+            } else if newlineEnd > after + 1 {
                 let removed = newlineEnd - after - 1
                 let extraStart = mutable.index(mutable.startIndex, offsetBy: after + 1)
                 let extraEnd = mutable.index(mutable.startIndex, offsetBy: newlineEnd)
                 mutable.removeSubrange(extraStart..<extraEnd)
                 if cursorLocation > after + 1 {
                     cursorLocation = max(after + 1, cursorLocation - removed)
-                }
-            } else if newlineEnd == after {
-                let index = mutable.index(mutable.startIndex, offsetBy: after)
-                mutable.insert("\n", at: index)
-                if cursorLocation >= after {
-                    cursorLocation += 1
                 }
             }
         }
@@ -205,11 +223,10 @@ enum NoteCardEmbedEditingSupport {
             }
         }
 
-        if let selectedRange {
+        if selectedRange != nil {
             let length = (mutable as NSString).length
             let location = min(max(0, cursorLocation), length)
             cursor = NSRange(location: location, length: 0)
-            _ = selectedRange
         }
         return (mutable, cursor)
     }
@@ -219,14 +236,9 @@ enum NoteCardEmbedEditingSupport {
         sanitizeEmbedSpacing(in: text, vaultURL: vaultURL)
     }
 
-    /// Places the caret on the first line below the last image embed.
+    /// Places the caret at the end of the last image embed line.
     static func caretBelowLastImageEmbed(in text: String, vaultURL: URL?) -> NSRange? {
         guard let last = NoteCardEmbedSupport.imageEmbedRanges(in: text, vaultURL: vaultURL).last else { return nil }
-        let after = last.location + last.length
-        let ns = text as NSString
-        if after < ns.length, ns.substring(with: NSRange(location: after, length: 1)) == "\n" {
-            return NSRange(location: after + 1, length: 0)
-        }
-        return NSRange(location: after, length: 0)
+        return NSRange(location: last.location + last.length, length: 0)
     }
 }

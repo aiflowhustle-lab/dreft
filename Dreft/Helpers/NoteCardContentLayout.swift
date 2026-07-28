@@ -10,6 +10,7 @@ enum NoteCardFlowRow: Identifiable {
     case text(String)
     case inline(text: String, imagePath: String)
     case image(path: String)
+    case verticalWhitespace(height: CGFloat)
 
     var id: String {
         switch self {
@@ -19,6 +20,8 @@ enum NoteCardFlowRow: Identifiable {
             return "inline-\(text.hashValue)-\(path.hashValue)"
         case .image(let path):
             return "image-\(path.hashValue)"
+        case .verticalWhitespace(let height):
+            return "whitespace-\(height.hashValue)"
         }
     }
 }
@@ -59,6 +62,11 @@ enum NoteCardContentLayout {
                     let displayText = trailingNewlineTrimmed(split.fullText)
                     if !displayText.isEmpty {
                         rows.append(.text(displayText))
+                    } else {
+                        let whitespaceHeight = whitespaceNewlineHeight(split.fullText, fontSize: fontSize)
+                        if whitespaceHeight > 0 {
+                            rows.append(.verticalWhitespace(height: whitespaceHeight))
+                        }
                     }
                     rows.append(.image(path: path))
                     previousWasImage = true
@@ -127,6 +135,8 @@ enum NoteCardContentLayout {
                 if !value.hasSuffix("\n") {
                     y += rowSpacing
                 }
+            case .verticalWhitespace(let height):
+                y += height
             case .inline(let text, let path):
                 let imageSize = imageSizeForPath(path)
                 let x = textWidth(text, fontSize: fontSize) + inlineSpacing
@@ -177,6 +187,8 @@ enum NoteCardContentLayout {
             switch row {
             case .text(let value):
                 height += textBlockHeight(value, maxWidth: maxWidth, fontSize: fontSize)
+            case .verticalWhitespace(let whitespaceHeight):
+                height += whitespaceHeight
             case .inline(_, let path):
                 height += max(singleLineHeight(fontSize: fontSize), imageSizeForPath(path).height)
             case .image(let path):
@@ -279,5 +291,14 @@ enum NoteCardContentLayout {
     /// Trailing newline before an image lives in markdown only — not as visible empty text line.
     private static func trailingNewlineTrimmed(_ text: String) -> String {
         text.hasSuffix("\n") ? String(text.dropLast()) : text
+    }
+
+    /// Height of newline-only text the editor still lays out before an image embed.
+    private static func whitespaceNewlineHeight(_ text: String, fontSize: CGFloat) -> CGFloat {
+        guard !text.isEmpty, text.allSatisfy(\.isWhitespace) else { return 0 }
+        let newlineCount = text.reduce(into: 0) { count, character in
+            if character == "\n" { count += 1 }
+        }
+        return CGFloat(newlineCount) * singleLineHeight(fontSize: fontSize)
     }
 }

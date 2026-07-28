@@ -38,8 +38,17 @@ enum NoteEditingChromeSupport {
     }
 
     static func caretRect(in textView: NSTextView, fontSize: CGFloat) -> CGRect {
-        guard let layoutManager = textView.layoutManager,
-              let textContainer = textView.textContainer else { return .zero }
+        let layoutView: NSTextView = {
+            guard let window = textView.window,
+                  let fieldEditor = window.fieldEditor(false, for: textView) as? NSTextView,
+                  window.firstResponder === fieldEditor else {
+                return textView
+            }
+            return fieldEditor
+        }()
+
+        guard let layoutManager = layoutView.layoutManager ?? textView.layoutManager,
+              let textContainer = layoutView.textContainer ?? textView.textContainer else { return .zero }
 
         let selected = textView.selectedRange()
         let caretIndex = min(
@@ -62,13 +71,17 @@ enum NoteEditingChromeSupport {
         if rect.height < 1 {
             rect.size.height = fontSize * 1.2
         }
-        return convert(rect, in: textView)
+        return convert(rect, in: textView, layoutView: layoutView)
     }
 
-    private static func convert(_ rect: CGRect, in textView: NSTextView) -> CGRect {
+    private static func convert(_ rect: CGRect, in textView: NSTextView, layoutView: NSTextView? = nil) -> CGRect {
+        let layoutView = layoutView ?? textView
         var converted = rect
-        converted.origin.x += textView.textContainerInset.width
-        converted.origin.y += textView.textContainerInset.height
+        converted.origin.x += layoutView.textContainerInset.width
+        converted.origin.y += layoutView.textContainerInset.height
+        if layoutView !== textView {
+            converted = layoutView.convert(converted, to: textView)
+        }
         if let scrollView = textView.enclosingScrollView {
             let scrollOrigin = scrollView.contentView.bounds.origin
             converted.origin.x -= scrollOrigin.x
@@ -77,29 +90,35 @@ enum NoteEditingChromeSupport {
         return converted
     }
     #elseif os(iOS)
-    static func selectionRects(in textView: UITextView) -> [CGRect] {
+    static func selectionRects(in textView: UITextView, contentScrollOffset: CGPoint? = nil) -> [CGRect] {
         guard let range = textView.selectedTextRange, !range.isEmpty else { return [] }
+        let scrollOffset = contentScrollOffset ?? textView.contentOffset
         return textView.selectionRects(for: range).map { item in
             var rect = item.rect
-            rect.origin.x -= textView.contentOffset.x
-            rect.origin.y -= textView.contentOffset.y
+            rect.origin.x -= scrollOffset.x
+            rect.origin.y -= scrollOffset.y
             rect.origin.x += textView.textContainerInset.left
             rect.origin.y += textView.textContainerInset.top
             return rect
         }
     }
 
-    static func caretRect(in textView: UITextView, fontSize: CGFloat) -> CGRect {
+    static func caretRect(in textView: UITextView, fontSize: CGFloat, contentScrollOffset: CGPoint? = nil) -> CGRect {
         guard let range = textView.selectedTextRange else { return .zero }
+        let scrollOffset = contentScrollOffset ?? textView.contentOffset
         var rect = textView.caretRect(for: range.end)
-        rect.origin.x -= textView.contentOffset.x
-        rect.origin.y -= textView.contentOffset.y
+        rect.origin.x -= scrollOffset.x
+        rect.origin.y -= scrollOffset.y
         rect.origin.x += textView.textContainerInset.left
         rect.origin.y += textView.textContainerInset.top
         if rect.height < 1 {
             rect.size.height = fontSize * 1.2
         }
         return rect
+    }
+
+    static func documentCaretRect(in textView: UITextView, fontSize: CGFloat) -> CGRect {
+        caretRect(in: textView, fontSize: fontSize, contentScrollOffset: .zero)
     }
     #endif
 }
@@ -118,6 +137,8 @@ struct NoteBodyTextView: View {
     var editorBackground: Color = AppColors.canvasBackground
     var vaultURL: URL? = nil
     var hideResolvedImageEmbeds: Bool = false
+    var imageEmbedMaxWidth: CGFloat? = nil
+    var hideTaskListMarkers: Bool = false
     /// Plain-text edits; `fromTextUndo` is true for NSTextView/UITextView ⌘Z steps.
     var onTextEdited: ((String, Bool) -> Void)?
     var toolbarBridge: NoteFormattingToolbarBridge? = nil
@@ -130,6 +151,15 @@ struct NoteBodyTextView: View {
     private var suggestions: [WorkspaceFileEntry] {
         guard let activeQuery else { return [] }
         return WikilinkSuggestSearch.results(matching: activeQuery.query, in: files)
+    }
+
+    private var showsCustomEditingChrome: Bool {
+        hideResolvedImageEmbeds
+    }
+
+    /// Image-embed editing hides the native caret; canvas cards draw it in `CanvasNoteEditOverlay`.
+    private var showsInlineCaretOverlay: Bool {
+        hideResolvedImageEmbeds && !embeddedInCanvas
     }
 
     var body: some View {
@@ -160,6 +190,8 @@ struct NoteBodyTextView: View {
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers,
                 onSelectionChange: refreshActiveQuery,
                 onSuggestKey: handleSuggestKey,
                 onTextEdited: onTextEdited,
@@ -171,6 +203,16 @@ struct NoteBodyTextView: View {
             .frame(maxWidth: embeddedInCanvas ? .infinity : nil, maxHeight: embeddedInCanvas ? .infinity : nil)
             .frame(minHeight: embeddedInCanvas ? 0 : minBodyHeight)
             .clipShape(RoundedRectangle(cornerRadius: embeddedInCanvas ? 4 : 0))
+
+            if showsInlineCaretOverlay, isFocused.wrappedValue {
+                NoteEditingCaretOverlay(
+                    caretRect: caretRect,
+                    selectionRects: selectionRects,
+                    fontSize: fontSize,
+                    isVisible: true
+                )
+                .zIndex(10)
+            }
 
             if activeQuery != nil, !suggestions.isEmpty {
                 WikilinkSuggestPopover(
@@ -281,23 +323,123 @@ private enum NoteUndoRegistration {
 }
 
 enum NoteTextEditingCoordinatorSupport {
-    private static func styledContent(
+    static func editingSourceAndRange(
+        from textView: AnyObject,
+        hideResolvedImageEmbeds: Bool,
+        vaultURL: URL?,
+        imageEmbedMaxWidth: CGFloat?
+    ) -> (source: String, range: NSRange, usesAttachments: Bool) {
+        let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        )
+        #if os(macOS)
+        guard let textView = textView as? NSTextView else {
+            return ("", NSRange(location: 0, length: 0), false)
+        }
+        if usesAttachments {
+            let source = NoteImageEmbedAttributedSupport.markdown(
+                from: textView.attributedString(),
+                vaultURL: vaultURL
+            )
+            let range = NoteImageEmbedAttributedSupport.markdownRange(
+                fromAttributedRange: textView.selectedRange(),
+                in: source,
+                vaultURL: vaultURL
+            )
+            return (source, range, true)
+        }
+        return (textView.string, textView.selectedRange(), false)
+        #else
+        guard let textView = textView as? UITextView else {
+            return ("", NSRange(location: 0, length: 0), false)
+        }
+        if usesAttachments {
+            let source = NoteImageEmbedAttributedSupport.markdown(
+                from: textView.attributedText,
+                vaultURL: vaultURL
+            )
+            let range = NoteImageEmbedAttributedSupport.markdownRange(
+                fromAttributedRange: textView.selectedRange,
+                in: source,
+                vaultURL: vaultURL
+            )
+            return (source, range, true)
+        }
+        return (textView.text ?? "", textView.selectedRange, false)
+        #endif
+    }
+
+    static func applySelectedRange(
+        _ markdownRange: NSRange,
+        markdown: String,
+        to textView: AnyObject,
+        usesAttachments: Bool,
+        vaultURL: URL?
+    ) {
+        #if os(macOS)
+        guard let textView = textView as? NSTextView else { return }
+        if usesAttachments {
+            textView.setSelectedRange(
+                NoteImageEmbedAttributedSupport.attributedRange(
+                    fromMarkdownRange: markdownRange,
+                    in: markdown,
+                    vaultURL: vaultURL
+                )
+            )
+        } else {
+            textView.setSelectedRange(markdownRange)
+        }
+        #else
+        guard let textView = textView as? UITextView else { return }
+        if usesAttachments {
+            textView.selectedRange = NoteImageEmbedAttributedSupport.attributedRange(
+                fromMarkdownRange: markdownRange,
+                in: markdown,
+                vaultURL: vaultURL
+            )
+        } else {
+            textView.selectedRange = markdownRange
+        }
+        #endif
+    }
+
+    static func styledContent(
         _ content: String,
         selectedRange: NSRange,
         fontSize: CGFloat,
         editorBackground: Color,
         vaultURL: URL?,
         hideResolvedImageEmbeds: Bool,
-        imageEmbedMaxWidth: CGFloat? = nil
+        imageEmbedMaxWidth: CGFloat? = nil,
+        hideTaskListMarkers: Bool = false
     ) -> NSAttributedString {
-        WikilinkEditorSupport.attributedString(
+        if NoteImageEmbedAttributedSupport.usesInlineAttachments(
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        ), let imageEmbedMaxWidth {
+            return NoteImageEmbedAttributedSupport.attributedString(
+                from: content,
+                selectedRange: selectedRange,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                vaultURL: vaultURL,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+        }
+
+        return WikilinkEditorSupport.attributedString(
             for: content,
             selectedRange: selectedRange,
             fontSize: fontSize,
             hiddenDelimiterOn: editorBackground,
             vaultURL: vaultURL,
             hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-            imageEmbedMaxWidth: imageEmbedMaxWidth
+            imageEmbedMaxWidth: imageEmbedMaxWidth,
+            hideTaskListMarkers: hideTaskListMarkers
         )
     }
 
@@ -308,21 +450,23 @@ enum NoteTextEditingCoordinatorSupport {
         editorBackground: Color,
         vaultURL: URL? = nil,
         hideResolvedImageEmbeds: Bool = false,
-        imageEmbedMaxWidth: CGFloat? = nil
+        imageEmbedMaxWidth: CGFloat? = nil,
+        hideTaskListMarkers: Bool = false
     ) -> (text: String, selectedRange: NSRange) {
-        #if os(macOS)
-        guard let textView = textView as? NSTextView else { return ("", NSRange(location: 0, length: 0)) }
-        let range = textView.selectedRange()
-        let source = textView.string
-        #else
-        guard let textView = textView as? UITextView else { return ("", NSRange(location: 0, length: 0)) }
-        let range = textView.selectedRange
-        let source = textView.text ?? ""
-        #endif
+        let editingState = editingSourceAndRange(
+            from: textView,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        )
+        let source = editingState.source
+        let range = editingState.range
+        let usesAttachments = editingState.usesAttachments
 
         let result = MarkdownEditingSupport.apply(action, text: source, selectedRange: range)
 
         #if os(macOS)
+        guard let textView = textView as? NSTextView else { return ("", NSRange(location: 0, length: 0)) }
         NoteUndoRegistration.perform(on: textView.undoManager) {
             if source != result.text {
                 let styled = styledContent(
@@ -332,7 +476,8 @@ enum NoteTextEditingCoordinatorSupport {
                     editorBackground: editorBackground,
                     vaultURL: vaultURL,
                     hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: imageEmbedMaxWidth
+                    imageEmbedMaxWidth: imageEmbedMaxWidth,
+                    hideTaskListMarkers: hideTaskListMarkers
                 )
                 textView.textStorage?.setAttributedString(styled)
             } else {
@@ -342,12 +487,20 @@ enum NoteTextEditingCoordinatorSupport {
                     editorBackground: editorBackground,
                     vaultURL: vaultURL,
                     hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: imageEmbedMaxWidth
+                    imageEmbedMaxWidth: imageEmbedMaxWidth,
+                    hideTaskListMarkers: hideTaskListMarkers
                 )
             }
-            textView.setSelectedRange(result.selectedRange)
+            applySelectedRange(
+                result.selectedRange,
+                markdown: result.text,
+                to: textView,
+                usesAttachments: usesAttachments,
+                vaultURL: vaultURL
+            )
         }
         #else
+        guard let textView = textView as? UITextView else { return ("", NSRange(location: 0, length: 0)) }
         NoteUndoRegistration.perform(on: textView.undoManager) {
             if source != result.text {
                 textView.attributedText = styledContent(
@@ -357,7 +510,8 @@ enum NoteTextEditingCoordinatorSupport {
                     editorBackground: editorBackground,
                     vaultURL: vaultURL,
                     hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: imageEmbedMaxWidth
+                    imageEmbedMaxWidth: imageEmbedMaxWidth,
+                    hideTaskListMarkers: hideTaskListMarkers
                 )
             } else {
                 restyleInPlace(
@@ -366,10 +520,17 @@ enum NoteTextEditingCoordinatorSupport {
                     editorBackground: editorBackground,
                     vaultURL: vaultURL,
                     hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: imageEmbedMaxWidth
+                    imageEmbedMaxWidth: imageEmbedMaxWidth,
+                    hideTaskListMarkers: hideTaskListMarkers
                 )
             }
-            textView.selectedRange = result.selectedRange
+            applySelectedRange(
+                result.selectedRange,
+                markdown: result.text,
+                to: textView,
+                usesAttachments: usesAttachments,
+                vaultURL: vaultURL
+            )
         }
         #endif
 
@@ -383,17 +544,18 @@ enum NoteTextEditingCoordinatorSupport {
         editorBackground: Color,
         vaultURL: URL? = nil,
         hideResolvedImageEmbeds: Bool = false,
-        imageEmbedMaxWidth: CGFloat? = nil
+        imageEmbedMaxWidth: CGFloat? = nil,
+        hideTaskListMarkers: Bool = false
     ) -> (text: String, selectedRange: NSRange) {
-        #if os(macOS)
-        guard let textView = textView as? NSTextView else { return ("", NSRange(location: 0, length: 0)) }
-        let range = textView.selectedRange()
-        let source = textView.string
-        #else
-        guard let textView = textView as? UITextView else { return ("", NSRange(location: 0, length: 0)) }
-        let range = textView.selectedRange
-        let source = textView.text ?? ""
-        #endif
+        let editingState = editingSourceAndRange(
+            from: textView,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        )
+        let source = editingState.source
+        let range = editingState.range
+        let usesAttachments = editingState.usesAttachments
 
         let result = MarkdownEditingSupport.insertText(
             NoteCardEmbedEditingSupport.normalizedAttachmentSnippet(snippet, in: source, range: range),
@@ -408,6 +570,7 @@ enum NoteTextEditingCoordinatorSupport {
         let finalResult = (text: sanitized.text, selectedRange: sanitized.selectedRange ?? result.selectedRange)
 
         #if os(macOS)
+        guard let textView = textView as? NSTextView else { return ("", NSRange(location: 0, length: 0)) }
         NoteUndoRegistration.perform(on: textView.undoManager) {
             let styled = styledContent(
                 finalResult.text,
@@ -416,12 +579,20 @@ enum NoteTextEditingCoordinatorSupport {
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: imageEmbedMaxWidth
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
             )
             textView.textStorage?.setAttributedString(styled)
-            textView.setSelectedRange(finalResult.selectedRange)
+            applySelectedRange(
+                finalResult.selectedRange,
+                markdown: finalResult.text,
+                to: textView,
+                usesAttachments: usesAttachments,
+                vaultURL: vaultURL
+            )
         }
         #else
+        guard let textView = textView as? UITextView else { return ("", NSRange(location: 0, length: 0)) }
         NoteUndoRegistration.perform(on: textView.undoManager) {
             textView.attributedText = styledContent(
                 finalResult.text,
@@ -430,9 +601,16 @@ enum NoteTextEditingCoordinatorSupport {
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: imageEmbedMaxWidth
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
             )
-            textView.selectedRange = finalResult.selectedRange
+            applySelectedRange(
+                finalResult.selectedRange,
+                markdown: finalResult.text,
+                to: textView,
+                usesAttachments: usesAttachments,
+                vaultURL: vaultURL
+            )
         }
         #endif
 
@@ -446,8 +624,15 @@ enum NoteTextEditingCoordinatorSupport {
         editorBackground: Color,
         vaultURL: URL? = nil,
         hideResolvedImageEmbeds: Bool = false,
-        imageEmbedMaxWidth: CGFloat? = nil
+        imageEmbedMaxWidth: CGFloat? = nil,
+        hideTaskListMarkers: Bool = false
     ) -> (text: String, selectedRange: NSRange) {
+        let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        )
+
         #if os(macOS)
         guard let textView = textView as? NSTextView else { return ("", NSRange(location: 0, length: 0)) }
         NoteUndoRegistration.perform(on: textView.undoManager) {
@@ -458,10 +643,17 @@ enum NoteTextEditingCoordinatorSupport {
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: imageEmbedMaxWidth
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
             )
             textView.textStorage?.setAttributedString(styled)
-            textView.setSelectedRange(result.selectedRange)
+            applySelectedRange(
+                result.selectedRange,
+                markdown: result.text,
+                to: textView,
+                usesAttachments: usesAttachments,
+                vaultURL: vaultURL
+            )
         }
         #else
         guard let textView = textView as? UITextView else { return ("", NSRange(location: 0, length: 0)) }
@@ -473,9 +665,16 @@ enum NoteTextEditingCoordinatorSupport {
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: imageEmbedMaxWidth
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
             )
-            textView.selectedRange = result.selectedRange
+            applySelectedRange(
+                result.selectedRange,
+                markdown: result.text,
+                to: textView,
+                usesAttachments: usesAttachments,
+                vaultURL: vaultURL
+            )
         }
         #endif
 
@@ -489,7 +688,8 @@ enum NoteTextEditingCoordinatorSupport {
         editorBackground: Color,
         vaultURL: URL? = nil,
         hideResolvedImageEmbeds: Bool = false,
-        imageEmbedMaxWidth: CGFloat? = nil
+        imageEmbedMaxWidth: CGFloat? = nil,
+        hideTaskListMarkers: Bool = false
     ) {
         if textView.textStorage == nil { return }
         let storage = textView.textStorage!
@@ -503,7 +703,8 @@ enum NoteTextEditingCoordinatorSupport {
                 hiddenDelimiterOn: editorBackground,
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: imageEmbedMaxWidth
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
             )
             storage.endEditing()
             if textView.selectedRange() != selected {
@@ -518,7 +719,8 @@ enum NoteTextEditingCoordinatorSupport {
         editorBackground: Color,
         vaultURL: URL? = nil,
         hideResolvedImageEmbeds: Bool = false,
-        imageEmbedMaxWidth: CGFloat? = nil
+        imageEmbedMaxWidth: CGFloat? = nil,
+        hideTaskListMarkers: Bool = false
     ) {
         let storage = textView.textStorage
         let selected = textView.selectedRange
@@ -531,13 +733,84 @@ enum NoteTextEditingCoordinatorSupport {
                 hiddenDelimiterOn: editorBackground,
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: imageEmbedMaxWidth
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
             )
             storage.endEditing()
             if textView.selectedRange != selected {
                 textView.selectedRange = selected
             }
         }
+    }
+    #endif
+}
+
+enum CanvasNoteEditorScrollSupport {
+    #if os(macOS)
+    static func resetScrollToTop(in textView: NSTextView) {
+        guard let scrollView = textView.enclosingScrollView else { return }
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: 0))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    static func scrollCaretIntoViewIfNeeded(_ textView: NSTextView, fontSize: CGFloat) {
+        guard let scrollView = textView.enclosingScrollView else { return }
+        let caret = NoteEditingChromeSupport.caretRect(in: textView, fontSize: fontSize)
+        let visibleHeight = scrollView.contentView.bounds.height
+        guard visibleHeight > 0 else { return }
+
+        var offsetY = scrollView.contentView.bounds.origin.y
+        let maxOffset = max(0, textView.frame.height - visibleHeight)
+        var changed = false
+        let margin = max(12, fontSize * 0.4)
+
+        if caret.minY < margin {
+            offsetY = max(0, offsetY + caret.minY - margin)
+            changed = true
+        } else if caret.maxY > visibleHeight - margin {
+            offsetY = min(maxOffset, offsetY + caret.maxY - visibleHeight + margin)
+            changed = true
+        }
+
+        guard changed else { return }
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: offsetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+    #elseif os(iOS)
+    static func resetScrollToTop(in scrollView: UIScrollView) {
+        scrollView.setContentOffset(.zero, animated: false)
+    }
+
+    static func scrollCaretIntoViewIfNeeded(
+        _ scrollView: UIScrollView,
+        textView: UITextView,
+        fontSize: CGFloat
+    ) {
+        let caret = NoteEditingChromeSupport.documentCaretRect(in: textView, fontSize: fontSize)
+        let visibleHeight = scrollView.bounds.height
+        guard visibleHeight > 0 else { return }
+
+        let visibleTop = scrollView.contentOffset.y
+        let visibleBottom = visibleTop + visibleHeight
+        let maxOffset = max(0, scrollView.contentSize.height - visibleHeight)
+        var offsetY = scrollView.contentOffset.y
+        var changed = false
+        let margin = max(12, fontSize * 0.4)
+
+        if caret.minY < visibleTop + margin {
+            offsetY = max(0, caret.minY - margin)
+            changed = true
+        } else if caret.maxY > visibleBottom - margin {
+            offsetY = min(maxOffset, caret.maxY - visibleHeight + margin)
+            changed = true
+        }
+
+        guard changed else { return }
+        scrollView.setContentOffset(CGPoint(x: 0, y: offsetY), animated: false)
+    }
+
+    static func scrollCaretIntoViewIfNeeded(_ textView: UITextView, fontSize: CGFloat) {
+        scrollCaretIntoViewIfNeeded(textView as UIScrollView, textView: textView, fontSize: fontSize)
     }
     #endif
 }
@@ -577,6 +850,12 @@ final class CanvasNoteTextContainerView: NSView {
         super.init(frame: .zero)
         scrollView.autoresizingMask = [.width, .height]
         addSubview(scrollView)
+        registerForDraggedTypes(Self.imageDragTypes)
+        scrollView.registerForDraggedTypes(Self.imageDragTypes)
+    }
+
+    static var imageDragTypes: [NSPasteboard.PasteboardType] {
+        NoteEditingNSTextView.imageDragTypes
     }
 
     @available(*, unavailable)
@@ -638,11 +917,44 @@ final class CanvasNoteTextContainerView: NSView {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         textView.performDragOperation(sender) || super.performDragOperation(sender)
     }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(textView)
+        textView.mouseDown(with: event)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 final class NoteEditingNSTextView: NSTextView {
     weak var editingDelegate: NoteEditingTextViewDelegate?
     var imageDropHandler: ((Data, String?) -> Bool)?
+
+    static var imageDragTypes: [NSPasteboard.PasteboardType] {
+        [
+            .fileURL,
+            .png,
+            .tiff,
+            NSPasteboard.PasteboardType(UTType.image.identifier),
+            NSPasteboard.PasteboardType("public.file-url"),
+            NSPasteboard.PasteboardType("NSFilenamesPboardType"),
+        ]
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForImageDragTypes()
+    }
+
+    override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
+        super.init(frame: frameRect, textContainer: container)
+        registerForImageDragTypes()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func awakeFromNib() {
         super.awakeFromNib()
@@ -650,14 +962,7 @@ final class NoteEditingNSTextView: NSTextView {
     }
 
     func registerForImageDragTypes() {
-        registerForDraggedTypes([
-            .fileURL,
-            .png,
-            .tiff,
-            NSPasteboard.PasteboardType(UTType.image.identifier),
-            NSPasteboard.PasteboardType("public.file-url"),
-            NSPasteboard.PasteboardType("NSFilenamesPboardType"),
-        ])
+        registerForDraggedTypes(Self.imageDragTypes)
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -733,6 +1038,8 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
     var editorBackground: Color
     var vaultURL: URL?
     var hideResolvedImageEmbeds: Bool
+    var imageEmbedMaxWidth: CGFloat? = nil
+    var hideTaskListMarkers: Bool = false
     var onSelectionChange: () -> Void
     var onSuggestKey: (WikilinkSuggestKey) -> Bool
     var onTextEdited: ((String, Bool) -> Void)?
@@ -742,8 +1049,11 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
 
     var imageEmbedLayoutWidth: CGFloat? {
-        guard embeddedInCanvas, hideResolvedImageEmbeds,
-              let width = containerSize?.width, width > 1 else { return nil }
+        guard embeddedInCanvas, hideResolvedImageEmbeds else { return nil }
+        if let imageEmbedMaxWidth, imageEmbedMaxWidth > 1 {
+            return imageEmbedMaxWidth
+        }
+        guard let width = containerSize?.width, width > 1 else { return nil }
         return max(1, width)
     }
 
@@ -788,6 +1098,7 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         }
 
         context.coordinator.parent = self
+        context.coordinator.syncFontSizeIfNeeded(in: textView, container: nsView as? CanvasNoteTextContainerView)
         context.coordinator.syncIfNeeded(text: text, selectedRange: selectedRange, in: textView)
         context.coordinator.configureToolbarBridge(toolbarBridge)
         textView.imageDropHandler = onImageAttachmentDrop
@@ -802,7 +1113,7 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             )
             container.relayoutDocumentTextView()
             if let scrollView = container.scrollView as CanvasNoteScrollView? {
-                context.coordinator.emitContentScroll(from: scrollView, textView: textView)
+                context.coordinator.emitContentScroll(from: scrollView, textView: textView, deferUpdate: true)
             }
             if isFocused.wrappedValue {
                 DispatchQueue.main.async {
@@ -811,13 +1122,18 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             }
         }
 
-        if isFocused.wrappedValue, textView.window?.firstResponder !== textView {
+        if isFocused.wrappedValue, !context.coordinator.isLiveEditing(in: textView) {
             textView.window?.makeFirstResponder(textView)
+        }
+        if isFocused.wrappedValue {
+            context.coordinator.syncEditingChrome(in: textView)
         }
     }
 
     private func configure(textView: NoteEditingNSTextView, coordinator: Coordinator) {
         textView.delegate = coordinator
+        textView.isEditable = true
+        textView.isSelectable = true
         textView.isRichText = true
         textView.importsGraphics = false
         textView.allowsUndo = true
@@ -841,7 +1157,7 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         if embeddedInCanvas && hideResolvedImageEmbeds {
             textView.insertionPointColor = .clear
             textView.selectedTextAttributes = [
-                .backgroundColor: NSColor(AppColors.selectionStroke).withAlphaComponent(0.22),
+                .backgroundColor: NSColor.clear,
             ]
         } else if embeddedInCanvas {
             textView.insertionPointColor = NSColor(AppColors.textPrimary)
@@ -855,9 +1171,26 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         weak var containerView: CanvasNoteTextContainerView?
         private var isApplyingProgrammaticChange = false
         private var lastLayoutRefreshToken = -1
+        private var lastAppliedFontSize: CGFloat = -1
 
         init(parent: NoteBodyTextViewRepresentable) {
             self.parent = parent
+        }
+
+        func syncFontSizeIfNeeded(in textView: NSTextView, container: CanvasNoteTextContainerView? = nil) {
+            guard abs(parent.fontSize - lastAppliedFontSize) > 0.01 else { return }
+            lastAppliedFontSize = parent.fontSize
+            textView.font = .systemFont(ofSize: parent.fontSize)
+            if NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            ) {
+                applyContent(parent.text, selectedRange: parent.selectedRange, to: textView)
+            } else {
+                restyle(textView)
+            }
+            container?.relayoutDocumentTextView()
         }
 
         func attach(textView: NoteEditingNSTextView, container: CanvasNoteTextContainerView? = nil) {
@@ -878,6 +1211,10 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                     self.emitContentScroll(from: scrollView, textView: textView)
                     self.updateCaretRect(for: textView)
                     return result
+                }
+                DispatchQueue.main.async { [weak textView] in
+                    guard let textView, textView.window != nil else { return }
+                    textView.window?.makeFirstResponder(textView)
                 }
             }
         }
@@ -900,8 +1237,29 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
 
         private func handleCanvasEmbedNavigation(in textView: NSTextView, key: CanvasEmbedNavKey) -> Bool {
             guard parent.embeddedInCanvas, parent.hideResolvedImageEmbeds else { return false }
-            let selected = textView.selectedRange()
-            let source = textView.string
+
+            let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+
+            let source: String
+            let selected: NSRange
+            if usesAttachments {
+                source = NoteImageEmbedAttributedSupport.markdown(
+                    from: textView.attributedString(),
+                    vaultURL: parent.vaultURL
+                )
+                selected = NoteImageEmbedAttributedSupport.markdownRange(
+                    fromAttributedRange: textView.selectedRange(),
+                    in: source,
+                    vaultURL: parent.vaultURL
+                )
+            } else {
+                source = textView.string
+                selected = textView.selectedRange()
+            }
 
             switch key {
             case .enter:
@@ -913,11 +1271,18 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                 applyCanvasNavigation(result, to: textView)
                 return true
             case .down:
-                guard let target = NoteCardEmbedEditingSupport.moveDownPastImageEmbed(
+                guard let markdownTarget = NoteCardEmbedEditingSupport.moveDownPastImageEmbed(
                     in: source,
                     selectedRange: selected,
                     vaultURL: parent.vaultURL
                 ) else { return false }
+                let target = usesAttachments
+                    ? NoteImageEmbedAttributedSupport.attributedRange(
+                        fromMarkdownRange: markdownTarget,
+                        in: source,
+                        vaultURL: parent.vaultURL
+                    )
+                    : markdownTarget
                 textView.setSelectedRange(target)
                 updateCaretRect(for: textView)
                 parent.onSelectionChange()
@@ -937,7 +1302,8 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
             Task { @MainActor in
                 parent.text = updates.text
@@ -965,7 +1331,8 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
             Task { @MainActor in
                 parent.text = updates.text
@@ -987,7 +1354,8 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
             Task { @MainActor in
                 parent.text = updates.text
@@ -1001,11 +1369,56 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
 
         func noteTextViewDidApplyEdit(_ textView: AnyObject) {}
 
+        func isLiveEditing(in textView: NSTextView) -> Bool {
+            guard let window = textView.window else { return false }
+            if window.firstResponder === textView { return true }
+            if let fieldEditor = window.fieldEditor(false, for: textView) as AnyObject?,
+               window.firstResponder === fieldEditor {
+                return true
+            }
+            return false
+        }
+
         func syncIfNeeded(text: String, selectedRange: NSRange, in textView: NSTextView) {
             guard !isApplyingProgrammaticChange else { return }
+
+            let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+
+            if usesAttachments, isLiveEditing(in: textView) {
+                return
+            }
+
+            if isLiveEditing(in: textView), textView.string != text {
+                return
+            }
+
+            if usesAttachments {
+                if NoteImageEmbedAttributedSupport.shouldRebuildAttributedText(
+                    bindingMarkdown: text,
+                    currentAttributed: textView.attributedString(),
+                    vaultURL: parent.vaultURL
+                ) {
+                    applyContent(text, selectedRange: selectedRange, to: textView)
+                } else if !isLiveEditing(in: textView) {
+                    let expected = NoteImageEmbedAttributedSupport.attributedRange(
+                        fromMarkdownRange: selectedRange,
+                        in: text,
+                        vaultURL: parent.vaultURL
+                    )
+                    if textView.selectedRange() != expected {
+                        textView.setSelectedRange(expected)
+                    }
+                }
+                return
+            }
+
             if textView.string != text {
                 applyContent(text, selectedRange: selectedRange, to: textView)
-            } else if textView.selectedRange() != selectedRange {
+            } else if !isLiveEditing(in: textView), textView.selectedRange() != selectedRange {
                 textView.setSelectedRange(selectedRange)
                 restyle(textView)
             }
@@ -1015,18 +1428,35 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             isApplyingProgrammaticChange = true
             defer { isApplyingProgrammaticChange = false }
 
+            let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+
             NoteUndoRegistration.perform(on: textView.undoManager) {
-                let styled = WikilinkEditorSupport.attributedString(
-                    for: content,
+                let styled = NoteTextEditingCoordinatorSupport.styledContent(
+                    content,
                     selectedRange: selectedRange,
                     fontSize: parent.fontSize,
-                    hiddenDelimiterOn: parent.editorBackground,
+                    editorBackground: parent.editorBackground,
                     vaultURL: parent.vaultURL,
                     hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                    imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                    hideTaskListMarkers: parent.hideTaskListMarkers
                 )
                 textView.textStorage?.setAttributedString(styled)
-                textView.setSelectedRange(clampedRange(selectedRange, in: content))
+                if usesAttachments {
+                    textView.setSelectedRange(
+                        NoteImageEmbedAttributedSupport.attributedRange(
+                            fromMarkdownRange: selectedRange,
+                            in: content,
+                            vaultURL: parent.vaultURL
+                        )
+                    )
+                } else {
+                    textView.setSelectedRange(clampedRange(selectedRange, in: content))
+                }
             }
             updateCaretRect(for: textView)
             containerView?.relayoutDocumentTextView()
@@ -1037,45 +1467,70 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView, !isApplyingProgrammaticChange else { return }
-            restyle(textView)
-            var newText = textView.string
-            var newRange = textView.selectedRange()
-            if parent.embeddedInCanvas, parent.hideResolvedImageEmbeds {
-                let sanitized = NoteCardEmbedEditingSupport.sanitizeEmbedSpacing(
-                    in: newText,
-                    vaultURL: parent.vaultURL,
-                    selectedRange: newRange
+
+            let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+
+            var newText: String
+            var newRange: NSRange
+
+            if usesAttachments {
+                newText = NoteImageEmbedAttributedSupport.markdownPreservingEmbeds(
+                    from: textView.attributedString(),
+                    previousMarkdown: parent.text,
+                    vaultURL: parent.vaultURL
                 )
-                if sanitized.text != newText {
-                    isApplyingProgrammaticChange = true
-                    NoteUndoRegistration.perform(on: textView.undoManager) {
-                        let styled = WikilinkEditorSupport.attributedString(
-                            for: sanitized.text,
-                            selectedRange: sanitized.selectedRange ?? newRange,
-                            fontSize: parent.fontSize,
-                            hiddenDelimiterOn: parent.editorBackground,
-                            vaultURL: parent.vaultURL,
-                            hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                            imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
-                        )
-                        textView.textStorage?.setAttributedString(styled)
-                        textView.setSelectedRange(sanitized.selectedRange ?? newRange)
+                newRange = NoteImageEmbedAttributedSupport.markdownRange(
+                    fromAttributedRange: textView.selectedRange(),
+                    in: newText,
+                    vaultURL: parent.vaultURL
+                )
+            } else {
+                restyle(textView)
+                newText = textView.string
+                newRange = textView.selectedRange()
+                if parent.embeddedInCanvas, parent.hideResolvedImageEmbeds {
+                    let sanitized = NoteCardEmbedEditingSupport.sanitizeEmbedSpacing(
+                        in: newText,
+                        vaultURL: parent.vaultURL,
+                        selectedRange: newRange
+                    )
+                    if sanitized.text != newText {
+                        isApplyingProgrammaticChange = true
+                        NoteUndoRegistration.perform(on: textView.undoManager) {
+                            let styled = WikilinkEditorSupport.attributedString(
+                                for: sanitized.text,
+                                selectedRange: sanitized.selectedRange ?? newRange,
+                                fontSize: parent.fontSize,
+                                hiddenDelimiterOn: parent.editorBackground,
+                                vaultURL: parent.vaultURL,
+                                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                            )
+                            textView.textStorage?.setAttributedString(styled)
+                            textView.setSelectedRange(sanitized.selectedRange ?? newRange)
+                        }
+                        isApplyingProgrammaticChange = false
+                        newText = sanitized.text
+                        newRange = sanitized.selectedRange ?? newRange
                     }
-                    isApplyingProgrammaticChange = false
-                    newText = sanitized.text
-                    newRange = sanitized.selectedRange ?? newRange
                 }
             }
+
             let fromTextUndo = textView.undoManager?.isUndoing == true || textView.undoManager?.isRedoing == true
+            parent.text = newText
+            parent.selectedRange = newRange
+            updateCaretRect(for: textView)
             Task { @MainActor in
-                parent.text = newText
-                parent.selectedRange = newRange
-                updateCaretRect(for: textView)
                 scrollCaretIntoView(textView)
                 containerView?.relayoutDocumentTextView()
                 if let scrollView = containerView?.scrollView {
                     emitContentScroll(from: scrollView, textView: textView)
                 }
+                updateCaretRect(for: textView)
                 parent.onSelectionChange()
                 parent.onTextEdited?(newText, fromTextUndo)
             }
@@ -1084,10 +1539,17 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView, !isApplyingProgrammaticChange else { return }
             let newRange = textView.selectedRange()
-            restyle(textView)
+            if !NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            ) {
+                restyle(textView)
+            }
+            parent.selectedRange = newRange
+            updateCaretRect(for: textView)
             Task { @MainActor in
-                parent.selectedRange = newRange
-                updateCaretRect(for: textView)
+                scrollCaretIntoView(textView)
                 parent.onSelectionChange()
             }
         }
@@ -1116,7 +1578,8 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
         }
 
@@ -1132,21 +1595,42 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         ) {
             guard token != lastLayoutRefreshToken else { return }
             lastLayoutRefreshToken = token
-            restyle(textView)
+            if NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            ) {
+                if isLiveEditing(in: textView) {
+                    container?.relayoutDocumentTextView()
+                    if let scrollView = containerView?.scrollView {
+                        emitContentScroll(from: scrollView, textView: textView)
+                    }
+                    return
+                }
+                applyContent(parent.text, selectedRange: parent.selectedRange, to: textView)
+            } else {
+                restyle(textView)
+            }
             container?.relayoutDocumentTextView()
             if let scrollView = containerView?.scrollView {
                 emitContentScroll(from: scrollView, textView: textView)
             }
         }
 
-        func emitContentScroll(from scrollView: NSScrollView, textView: NSTextView) {
+        func emitContentScroll(from scrollView: NSScrollView, textView: NSTextView, deferUpdate: Bool = false) {
             guard let handler = parent.onContentScroll else { return }
             let metrics = CanvasNoteScrollMetrics(
                 offset: scrollView.contentView.bounds.origin,
                 contentHeight: textView.frame.height,
                 viewportHeight: scrollView.contentView.bounds.height
             )
-            handler(metrics)
+            if deferUpdate {
+                Task { @MainActor in
+                    handler(metrics)
+                }
+            } else {
+                handler(metrics)
+            }
         }
 
         private func updateEditingChrome(for textView: NSTextView) {
@@ -1160,6 +1644,10 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         }
 
         private func updateCaretRect(for textView: NSTextView) {
+            updateEditingChrome(for: textView)
+        }
+
+        func syncEditingChrome(in textView: NSTextView) {
             updateEditingChrome(for: textView)
         }
 
@@ -1180,12 +1668,140 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
 
 #else
 
+final class CanvasNoteIOSScrollView: UIScrollView {
+    var onScroll: (() -> Void)?
+
+    override var contentOffset: CGPoint {
+        didSet {
+            if contentOffset != oldValue {
+                onScroll?()
+            }
+        }
+    }
+}
+
+/// Mirrors the Mac `CanvasNoteTextContainerView` — outer UIScrollView + fixed-width UITextView document.
+final class CanvasNoteUITextContainerView: UIView, UIGestureRecognizerDelegate {
+    let scrollView: CanvasNoteIOSScrollView
+    let textView: NoteEditingUITextView
+    private var panOriginOffsetY: CGFloat = 0
+    private lazy var scrollPanGesture: UIPanGestureRecognizer = {
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleScrollPan(_:)))
+        pan.delegate = self
+        pan.cancelsTouchesInView = false
+        return pan
+    }()
+
+    var onScroll: (() -> Void)? {
+        get { scrollView.onScroll }
+        set { scrollView.onScroll = newValue }
+    }
+
+    init(textView: NoteEditingUITextView) {
+        self.textView = textView
+        self.scrollView = CanvasNoteIOSScrollView()
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.backgroundColor = .clear
+        scrollView.contentInsetAdjustmentBehavior = .never
+        scrollView.alwaysBounceVertical = false
+        scrollView.delaysContentTouches = false
+        scrollView.canCancelContentTouches = true
+        scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        textView.isScrollEnabled = false
+        textView.backgroundColor = .clear
+        textView.textContainer.widthTracksTextView = false
+        textView.textContainer.heightTracksTextView = false
+        scrollView.addSubview(textView)
+        addSubview(scrollView)
+        addGestureRecognizer(scrollPanGesture)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        scrollView.frame = bounds
+        relayoutDocumentTextView()
+    }
+
+    func relayoutDocumentTextView() {
+        guard scrollView.bounds.width > 1, scrollView.bounds.height > 1 else { return }
+
+        let textContainer = textView.textContainer
+        let layoutManager = textView.layoutManager
+        let width = max(1, scrollView.bounds.width)
+        textContainer.widthTracksTextView = false
+        textContainer.heightTracksTextView = false
+        textContainer.size = CGSize(width: width, height: .greatestFiniteMagnitude)
+
+        layoutManager.ensureLayout(for: textContainer)
+        let used = layoutManager.usedRect(for: textContainer)
+        let inset = textView.textContainerInset
+        let textHeight = ceil(used.maxY + inset.top + inset.bottom)
+        let contentHeight = textHeight
+        let newFrame = CGRect(x: 0, y: 0, width: width, height: contentHeight)
+        if textView.frame != newFrame {
+            textView.frame = newFrame
+        }
+        let newContentSize = CGSize(width: width, height: contentHeight)
+        if scrollView.contentSize != newContentSize {
+            scrollView.contentSize = newContentSize
+        }
+    }
+
+    func resetScrollToTop() {
+        scrollView.setContentOffset(.zero, animated: false)
+        panOriginOffsetY = 0
+    }
+
+    @objc private func handleScrollPan(_ gesture: UIPanGestureRecognizer) {
+        let maxOffset = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+        guard maxOffset > 0.5 else { return }
+
+        switch gesture.state {
+        case .began:
+            panOriginOffsetY = scrollView.contentOffset.y
+        case .changed:
+            let proposed = panOriginOffsetY - gesture.translation(in: scrollView).y
+            scrollView.contentOffset.y = min(max(0, proposed), maxOffset)
+        case .ended, .cancelled, .failed:
+            panOriginOffsetY = scrollView.contentOffset.y
+        default:
+            break
+        }
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === scrollPanGesture else { return true }
+        return scrollView.contentSize.height > scrollView.bounds.height + 0.5
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === scrollPanGesture
+    }
+}
+
 final class NoteEditingUITextView: UITextView {
     weak var editingDelegate: NoteEditingTextViewDelegate?
     var toolbarBridge: NoteFormattingToolbarBridge?
     weak var dropDelegate: UIDropInteractionDelegate?
     var imageDropHandler: ((Data, String?) -> Bool)?
     var onScroll: (() -> Void)?
+    var canvasMinimalScrolling = false
+
+    override func scrollRangeToVisible(_ range: NSRange) {
+        guard !canvasMinimalScrolling else { return }
+        super.scrollRangeToVisible(range)
+    }
 
     override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) {
         super.setContentOffset(contentOffset, animated: animated)
@@ -1289,6 +1905,8 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     var editorBackground: Color
     var vaultURL: URL?
     var hideResolvedImageEmbeds: Bool
+    var imageEmbedMaxWidth: CGFloat? = nil
+    var hideTaskListMarkers: Bool
     var onSelectionChange: () -> Void
     var onSuggestKey: (WikilinkSuggestKey) -> Bool
     var onTextEdited: ((String, Bool) -> Void)?
@@ -1298,24 +1916,100 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
 
     var imageEmbedLayoutWidth: CGFloat? {
-        guard embeddedInCanvas, hideResolvedImageEmbeds,
-              let width = containerSize?.width, width > 1 else { return nil }
+        guard embeddedInCanvas, hideResolvedImageEmbeds else { return nil }
+        if let imageEmbedMaxWidth, imageEmbedMaxWidth > 1 {
+            return imageEmbedMaxWidth
+        }
+        guard let width = containerSize?.width, width > 1 else { return nil }
         return max(1, width)
+    }
+
+    var showsCustomEditingChrome: Bool {
+        hideResolvedImageEmbeds
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
     }
 
-    func makeUIView(context: Context) -> NoteEditingUITextView {
+    func makeUIView(context: Context) -> UIView {
+        let textView = makeConfiguredTextView(context: context)
+        if embeddedInCanvas {
+            let container = CanvasNoteUITextContainerView(textView: textView)
+            context.coordinator.attach(textView: textView, container: container)
+            context.coordinator.applyContent(text, selectedRange: selectedRange, to: textView)
+            container.relayoutDocumentTextView()
+            container.resetScrollToTop()
+            context.coordinator.emitContentScroll(from: container.scrollView, deferUpdate: true)
+            return container
+        }
+
+        context.coordinator.attach(textView: textView)
+        context.coordinator.applyContent(text, selectedRange: selectedRange, to: textView)
+        return textView
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        let textView: NoteEditingUITextView
+        let container: CanvasNoteUITextContainerView?
+        if let embeddedContainer = uiView as? CanvasNoteUITextContainerView {
+            textView = embeddedContainer.textView
+            container = embeddedContainer
+        } else if let standaloneTextView = uiView as? NoteEditingUITextView {
+            textView = standaloneTextView
+            container = nil
+        } else {
+            return
+        }
+
+        context.coordinator.parent = self
+        context.coordinator.syncFontSizeIfNeeded(in: textView, container: container)
+        textView.configureToolbarBridge(toolbarBridge)
+        textView.imageDropHandler = onImageAttachmentDrop
+        textView.refreshDropInteraction()
+        context.coordinator.syncIfNeeded(text: text, selectedRange: selectedRange, in: textView)
+        container?.relayoutDocumentTextView()
+        context.coordinator.refreshLayoutIfNeeded(
+            token: layoutRefreshToken,
+            in: textView,
+            container: container
+        )
+        if isFocused.wrappedValue, !textView.isFirstResponder {
+            _ = textView.becomeFirstResponder()
+        }
+        if let scrollView = container?.scrollView {
+            context.coordinator.emitContentScroll(from: scrollView, deferUpdate: true)
+        }
+        if showsCustomEditingChrome {
+            textView.tintColor = .clear
+        } else {
+            textView.tintColor = UIColor(AppColors.textPrimary)
+        }
+        if isFocused.wrappedValue {
+            context.coordinator.syncEditingChrome(in: textView)
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIView, context: Context) -> CGSize? {
+        guard embeddedInCanvas,
+              let containerSize,
+              containerSize.width > 1,
+              containerSize.height > 1 else { return nil }
+        return containerSize
+    }
+
+    private func makeConfiguredTextView(context: Context) -> NoteEditingUITextView {
         let textView = NoteEditingUITextView()
         textView.editingDelegate = context.coordinator
         textView.delegate = context.coordinator
         textView.dropDelegate = context.coordinator
+        textView.isEditable = true
+        textView.isSelectable = true
         textView.backgroundColor = .clear
         textView.font = .systemFont(ofSize: fontSize)
         textView.textColor = UIColor(AppColors.textPrimary)
-        textView.isScrollEnabled = embeddedInCanvas
+        textView.isScrollEnabled = !embeddedInCanvas
+        textView.contentInsetAdjustmentBehavior = .never
         textView.showsVerticalScrollIndicator = false
         textView.showsHorizontalScrollIndicator = false
         textView.textContainerInset = .zero
@@ -1324,60 +2018,74 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         textView.autocapitalizationType = .none
         textView.smartDashesType = .no
         textView.smartQuotesType = .no
-        if embeddedInCanvas && hideResolvedImageEmbeds {
+        textView.canvasMinimalScrolling = embeddedInCanvas
+        if showsCustomEditingChrome {
             textView.tintColor = .clear
-        } else if embeddedInCanvas {
+        } else {
             textView.tintColor = UIColor(AppColors.textPrimary)
         }
         textView.imageDropHandler = onImageAttachmentDrop
         textView.refreshDropInteraction()
-        context.coordinator.attach(textView: textView)
         textView.configureToolbarBridge(toolbarBridge)
-        context.coordinator.applyContent(text, selectedRange: selectedRange, to: textView)
         return textView
-    }
-
-    func updateUIView(_ textView: NoteEditingUITextView, context: Context) {
-        context.coordinator.parent = self
-        textView.configureToolbarBridge(toolbarBridge)
-        textView.imageDropHandler = onImageAttachmentDrop
-        textView.refreshDropInteraction()
-        context.coordinator.syncIfNeeded(text: text, selectedRange: selectedRange, in: textView)
-        if let containerSize, embeddedInCanvas, containerSize.width > 1, containerSize.height > 1 {
-            textView.bounds.size = containerSize
-        }
-        context.coordinator.refreshLayoutIfNeeded(
-            token: layoutRefreshToken,
-            in: textView
-        )
-        if isFocused.wrappedValue, !textView.isFirstResponder {
-            _ = textView.becomeFirstResponder()
-        }
-        if embeddedInCanvas {
-            context.coordinator.emitContentScroll(from: textView)
-        }
     }
 
     final class Coordinator: NSObject, UITextViewDelegate, NoteEditingUITextViewDelegate, UIDropInteractionDelegate {
         var parent: NoteBodyTextViewRepresentable
         weak var textView: NoteEditingUITextView?
+        weak var containerView: CanvasNoteUITextContainerView?
         private var isApplyingProgrammaticChange = false
         private var lastLayoutRefreshToken = -1
+        private var lastAppliedFontSize: CGFloat = -1
 
         init(parent: NoteBodyTextViewRepresentable) {
             self.parent = parent
         }
 
-        func attach(textView: NoteEditingUITextView) {
+        func syncFontSizeIfNeeded(in textView: UITextView, container: CanvasNoteUITextContainerView? = nil) {
+            guard abs(parent.fontSize - lastAppliedFontSize) > 0.01 else { return }
+            lastAppliedFontSize = parent.fontSize
+            textView.font = .systemFont(ofSize: parent.fontSize)
+            if NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            ) {
+                applyContent(parent.text, selectedRange: parent.selectedRange, to: textView)
+            } else {
+                restyle(textView)
+            }
+            container?.relayoutDocumentTextView()
+        }
+
+        func attach(textView: NoteEditingUITextView, container: CanvasNoteUITextContainerView? = nil) {
             self.textView = textView
-            textView.onScroll = { [weak self] in
-                guard let self, let textView = self.textView else { return }
-                self.emitContentScroll(from: textView)
-                self.updateCaretRect(for: textView)
+            self.containerView = container
+            if let container {
+                container.onScroll = { [weak self] in
+                    guard let self, let scrollView = self.containerView?.scrollView else { return }
+                    self.emitContentScroll(from: scrollView)
+                    self.updateCaretRect(for: textView)
+                }
+            } else {
+                textView.onScroll = { [weak self] in
+                    guard let self, let textView = self.textView else { return }
+                    self.emitContentScroll(from: textView)
+                    self.updateCaretRect(for: textView)
+                }
             }
             if parent.embeddedInCanvas {
                 CanvasNoteCardScrollBridge.register(owner: "edit") { [weak self] delta in
-                    guard let self, let textView = self.textView else { return .none }
+                    guard let self else { return .none }
+                    if let scrollView = self.containerView?.scrollView {
+                        let result = CanvasNoteCardScrollBridge.scroll(scrollView, by: delta)
+                        self.emitContentScroll(from: scrollView)
+                        if let textView = self.textView {
+                            self.updateCaretRect(for: textView)
+                        }
+                        return result
+                    }
+                    guard let textView = self.textView else { return .none }
                     let result = CanvasNoteCardScrollBridge.scroll(textView, by: delta)
                     self.emitContentScroll(from: textView)
                     self.updateCaretRect(for: textView)
@@ -1386,14 +2094,28 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             }
         }
 
-        func emitContentScroll(from textView: UITextView) {
+        private func contentScrollOffset(for textView: UITextView) -> CGPoint {
+            containerView?.scrollView.contentOffset ?? textView.contentOffset
+        }
+
+        func emitContentScroll(from scrollView: UIScrollView, deferUpdate: Bool = false) {
             guard let handler = parent.onContentScroll else { return }
             let metrics = CanvasNoteScrollMetrics(
-                offset: textView.contentOffset,
-                contentHeight: textView.contentSize.height,
-                viewportHeight: textView.bounds.height
+                offset: scrollView.contentOffset,
+                contentHeight: scrollView.contentSize.height,
+                viewportHeight: scrollView.bounds.height
             )
-            handler(metrics)
+            if deferUpdate {
+                Task { @MainActor in
+                    handler(metrics)
+                }
+            } else {
+                handler(metrics)
+            }
+        }
+
+        func emitContentScroll(from textView: UITextView, deferUpdate: Bool = false) {
+            emitContentScroll(from: textView as UIScrollView, deferUpdate: deferUpdate)
         }
 
         func noteEditingTextView(_ textView: NoteEditingUITextView, apply action: MarkdownEditAction) {
@@ -1405,7 +2127,8 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
             textView.refreshFormattingToolbar()
             Task { @MainActor in
@@ -1427,7 +2150,8 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
             textView.refreshFormattingToolbar()
             Task { @MainActor in
@@ -1443,17 +2167,32 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         func noteTextViewDidApplyEdit(_ textView: AnyObject) {}
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            guard text == "\n",
-                  parent.embeddedInCanvas,
-                  parent.hideResolvedImageEmbeds,
-                  !isApplyingProgrammaticChange else { return true }
+            guard text == "\n", !isApplyingProgrammaticChange else { return true }
             let source = textView.text ?? ""
-            guard let result = NoteCardEmbedEditingSupport.newlineBelowImageEmbed(
-                in: source,
-                selectedRange: range,
-                vaultURL: parent.vaultURL
-            ) else { return true }
 
+            if parent.embeddedInCanvas,
+               parent.hideResolvedImageEmbeds,
+               let result = NoteCardEmbedEditingSupport.newlineBelowImageEmbed(
+                   in: source,
+                   selectedRange: range,
+                   vaultURL: parent.vaultURL
+               ) {
+                applyProgrammaticNewline(result, to: textView)
+                return false
+            }
+
+            if let result = MarkdownEditingSupport.newlineInTaskList(in: source, selectedRange: range) {
+                applyProgrammaticNewline(result, to: textView)
+                return false
+            }
+
+            return true
+        }
+
+        private func applyProgrammaticNewline(
+            _ result: (text: String, selectedRange: NSRange),
+            to textView: UITextView
+        ) {
             isApplyingProgrammaticChange = true
             let updates = NoteTextEditingCoordinatorSupport.applyEditedText(
                 result,
@@ -1462,25 +2201,62 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
             (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
             Task { @MainActor in
                 parent.text = updates.text
                 parent.selectedRange = updates.selectedRange
                 updateCaretRect(for: textView)
+                if parent.embeddedInCanvas {
+                    relayoutEmbeddedCanvas(in: textView)
+                }
                 parent.onSelectionChange()
                 parent.onTextEdited?(updates.text, false)
                 isApplyingProgrammaticChange = false
             }
-            return false
+        }
+
+        private func isLiveEditing(in textView: UITextView) -> Bool {
+            textView.isFirstResponder
         }
 
         func syncIfNeeded(text: String, selectedRange: NSRange, in textView: UITextView) {
             guard !isApplyingProgrammaticChange else { return }
+            if isLiveEditing(in: textView), textView.text != text {
+                return
+            }
+
+            let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+
+            if usesAttachments {
+                if NoteImageEmbedAttributedSupport.shouldRebuildAttributedText(
+                    bindingMarkdown: text,
+                    currentAttributed: textView.attributedText,
+                    vaultURL: parent.vaultURL
+                ) {
+                    applyContent(text, selectedRange: selectedRange, to: textView)
+                } else if !isLiveEditing(in: textView) {
+                    let expected = NoteImageEmbedAttributedSupport.attributedRange(
+                        fromMarkdownRange: selectedRange,
+                        in: text,
+                        vaultURL: parent.vaultURL
+                    )
+                    if textView.selectedRange != expected {
+                        textView.selectedRange = expected
+                    }
+                }
+                return
+            }
+
             if textView.text != text {
                 applyContent(text, selectedRange: selectedRange, to: textView)
-            } else if textView.selectedRange != selectedRange {
+            } else if !isLiveEditing(in: textView), textView.selectedRange != selectedRange {
                 textView.selectedRange = selectedRange
                 restyle(textView)
             }
@@ -1490,60 +2266,134 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             isApplyingProgrammaticChange = true
             defer { isApplyingProgrammaticChange = false }
 
+            let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+
             NoteUndoRegistration.perform(on: textView.undoManager) {
-                textView.attributedText = WikilinkEditorSupport.attributedString(
-                    for: content,
+                textView.attributedText = NoteTextEditingCoordinatorSupport.styledContent(
+                    content,
                     selectedRange: selectedRange,
                     fontSize: parent.fontSize,
-                    hiddenDelimiterOn: parent.editorBackground,
+                    editorBackground: parent.editorBackground,
                     vaultURL: parent.vaultURL,
                     hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                    imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                    hideTaskListMarkers: parent.hideTaskListMarkers
                 )
-                textView.selectedRange = clampedRange(selectedRange, in: content)
+                if usesAttachments {
+                    textView.selectedRange = NoteImageEmbedAttributedSupport.attributedRange(
+                        fromMarkdownRange: selectedRange,
+                        in: content,
+                        vaultURL: parent.vaultURL
+                    )
+                } else {
+                    textView.selectedRange = clampedRange(selectedRange, in: content)
+                }
             }
             updateCaretRect(for: textView)
             (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
+            if parent.embeddedInCanvas {
+                relayoutEmbeddedCanvas(in: textView)
+                if let scrollView = containerView?.scrollView {
+                    emitContentScroll(from: scrollView, deferUpdate: true)
+                }
+            }
+        }
+
+        private func relayoutEmbeddedCanvas(in textView: UITextView) {
+            containerView?.relayoutDocumentTextView()
+        }
+
+        private func scrollEmbeddedCaretIntoViewIfNeeded(for textView: UITextView) {
+            guard parent.embeddedInCanvas else { return }
+            if let scrollView = containerView?.scrollView {
+                CanvasNoteEditorScrollSupport.scrollCaretIntoViewIfNeeded(
+                    scrollView,
+                    textView: textView,
+                    fontSize: parent.fontSize
+                )
+            } else {
+                CanvasNoteEditorScrollSupport.scrollCaretIntoViewIfNeeded(
+                    textView,
+                    fontSize: parent.fontSize
+                )
+            }
         }
 
         func textViewDidChange(_ textView: UITextView) {
             guard !isApplyingProgrammaticChange else { return }
-            restyle(textView)
-            var newText = textView.text ?? ""
-            var newRange = textView.selectedRange
-            if parent.embeddedInCanvas, parent.hideResolvedImageEmbeds {
-                let sanitized = NoteCardEmbedEditingSupport.sanitizeEmbedSpacing(
-                    in: newText,
-                    vaultURL: parent.vaultURL,
-                    selectedRange: newRange
+
+            let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+
+            var newText: String
+            var newRange: NSRange
+
+            if usesAttachments {
+                newText = NoteImageEmbedAttributedSupport.markdownPreservingEmbeds(
+                    from: textView.attributedText,
+                    previousMarkdown: parent.text,
+                    vaultURL: parent.vaultURL
                 )
-                if sanitized.text != newText {
-                    isApplyingProgrammaticChange = true
-                    NoteUndoRegistration.perform(on: textView.undoManager) {
-                        textView.attributedText = WikilinkEditorSupport.attributedString(
-                            for: sanitized.text,
-                            selectedRange: sanitized.selectedRange ?? newRange,
-                            fontSize: parent.fontSize,
-                            hiddenDelimiterOn: parent.editorBackground,
-                            vaultURL: parent.vaultURL,
-                            hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                            imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
-                        )
-                        textView.selectedRange = sanitized.selectedRange ?? newRange
+                newRange = NoteImageEmbedAttributedSupport.markdownRange(
+                    fromAttributedRange: textView.selectedRange,
+                    in: newText,
+                    vaultURL: parent.vaultURL
+                )
+            } else {
+                restyle(textView)
+                newText = textView.text ?? ""
+                newRange = textView.selectedRange
+                if parent.embeddedInCanvas, parent.hideResolvedImageEmbeds {
+                    let sanitized = NoteCardEmbedEditingSupport.sanitizeEmbedSpacing(
+                        in: newText,
+                        vaultURL: parent.vaultURL,
+                        selectedRange: newRange
+                    )
+                    if sanitized.text != newText {
+                        isApplyingProgrammaticChange = true
+                        NoteUndoRegistration.perform(on: textView.undoManager) {
+                            textView.attributedText = NoteTextEditingCoordinatorSupport.styledContent(
+                                sanitized.text,
+                                selectedRange: sanitized.selectedRange ?? newRange,
+                                fontSize: parent.fontSize,
+                                editorBackground: parent.editorBackground,
+                                vaultURL: parent.vaultURL,
+                                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                                hideTaskListMarkers: parent.hideTaskListMarkers
+                            )
+                            textView.selectedRange = sanitized.selectedRange ?? newRange
+                        }
+                        isApplyingProgrammaticChange = false
+                        newText = sanitized.text
+                        newRange = sanitized.selectedRange ?? newRange
                     }
-                    isApplyingProgrammaticChange = false
-                    newText = sanitized.text
-                    newRange = sanitized.selectedRange ?? newRange
                 }
             }
+
             let fromTextUndo = textView.undoManager?.isUndoing == true || textView.undoManager?.isRedoing == true
             (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
+            parent.text = newText
+            parent.selectedRange = newRange
             Task { @MainActor in
-                parent.text = newText
-                parent.selectedRange = newRange
                 updateCaretRect(for: textView)
-                scrollCaretIntoView(textView)
-                emitContentScroll(from: textView)
+                if parent.embeddedInCanvas {
+                    relayoutEmbeddedCanvas(in: textView)
+                    scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
+                    updateCaretRect(for: textView)
+                }
+                if let scrollView = containerView?.scrollView {
+                    emitContentScroll(from: scrollView)
+                } else {
+                    emitContentScroll(from: textView)
+                }
                 parent.onSelectionChange()
                 parent.onTextEdited?(newText, fromTextUndo)
             }
@@ -1580,10 +2430,19 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard !isApplyingProgrammaticChange else { return }
             let newRange = textView.selectedRange
-            restyle(textView)
+            if !NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            ) {
+                restyle(textView)
+            }
             (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
+            parent.selectedRange = newRange
+            if parent.embeddedInCanvas {
+                scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
+            }
             Task { @MainActor in
-                parent.selectedRange = newRange
                 updateCaretRect(for: textView)
                 parent.onSelectionChange()
             }
@@ -1596,28 +2455,61 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
         }
 
-        func restyleForLayoutRefresh(in textView: UITextView) {
+        func restyleForLayoutRefresh(in textView: UITextView, container: CanvasNoteUITextContainerView?) {
             restyle(textView)
+            if parent.embeddedInCanvas {
+                container?.relayoutDocumentTextView()
+            }
         }
 
-        func refreshLayoutIfNeeded(token: Int, in textView: UITextView) {
+        func refreshLayoutIfNeeded(token: Int, in textView: UITextView, container: CanvasNoteUITextContainerView?) {
             guard token != lastLayoutRefreshToken else { return }
             lastLayoutRefreshToken = token
-            restyle(textView)
-            emitContentScroll(from: textView)
+            if NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            ) {
+                applyContent(parent.text, selectedRange: parent.selectedRange, to: textView)
+            } else {
+                restyleForLayoutRefresh(in: textView, container: container)
+                if let scrollView = container?.scrollView {
+                    emitContentScroll(from: scrollView, deferUpdate: true)
+                } else if parent.embeddedInCanvas {
+                    emitContentScroll(from: textView, deferUpdate: true)
+                }
+                return
+            }
+            if parent.embeddedInCanvas {
+                container?.relayoutDocumentTextView()
+            }
+            if let scrollView = container?.scrollView {
+                emitContentScroll(from: scrollView, deferUpdate: true)
+            } else if parent.embeddedInCanvas {
+                emitContentScroll(from: textView, deferUpdate: true)
+            }
         }
 
         private func updateEditingChrome(for textView: UITextView) {
-            guard parent.embeddedInCanvas else { return }
-            let rect = NoteEditingChromeSupport.caretRect(in: textView, fontSize: parent.fontSize)
-            let rects = NoteEditingChromeSupport.selectionRects(in: textView)
+            let scrollOffset = contentScrollOffset(for: textView)
+            let rect = NoteEditingChromeSupport.caretRect(
+                in: textView,
+                fontSize: parent.fontSize,
+                contentScrollOffset: scrollOffset
+            )
+            let selection = parent.showsCustomEditingChrome
+                ? NoteEditingChromeSupport.selectionRects(in: textView, contentScrollOffset: scrollOffset)
+                : nil
             Task { @MainActor in
                 parent.caretRect = rect
-                parent.selectionRects = rects
+                if let selection {
+                    parent.selectionRects = selection
+                }
             }
         }
 
@@ -1625,9 +2517,13 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             updateEditingChrome(for: textView)
         }
 
+        func syncEditingChrome(in textView: UITextView) {
+            updateEditingChrome(for: textView)
+        }
+
         private func scrollCaretIntoView(_ textView: UITextView) {
             guard parent.embeddedInCanvas else { return }
-            textView.scrollRangeToVisible(textView.selectedRange)
+            scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
             updateCaretRect(for: textView)
         }
 

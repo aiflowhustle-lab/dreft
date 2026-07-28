@@ -553,10 +553,12 @@ struct InfiniteCanvasView: View {
       .onReceive(NotificationCenter.default.publisher(for: .openImagePanel)) { _ in
         openMacImagePanel(canvasSize: size)
       }
-      .focusable()
+      .focusable(store.focusCardID == nil)
       .focusEffectDisabled()
       .background {
-        canvasKeyboardShortcuts(canvasSize: size)
+        if store.focusCardID == nil {
+          canvasKeyboardShortcuts(canvasSize: size)
+        }
       }
     #else
     content()
@@ -1086,6 +1088,7 @@ struct InfiniteCanvasView: View {
           store.fitNoteCardToContent(for: card.id)
         }
       },
+      onUpdateContent: { store.updateContent(for: card.id, content: $0) },
       onSelect: { store.selectCard(card.id) },
       onDragBegan: { handleCardDragBegan() },
       onMove: { handleCardMove(cardID: card.id, preview: $0) },
@@ -1300,6 +1303,11 @@ struct InfiniteCanvasView: View {
     .onAppear {
       noteEditFontSize = CanvasConstants.noteCardFontSize * zoom
     }
+    .onChange(of: displayTransform.zoom) { _, newZoom in
+      if store.focusCardID != nil {
+        noteEditFontSize = CanvasConstants.noteCardFontSize * newZoom
+      }
+    }
     .onChange(of: store.focusCardID) { _, newID in
       if newID == nil {
         noteEditFontSize = nil
@@ -1388,7 +1396,13 @@ struct InfiniteCanvasView: View {
         cardColors: store.cardColors,
         showColorRow: $cardToolbarColorRowOpen,
         showCustomColorPicker: $cardToolbarCustomColorOpen,
-        onDelete: { store.deleteCard(card.id) },
+        onDelete: {
+          if store.focusCardID == card.id {
+            store.endContentEdit()
+            store.focusCardID = nil
+          }
+          store.deleteCard(card.id)
+        },
         onZoomToCard: {
           clearCardInteractionState()
           isCanvasInteracting = false

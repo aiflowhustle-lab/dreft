@@ -28,6 +28,9 @@ struct CanvasNoteEditOverlay: View {
     @FocusState private var isFocused: Bool
     @State private var contentScrollOffset = CGPoint.zero
     @State private var scrollMetrics = CanvasNoteScrollMetrics()
+    @State private var embedLayoutRevision = 0
+    /// Stays enabled for the whole edit session so typing never flips the editor out of attachment mode.
+    @State private var usesInlineImageEditor = false
 
     var toolbarBridge: NoteFormattingToolbarBridge?
 
@@ -73,6 +76,13 @@ struct CanvasNoteEditOverlay: View {
         max(1, cardSize.width - 16)
     }
 
+    private var hasTaskLines: Bool {
+        NoteCardTaskSupport.parsedLines(from: draftText).contains { line in
+            if case .task = line { return true }
+            return false
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             NoteBodyTextView(
@@ -87,11 +97,13 @@ struct CanvasNoteEditOverlay: View {
                 embeddedInCanvas: true,
                 editorBackground: editorSurface,
                 vaultURL: vaultURL,
-                hideResolvedImageEmbeds: vaultURL != nil,
+                hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
+                imageEmbedMaxWidth: contentWidth,
+                hideTaskListMarkers: editorHideTaskListMarkers,
                 onTextEdited: onTextEdited,
                 toolbarBridge: toolbarBridge,
                 onImageAttachmentDrop: insertImageAttachment,
-                layoutRefreshToken: imageCacheRevision,
+                layoutRefreshToken: editorLayoutRefreshToken,
                 onContentScroll: { metrics in
                     Task { @MainActor in
                         scrollMetrics = metrics
@@ -100,26 +112,7 @@ struct CanvasNoteEditOverlay: View {
                 }
             )
 
-            if vaultURL != nil {
-                CanvasNoteCardImageOverlay(
-                    content: draftText,
-                    vaultURL: vaultURL,
-                    maxImageWidth: contentWidth,
-                    fontSize: fontSize,
-                    cacheRevision: imageCacheRevision,
-                    scrollOffset: contentScrollOffset
-                )
-                .allowsHitTesting(false)
-            }
-
-            if isFocused, vaultURL != nil {
-                CanvasNoteEditingChrome(
-                    caretRect: caretRect,
-                    selectionRects: selectionRects,
-                    fontSize: fontSize
-                )
-                .zIndex(15)
-            }
+            editorChromeOverlays
 
             CanvasNoteCardScrollIndicator(metrics: scrollMetrics)
                 .zIndex(20)
@@ -134,20 +127,7 @@ struct CanvasNoteEditOverlay: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(cardColor ?? AppColors.selectionStroke, lineWidth: 3)
         )
-        .onAppear {
-            let prepared = NoteCardEmbedEditingSupport.sanitizeEmbedSpacing(
-                in: initialText,
-                vaultURL: vaultURL
-            )
-            draftText = prepared
-            if prepared != initialText {
-                onTextEdited(prepared, false)
-            }
-            onRegisterImageInserter?(insertImageAttachment)
-            Task { @MainActor in
-                isFocused = true
-            }
-        }
+        .onAppear(perform: handleAppear)
         .onDisappear {
             onRegisterImageInserter?(nil)
             toolbarBridge?.dismissKeyboard()
@@ -179,6 +159,65 @@ struct CanvasNoteEditOverlay: View {
         #endif
     }
 
+    private var editorHideResolvedImageEmbeds: Bool {
+        usesInlineImageEditor
+    }
+
+    private var editorHideTaskListMarkers: Bool {
+        hasTaskLines
+    }
+
+    private var editorLayoutRefreshToken: Int {
+        imageCacheRevision + embedLayoutRevision
+    }
+
+    @ViewBuilder
+    private var editorChromeOverlays: some View {
+        if usesInlineImageEditor, isFocused {
+            NoteEditingCaretOverlay(
+                caretRect: caretRect,
+                selectionRects: selectionRects,
+                fontSize: fontSize,
+                isVisible: true
+            )
+            .zIndex(15)
+        }
+
+        if hasTaskLines {
+            CanvasNoteCardTaskTapOverlay(
+                content: draftText,
+                maxWidth: contentWidth,
+                fontSize: fontSize,
+                scrollOffset: contentScrollOffset,
+                onToggleTaskRawLine: toggleTaskRawLine
+            )
+            .zIndex(10)
+        }
+    }
+
+    private func handleAppear() {
+        let prepared = NoteCardEmbedEditingSupport.sanitizeEmbedSpacing(
+            in: initialText,
+            vaultURL: vaultURL
+        )
+        draftText = prepared
+        usesInlineImageEditor = vaultURL != nil
+            && !NoteCardEmbedSupport.imageEmbedRanges(in: prepared, vaultURL: vaultURL).isEmpty
+        if prepared != initialText {
+            onTextEdited(prepared, false)
+        }
+        onRegisterImageInserter?(insertImageAttachment)
+        #if os(macOS)
+        DispatchQueue.main.async {
+            isFocused = true
+        }
+        #else
+        Task { @MainActor in
+            isFocused = true
+        }
+        #endif
+    }
+
     @discardableResult
     private func insertImageAttachment(_ data: Data, _ suggestedName: String?) -> Bool {
         guard let vaultURL else { return false }
@@ -188,6 +227,17 @@ struct CanvasNoteEditOverlay: View {
             suggestedName: suggestedName
         ) else { return false }
 
+        CanvasImageCache.shared.cacheDisplayImageSync(
+            data: data,
+            cardID: "note-embed|\(path)",
+            contentKey: path
+        )
+        if let cgImage = CanvasImageCache.shared.cachedImage(forCardID: "note-embed|\(path)", content: path) {
+            let size = NoteCardInlineImageMetrics.displaySize(for: cgImage, maxWidth: contentWidth)
+            NoteCardEmbedLayoutMetrics.store(height: size.height, path: path, maxWidth: contentWidth)
+        }
+
+        usesInlineImageEditor = true
         insertEmbedSnippet("![[\(path)]]")
         onImageEmbedSaved?(path)
         return true
@@ -207,48 +257,16 @@ struct CanvasNoteEditOverlay: View {
         )
         draftText = sanitized.text
         selectedRange = sanitized.selectedRange ?? result.selectedRange
+        if snippet.hasPrefix("![["),
+           let caret = NoteCardEmbedEditingSupport.caretBelowLastImageEmbed(in: sanitized.text, vaultURL: vaultURL) {
+            selectedRange = caret
+        }
         onTextEdited(sanitized.text, false)
     }
-}
 
-private struct CanvasNoteEditingChrome: View {
-    let caretRect: CGRect
-    let selectionRects: [CGRect]
-    let fontSize: CGFloat
-
-    @State private var caretVisible = true
-
-    private var caretHeight: CGFloat {
-        max(4, min(caretRect.height > 1 ? caretRect.height : fontSize * 1.15, fontSize * 1.35))
-    }
-
-    private var showsCaret: Bool {
-        caretRect.maxY > 0 || caretRect.maxX > 0
-    }
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(Array(selectionRects.enumerated()), id: \.offset) { _, rect in
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(AppColors.selectionStroke.opacity(0.24))
-                    .frame(width: max(2, rect.width), height: max(4, rect.height))
-                    .position(x: rect.midX, y: rect.midY)
-            }
-
-            if showsCaret, selectionRects.isEmpty {
-                Rectangle()
-                    .fill(AppColors.textPrimary)
-                    .frame(width: 2, height: caretHeight)
-                    .position(x: caretRect.minX + 1, y: caretRect.midY)
-                    .opacity(caretVisible ? 1 : 0)
-            }
-        }
-        .allowsHitTesting(false)
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(530))
-                caretVisible.toggle()
-            }
-        }
+    private func toggleTaskRawLine(_ rawLine: String) {
+        guard let updated = NoteCardTaskSupport.toggleTask(matchingRawLine: rawLine, in: draftText) else { return }
+        draftText = updated
+        onTextEdited(updated, false)
     }
 }

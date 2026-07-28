@@ -18,6 +18,8 @@ struct CanvasCardSurface: View {
     var isEditing: Bool = false
     var imageCacheRevision: Int = 0
     var onImageLoaded: () -> Void = {}
+    var onUpdateContent: ((String) -> Void)? = nil
+    var onTaskCheckboxTap: (() -> Void)? = nil
 
     private var isImage: Bool { card.kind == .image }
 
@@ -149,6 +151,11 @@ struct CanvasCardSurface: View {
             vaultURL: vaultURL,
             vaultFiles: vaultFiles
         )
+        let hasTasks = NoteCardTaskSupport.parsedLines(from: displayMarkdown).contains { line in
+            if case .task = line { return true }
+            return false
+        }
+        let showsTaskCheckboxOverlay = !isEditing && !isSelected && onUpdateContent != nil && hasTasks
 
         Group {
             if displayMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -166,6 +173,21 @@ struct CanvasCardSurface: View {
         .padding(.bottom, 8)
         .padding(.top, 8)
         .allowsHitTesting(isSelected && !isEditing)
+        .overlay(alignment: .topLeading) {
+            if showsTaskCheckboxOverlay {
+                CanvasNoteCardTaskTapOverlay(
+                    content: displayMarkdown,
+                    maxWidth: max(1, frameWidth - 16),
+                    fontSize: CanvasConstants.noteCardFontSize,
+                    onToggleTaskRawLine: { rawLine in
+                        onTaskCheckboxTap?()
+                        toggleTask(matchingRawLine: rawLine, in: displayMarkdown)
+                    }
+                )
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+            }
+        }
     }
 
     @ViewBuilder
@@ -175,7 +197,10 @@ struct CanvasCardSurface: View {
             vaultURL: vaultURL,
             maxImageWidth: max(1, frameWidth - 16),
             cacheRevision: imageCacheRevision,
-            onContentSizeChange: onImageLoaded
+            onContentSizeChange: onImageLoaded,
+            onToggleTaskRawLine: onUpdateContent == nil ? nil : { rawLine in
+                toggleTask(matchingRawLine: rawLine, in: displayMarkdown)
+            }
         )
         let scrollHeight = max(1, frameHeight - 16)
 
@@ -201,6 +226,11 @@ struct CanvasCardSurface: View {
                 .clipped()
         }
     }
+
+    private func toggleTask(matchingRawLine rawLine: String, in markdown: String) {
+        guard let updated = NoteCardTaskSupport.toggleTask(matchingRawLine: rawLine, in: markdown) else { return }
+        onUpdateContent?(updated)
+    }
 }
 
 /// Obsidian-style lightweight card — border + content + drag/tap only (no handles or connect UI).
@@ -214,6 +244,7 @@ struct CanvasCardCompactView: View {
     var isConnectingLine: Bool = false
     var imageCacheRevision: Int = 0
     var onImageLoaded: () -> Void = {}
+    var onUpdateContent: ((String) -> Void)? = nil
     var onSelect: () -> Void
     var onDragBegan: () -> Void
     var onMove: (CGPoint) -> Void
@@ -222,13 +253,14 @@ struct CanvasCardCompactView: View {
     @State private var dragOrigin: CGPoint?
     @State private var isDragging = false
     @State private var isPressingCard = false
+    @State private var suppressNextSelect = false
 
     private var frameWidth: CGFloat { displayFrame.width }
     private var frameHeight: CGFloat { displayFrame.height }
     private var displayOrigin: CGPoint { displayFrame.origin }
 
     var body: some View {
-        CanvasCardSurface(
+        let surface = CanvasCardSurface(
             card: card,
             frameWidth: frameWidth,
             frameHeight: frameHeight,
@@ -238,13 +270,11 @@ struct CanvasCardCompactView: View {
             isLinkTarget: isLinkTarget,
             isConnectingLine: isConnectingLine,
             imageCacheRevision: imageCacheRevision,
-            onImageLoaded: onImageLoaded
+            onImageLoaded: onImageLoaded,
+            onUpdateContent: onUpdateContent,
+            onTaskCheckboxTap: { suppressNextSelect = true }
         )
         .contentShape(Rectangle())
-        .highPriorityGesture(cardDragGesture)
-        #if os(macOS)
-        .modifier(CanvasCardCompactCursorModifier(isGrabbing: isPressingCard))
-        #endif
         .frame(width: frameWidth, height: frameHeight)
         .zIndex(isLinkTarget ? 8 : 1)
         .transaction { transaction in
@@ -252,6 +282,17 @@ struct CanvasCardCompactView: View {
                 transaction.disablesAnimations = true
             }
         }
+
+        Group {
+            if card.kind == .image {
+                surface.highPriorityGesture(cardDragGesture)
+            } else {
+                surface.gesture(cardDragGesture)
+            }
+        }
+        #if os(macOS)
+        .modifier(CanvasCardCompactCursorModifier(isGrabbing: isPressingCard))
+        #endif
     }
 
     private var cardDragGesture: some Gesture {
@@ -275,7 +316,11 @@ struct CanvasCardCompactView: View {
             .onEnded { value in
                 let moved = hypot(value.translation.width, value.translation.height) > dragThreshold
                 if !moved {
-                    onSelect()
+                    if suppressNextSelect {
+                        suppressNextSelect = false
+                    } else {
+                        onSelect()
+                    }
                 }
                 dragOrigin = nil
                 isDragging = false

@@ -104,13 +104,15 @@ enum WikilinkEditorSupport {
         from content: String,
         selectedRange: NSRange = NSRange(location: NSNotFound, length: 0),
         fontSize: CGFloat = bodyFontSize,
-        hiddenDelimiterOn: Color = AppColors.canvasBackground
+        hiddenDelimiterOn: Color = AppColors.canvasBackground,
+        hideTaskListMarkers: Bool = false
     ) -> NSAttributedString {
         let styled = attributedString(
             for: content,
             selectedRange: selectedRange,
             fontSize: fontSize,
-            hiddenDelimiterOn: hiddenDelimiterOn
+            hiddenDelimiterOn: hiddenDelimiterOn,
+            hideTaskListMarkers: hideTaskListMarkers
         )
         return removingHiddenDelimiterCharacters(from: styled)
     }
@@ -142,7 +144,8 @@ enum WikilinkEditorSupport {
         hiddenDelimiterOn: Color = AppColors.canvasBackground,
         vaultURL: URL? = nil,
         hideResolvedImageEmbeds: Bool = false,
-        imageEmbedMaxWidth: CGFloat? = nil
+        imageEmbedMaxWidth: CGFloat? = nil,
+        hideTaskListMarkers: Bool = false
     ) -> NSAttributedString {
         let storage = NSMutableAttributedString(
             string: content,
@@ -155,7 +158,8 @@ enum WikilinkEditorSupport {
             hiddenDelimiterOn: hiddenDelimiterOn,
             vaultURL: vaultURL,
             hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-            imageEmbedMaxWidth: imageEmbedMaxWidth
+            imageEmbedMaxWidth: imageEmbedMaxWidth,
+            hideTaskListMarkers: hideTaskListMarkers
         )
         return storage
     }
@@ -168,22 +172,33 @@ enum WikilinkEditorSupport {
         hiddenDelimiterOn: Color = AppColors.canvasBackground,
         vaultURL: URL? = nil,
         hideResolvedImageEmbeds: Bool = false,
-        imageEmbedMaxWidth: CGFloat? = nil
+        imageEmbedMaxWidth: CGFloat? = nil,
+        hideTaskListMarkers: Bool = false
     ) {
         guard storage.length > 0 else { return }
-        let fullRange = NSRange(location: 0, length: storage.length)
-        storage.setAttributes(baseBodyAttributes(fontSize: fontSize), range: fullRange)
-        storage.removeAttribute(.strikethroughStyle, range: fullRange)
-        storage.removeAttribute(.backgroundColor, range: fullRange)
-        storage.removeAttribute(.underlineStyle, range: fullRange)
-        storage.removeAttribute(.underlineColor, range: fullRange)
-        storage.removeAttribute(.paragraphStyle, range: fullRange)
+        let resetRanges = NoteImageEmbedAttributedSupport.textRangesExcludingInlineImageAttachments(in: storage)
+        for range in resetRanges where range.length > 0 {
+            storage.setAttributes(baseBodyAttributes(fontSize: fontSize), range: range)
+            storage.removeAttribute(.strikethroughStyle, range: range)
+            storage.removeAttribute(.backgroundColor, range: range)
+            storage.removeAttribute(.underlineStyle, range: range)
+            storage.removeAttribute(.underlineColor, range: range)
+            storage.removeAttribute(.paragraphStyle, range: range)
+        }
         applyInlineMarkdownStyling(
             to: storage,
             selectedRange: selectedRange,
             fontSize: fontSize,
             hiddenDelimiterOn: hiddenDelimiterOn
         )
+        applyTaskListStyling(to: storage, fontSize: fontSize)
+        if hideTaskListMarkers {
+            applyTaskListMarkerHiding(
+                to: storage,
+                fontSize: fontSize,
+                hiddenDelimiterOn: hiddenDelimiterOn
+            )
+        }
         stripDecorationsFromHiddenDelimiters(in: storage)
         applyWikilinkStyling(
             to: storage,
@@ -321,6 +336,81 @@ enum WikilinkEditorSupport {
                 storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: charRange)
             }
         )
+    }
+
+    private static func applyTaskListStyling(to storage: NSMutableAttributedString, fontSize: CGFloat) {
+        let content = storage.string as NSString
+        let pattern = #"^\s*[-*+]\s+\[([ xX])\]\s+(.*)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+
+        var location = 0
+        while location < content.length {
+            let lineRange = content.lineRange(for: NSRange(location: location, length: 0))
+            let line = content.substring(with: lineRange).trimmingCharacters(in: .newlines)
+            let nsLine = line as NSString
+
+            if let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)),
+               match.numberOfRanges >= 3 {
+                let mark = nsLine.substring(with: match.range(at: 1))
+                if mark.lowercased() == "x", match.range(at: 2).length > 0 {
+                    let bodyRange = NSRange(
+                        location: lineRange.location + match.range(at: 2).location,
+                        length: match.range(at: 2).length
+                    )
+                    applyStrikethrough(to: storage, range: bodyRange)
+                    #if canImport(AppKit)
+                    storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: bodyRange)
+                    #else
+                    storage.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: bodyRange)
+                    #endif
+                }
+            }
+
+            location = NSMaxRange(lineRange)
+        }
+    }
+
+    /// Collapses `- [ ]` / `- [x]` list prefixes when canvas preview draws its own checkbox UI.
+    private static func applyTaskListMarkerHiding(
+        to storage: NSMutableAttributedString,
+        fontSize: CGFloat,
+        hiddenDelimiterOn: Color
+    ) {
+        let content = storage.string as NSString
+        let pattern = #"^(\s*[-*+]\s+\[)([ xX])(\]\s+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+
+        var location = 0
+        while location < content.length {
+            let lineRange = content.lineRange(for: NSRange(location: location, length: 0))
+            let line = content.substring(with: lineRange).trimmingCharacters(in: .newlines)
+            let nsLine = line as NSString
+
+            if let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)),
+               match.numberOfRanges >= 4 {
+                let prefixStart = match.range(at: 1).location
+                let prefixEnd = NSMaxRange(match.range(at: 3))
+                let prefixRange = NSRange(
+                    location: lineRange.location + prefixStart,
+                    length: prefixEnd - prefixStart
+                )
+                applyDelimiterAppearance(
+                    to: storage,
+                    range: prefixRange,
+                    isEditing: false,
+                    fontSize: fontSize,
+                    hiddenDelimiterOn: hiddenDelimiterOn
+                )
+
+                let leadingInset = NoteCardTaskSupport.lineLeadingInset(fontSize: fontSize)
+                let style = NSMutableParagraphStyle()
+                style.firstLineHeadIndent = leadingInset
+                style.headIndent = leadingInset
+                storage.addAttribute(.paragraphStyle, value: style, range: lineRange)
+            }
+
+            location = NSMaxRange(lineRange)
+        }
     }
 
     private static func applyHighlight(_ color: Any, to storage: NSMutableAttributedString, range: NSRange) {
@@ -614,15 +704,35 @@ enum WikilinkEditorSupport {
                 )
                 if let imageEmbedMaxWidth, vaultURL != nil {
                     let path = VaultFilesystem.preferredCanvasAssetPath(for: embedTarget)
-                    let imageHeight = NoteCardInlineImageMetrics.estimatedSize(
-                        for: path,
-                        vaultURL: vaultURL,
-                        maxWidth: imageEmbedMaxWidth
-                    ).height
-                    let lineRange = content.lineRange(for: full)
-                    let style = NSMutableParagraphStyle()
-                    style.minimumLineHeight = max(ceil(imageHeight), fontSize * 1.35)
-                    storage.addAttribute(.paragraphStyle, value: style, range: lineRange)
+                    let imageHeight = ceil(
+                        NoteCardEmbedLayoutMetrics.reservedHeight(
+                            for: path,
+                            maxWidth: imageEmbedMaxWidth,
+                            vaultURL: vaultURL
+                        )
+                    )
+
+                    let embedParagraph = content.paragraphRange(for: full)
+                    let embedStyle = NSMutableParagraphStyle()
+                    embedStyle.minimumLineHeight = imageHeight
+                    embedStyle.maximumLineHeight = imageHeight
+                    embedStyle.lineSpacing = 0
+                    embedStyle.paragraphSpacing = NoteCardContentLayout.rowSpacing
+                    embedStyle.paragraphSpacingBefore = 0
+                    storage.addAttribute(.paragraphStyle, value: embedStyle, range: embedParagraph)
+
+                    let afterEmbed = NSMaxRange(embedParagraph)
+                    if afterEmbed < content.length {
+                        let nextParagraph = content.paragraphRange(for: NSRange(location: afterEmbed, length: 0))
+                        if nextParagraph.length > 0 {
+                            let nextStyle = NSMutableParagraphStyle()
+                            if let existing = storage.attribute(.paragraphStyle, at: nextParagraph.location, effectiveRange: nil) as? NSParagraphStyle {
+                                nextStyle.setParagraphStyle(existing)
+                            }
+                            nextStyle.paragraphSpacingBefore = NoteCardContentLayout.rowSpacing
+                            storage.addAttribute(.paragraphStyle, value: nextStyle, range: nextParagraph)
+                        }
+                    }
                 }
                 continue
             }

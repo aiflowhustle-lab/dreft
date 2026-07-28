@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Caches rendered note previews so undo/redo does not re-parse markdown for every card.
 enum NotePreviewCache {
-    private static let rendererVersion = 3
+    private static let rendererVersion = 4
     private static var cache: [String: AttributedString] = [:]
     private static var order: [String] = []
     private static let maxEntries = 96

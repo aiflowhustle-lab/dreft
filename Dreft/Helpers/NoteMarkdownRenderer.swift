@@ -82,7 +82,8 @@ enum NoteMarkdownRenderer {
         let ns = WikilinkEditorSupport.displayAttributedString(
             from: content,
             fontSize: CanvasConstants.noteCardFontSize,
-            hiddenDelimiterOn: AppColors.noteCardBackground
+            hiddenDelimiterOn: AppColors.noteCardBackground,
+            hideTaskListMarkers: true
         )
         var attributed = AttributedString(ns)
         for run in attributed.runs where run.link != nil {

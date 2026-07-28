@@ -19,6 +19,7 @@ struct CanvasNoteCardBodyView: View {
     var contentMode: ContentMode = .full
     var cacheRevision: Int = 0
     var onContentSizeChange: () -> Void = {}
+    var onToggleTaskRawLine: ((String) -> Void)? = nil
 
     @State private var imageCacheRevision = 0
 
@@ -78,6 +79,10 @@ struct CanvasNoteCardBodyView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         case .image(let path):
             inlineImageView(path: path)
+        case .verticalWhitespace(let height):
+            if contentMode == .full {
+                Spacer().frame(height: height)
+            }
         }
     }
 
@@ -101,13 +106,70 @@ struct CanvasNoteCardBodyView: View {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             EmptyView()
         } else {
-            Text(NotePreviewCache.canvasCardPreview(for: text))
-                .font(.system(size: fontSize))
-                .foregroundStyle(themeState.theme.textPrimary)
-                .tint(AppColors.noteLink)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
+            let lines = NoteCardTaskSupport.parsedLines(from: text)
+            if lines.contains(where: { if case .task = $0 { return true }; return false }) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(lines.enumerated()), id: \.element.id) { _, line in
+                        noteTextLine(line)
+                    }
+                }
                 .frame(maxWidth: maxImageWidth, alignment: .leading)
+            } else {
+                Text(NotePreviewCache.canvasCardPreview(for: text))
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(themeState.theme.textPrimary)
+                    .tint(AppColors.noteLink)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: maxImageWidth, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func noteTextLine(_ line: NoteCardTextLine) -> some View {
+        switch line {
+        case .plain(let value):
+            if value.isEmpty {
+                Spacer().frame(height: fontSize * 0.35)
+            } else {
+                Text(NotePreviewCache.canvasCardPreview(for: value))
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(themeState.theme.textPrimary)
+                    .tint(AppColors.noteLink)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: maxImageWidth, alignment: .leading)
+            }
+        case .task(let checked, let value, let rawLine):
+            HStack(alignment: .top, spacing: NoteCardTaskSupport.checkboxSpacing) {
+                Group {
+                    if onToggleTaskRawLine != nil {
+                        Button {
+                            onToggleTaskRawLine?(rawLine)
+                        } label: {
+                            NoteCardTaskCheckbox(checked: checked)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        NoteCardTaskCheckbox(checked: checked)
+                    }
+                }
+                .padding(.top, max(2, fontSize * 0.12))
+
+                Text(NotePreviewCache.canvasCardPreview(for: value))
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(checked ? AppColors.textSecondary : themeState.theme.textPrimary)
+                    .strikethrough(checked, color: AppColors.textSecondary)
+                    .tint(AppColors.noteLink)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(
+                        maxWidth: max(1, maxImageWidth - NoteCardTaskSupport.lineLeadingInset(fontSize: fontSize)),
+                        alignment: .leading
+                    )
+            }
+            .frame(maxWidth: maxImageWidth, alignment: .leading)
         }
     }
 
@@ -152,6 +214,7 @@ struct CanvasNoteCardImageOverlay: View {
     var fontSize: CGFloat
     var cacheRevision: Int = 0
     var scrollOffset: CGPoint = .zero
+    var onImageLayoutChange: (() -> Void)? = nil
 
     @State private var imageCacheRevision = 0
 
@@ -182,7 +245,10 @@ struct CanvasNoteCardImageOverlay: View {
                     vaultURL: vaultURL,
                     maxWidth: maxImageWidth,
                     cacheRevision: imageCacheRevision + cacheRevision,
-                    onLoaded: { deferImageLayoutRefresh() }
+                    onLoaded: {
+                        deferImageLayoutRefresh()
+                        onImageLayoutChange?()
+                    }
                 )
                 .offset(x: placement.origin.x, y: placement.origin.y)
             }
@@ -207,23 +273,48 @@ struct CanvasNoteCardImageOverlay: View {
 
 enum NoteCardInlineImageMetrics {
     static func estimatedSize(for path: String, vaultURL: URL?, maxWidth: CGFloat) -> CGSize {
+        let height = NoteCardEmbedLayoutMetrics.reservedHeight(for: path, maxWidth: maxWidth, vaultURL: vaultURL)
         let cacheID = "note-embed|\(path)"
         if let cgImage = CanvasImageCache.shared.cachedImage(forCardID: cacheID, content: path) {
-            return displaySize(for: cgImage, maxWidth: maxWidth)
+            let size = displaySize(for: cgImage, maxWidth: maxWidth)
+            return CGSize(width: size.width, height: height)
         }
-        return CGSize(width: min(maxWidth, 160), height: min(maxWidth * 0.6, 120))
+        let width = min(maxWidth, 160)
+        return CGSize(width: width, height: height)
+    }
+
+    static func recordDisplaySize(_ size: CGSize, path: String, maxWidth: CGFloat) {
+        NoteCardEmbedLayoutMetrics.store(height: size.height, path: path, maxWidth: maxWidth)
     }
 
     static func displaySize(for cgImage: CGImage, maxWidth: CGFloat) -> CGSize {
-        let scale = screenScale
-        let naturalWidth = CGFloat(cgImage.width) / scale
-        let naturalHeight = CGFloat(cgImage.height) / scale
-        guard naturalWidth > 0 else {
+        let naturalSize = pointSize(for: cgImage)
+        guard naturalSize.width > 0 else {
             return CGSize(width: min(maxWidth, 160), height: min(maxWidth * 0.6, 120))
         }
-        let width = min(maxWidth, naturalWidth)
-        let height = naturalHeight * (width / naturalWidth)
+        let width = min(maxWidth, naturalSize.width)
+        let height = naturalSize.height * (width / naturalSize.width)
         return CGSize(width: width, height: height)
+    }
+
+    /// Point size for a cached thumbnail — matches SwiftUI `Image(decorative:scale:)`.
+    private static func pointSize(for cgImage: CGImage) -> CGSize {
+        #if canImport(UIKit)
+        let image = UIImage(cgImage: cgImage, scale: screenScale, orientation: .up)
+        return image.size
+        #elseif canImport(AppKit)
+        let scale = screenScale
+        let size = NSSize(
+            width: CGFloat(cgImage.width) / scale,
+            height: CGFloat(cgImage.height) / scale
+        )
+        return size
+        #else
+        return CGSize(
+            width: CGFloat(cgImage.width) / screenScale,
+            height: CGFloat(cgImage.height) / screenScale
+        )
+        #endif
     }
 
     private static var screenScale: CGFloat {
@@ -234,6 +325,31 @@ enum NoteCardInlineImageMetrics {
         #else
         2
         #endif
+    }
+}
+
+/// Measured embed image heights so text layout matches overlay frames exactly.
+enum NoteCardEmbedLayoutMetrics {
+    private static var measuredHeights: [String: CGFloat] = [:]
+
+    static func cacheKey(path: String, maxWidth: CGFloat) -> String {
+        "\(path)|\(Int(maxWidth.rounded()))"
+    }
+
+    static func store(height: CGFloat, path: String, maxWidth: CGFloat) {
+        measuredHeights[cacheKey(path: path, maxWidth: maxWidth)] = height
+    }
+
+    static func reservedHeight(for path: String, maxWidth: CGFloat, vaultURL: URL?) -> CGFloat {
+        let key = cacheKey(path: path, maxWidth: maxWidth)
+        if let measured = measuredHeights[key] {
+            return measured
+        }
+        let cacheID = "note-embed|\(path)"
+        if let cgImage = CanvasImageCache.shared.cachedImage(forCardID: cacheID, content: path) {
+            return NoteCardInlineImageMetrics.displaySize(for: cgImage, maxWidth: maxWidth).height
+        }
+        return min(maxWidth * 0.6, 120)
     }
 }
 
@@ -267,6 +383,7 @@ struct NoteCardInlineImage: View {
 
     private func inlineImage(_ cgImage: CGImage) -> some View {
         let size = NoteCardInlineImageMetrics.displaySize(for: cgImage, maxWidth: maxWidth)
+        NoteCardInlineImageMetrics.recordDisplaySize(size, path: vaultPath, maxWidth: maxWidth)
         #if canImport(UIKit)
         return Image(decorative: cgImage, scale: UIScreen.main.scale, orientation: .up)
             .resizable()

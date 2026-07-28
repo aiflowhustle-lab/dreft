@@ -109,8 +109,13 @@
 		SM000107 /* MarkdownEditingSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100107 /* MarkdownEditingSupportTests.swift */; };
 		SM000108 /* CanvasCardColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100108 /* CanvasCardColors.swift */; };
 		SM000109 /* NoteCardEmbedSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100109 /* NoteCardEmbedSupport.swift */; };
+		SM000120 /* NoteImageTextAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100120 /* NoteImageTextAttachment.swift */; };
 		SM000112 /* NoteImageDropSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100112 /* NoteImageDropSupport.swift */; };
 		SM000115 /* CanvasNoteCardPreviewScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100115 /* CanvasNoteCardPreviewScroller.swift */; };
+		SM000116 /* NoteEditingCaretOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100116 /* NoteEditingCaretOverlay.swift */; };
+		SM000117 /* NoteCardTaskSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100117 /* NoteCardTaskSupport.swift */; };
+		SM000118 /* NoteCardTaskCheckbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100118 /* NoteCardTaskCheckbox.swift */; };
+		SM000119 /* CanvasNoteCardTaskTapOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100119 /* CanvasNoteCardTaskTapOverlay.swift */; };
 		SM000114 /* CanvasNoteCardScrollBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100114 /* CanvasNoteCardScrollBridge.swift */; };
 		SM000113 /* CanvasNoteCardScrollIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100113 /* CanvasNoteCardScrollIndicator.swift */; };
 		SM000111 /* NoteCardContentLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100111 /* NoteCardContentLayout.swift */; };
@@ -231,7 +236,12 @@
 		SM100107 /* MarkdownEditingSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditingSupportTests.swift; sourceTree = "<group>"; };
 		SM100108 /* CanvasCardColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardColors.swift; sourceTree = "<group>"; };
 		SM100109 /* NoteCardEmbedSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCardEmbedSupport.swift; sourceTree = "<group>"; };
+		SM100120 /* NoteImageTextAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteImageTextAttachment.swift; sourceTree = "<group>"; };
 		SM100115 /* CanvasNoteCardPreviewScroller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteCardPreviewScroller.swift; sourceTree = "<group>"; };
+		SM100116 /* NoteEditingCaretOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditingCaretOverlay.swift; sourceTree = "<group>"; };
+		SM100117 /* NoteCardTaskSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCardTaskSupport.swift; sourceTree = "<group>"; };
+		SM100118 /* NoteCardTaskCheckbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCardTaskCheckbox.swift; sourceTree = "<group>"; };
+		SM100119 /* CanvasNoteCardTaskTapOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteCardTaskTapOverlay.swift; sourceTree = "<group>"; };
 		SM100114 /* CanvasNoteCardScrollBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteCardScrollBridge.swift; sourceTree = "<group>"; };
 		SM100113 /* CanvasNoteCardScrollIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteCardScrollIndicator.swift; sourceTree = "<group>"; };
 		SM100112 /* NoteImageDropSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteImageDropSupport.swift; sourceTree = "<group>"; };
@@ -366,6 +376,8 @@
 				SM100072 /* CanvasEdgeHitOverlay.swift */,
 				SM100075 /* CanvasNoteEditOverlay.swift */,
 				SM100110 /* CanvasNoteCardBodyView.swift */,
+				SM100118 /* NoteCardTaskCheckbox.swift */,
+				SM100119 /* CanvasNoteCardTaskTapOverlay.swift */,
 			);
 			path = Canvas;
 			sourceTree = "<group>";
@@ -391,6 +403,7 @@
 				SM100052 /* DreftBrandMark.swift */,
 				SM100053 /* DreftHelpView.swift */,
 				SM100055 /* NoteBodyTextView.swift */,
+				SM100116 /* NoteEditingCaretOverlay.swift */,
 				SM100056 /* WikilinkSuggestPopover.swift */,
 				SM100057 /* AddBookmarkSheet.swift */,
 				SM100058 /* CanvasDocumentOptionsMenu.swift */,
@@ -417,6 +430,8 @@
 				SM100054 /* WikilinkEditorSupport.swift */,
 				SM100108 /* CanvasCardColors.swift */,
 				SM100109 /* NoteCardEmbedSupport.swift */,
+				SM100120 /* NoteImageTextAttachment.swift */,
+				SM100117 /* NoteCardTaskSupport.swift */,
 				SM100115 /* CanvasNoteCardPreviewScroller.swift */,
 				SM100114 /* CanvasNoteCardScrollBridge.swift */,
 				SM100113 /* CanvasNoteCardScrollIndicator.swift */,
@@ -632,13 +647,18 @@
 				SM000055 /* WikilinkEditorSupport.swift in Sources */,
 				SM000108 /* CanvasCardColors.swift in Sources */,
 				SM000109 /* NoteCardEmbedSupport.swift in Sources */,
+				SM000120 /* NoteImageTextAttachment.swift in Sources */,
+				SM000117 /* NoteCardTaskSupport.swift in Sources */,
 				SM000115 /* CanvasNoteCardPreviewScroller.swift in Sources */,
 				SM000114 /* CanvasNoteCardScrollBridge.swift in Sources */,
 				SM000113 /* CanvasNoteCardScrollIndicator.swift in Sources */,
 				SM000112 /* NoteImageDropSupport.swift in Sources */,
 				SM000111 /* NoteCardContentLayout.swift in Sources */,
 				SM000110 /* CanvasNoteCardBodyView.swift in Sources */,
+				SM000118 /* NoteCardTaskCheckbox.swift in Sources */,
+				SM000119 /* CanvasNoteCardTaskTapOverlay.swift in Sources */,
 				SM000056 /* NoteBodyTextView.swift in Sources */,
+				SM000116 /* NoteEditingCaretOverlay.swift in Sources */,
 				SM000057 /* WikilinkSuggestPopover.swift in Sources */,
 				SM000058 /* AddBookmarkSheet.swift in Sources */,
 				SM000059 /* CanvasDocumentOptionsMenu.swift in Sources */,

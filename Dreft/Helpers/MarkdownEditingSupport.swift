@@ -52,7 +52,7 @@ enum MarkdownEditAction: String, CaseIterable {
         case .quote: return "Quote"
         case .bulletList: return "Bullet list"
         case .numberedList: return "Numbered list"
-        case .taskList: return "Task list"
+        case .taskList: return "Checkbox"
         case .wikilink: return "Add link"
         case .embed: return "Add embed"
         case .attachment: return "Insert attachment"
@@ -96,7 +96,7 @@ enum MarkdownEditingSupport {
         case .quote: return toggleLinePrefix("> ", in: text, range: selectedRange)
         case .bulletList: return toggleLinePrefix("- ", in: text, range: selectedRange)
         case .numberedList: return toggleNumberedList(in: text, range: selectedRange)
-        case .taskList: return toggleLinePrefix("- [ ] ", in: text, range: selectedRange)
+        case .taskList: return applyToggleTaskList(in: text, range: selectedRange)
         case .wikilink: return insertWikilink(in: text, range: selectedRange)
         case .embed: return insertEmbed(in: text, range: selectedRange)
         case .attachment: return insertEmbed(in: text, range: selectedRange)
@@ -108,6 +108,13 @@ enum MarkdownEditingSupport {
         case .outdent: return adjustIndent(in: text, range: selectedRange, delta: -2)
         case .tag: return insertPlainText("#", in: text, range: selectedRange)
         }
+    }
+
+    static func toggleTaskList(
+        in text: String,
+        selectedRange: NSRange
+    ) -> (text: String, selectedRange: NSRange) {
+        applyToggleTaskList(in: text, range: selectedRange)
     }
 
     static func insertText(
@@ -277,6 +284,69 @@ enum MarkdownEditingSupport {
         let prefix = level > 0 ? String(repeating: "#", count: level) + " " : ""
         let updated = prefix + line + (lineRange.length > 0 && ns.substring(with: lineRange).hasSuffix("\n") ? "\n" : "")
         return replace(lineRange, with: updated, in: text, selectLength: (line.trimmingCharacters(in: .newlines) as NSString).length)
+    }
+
+    private static func applyToggleTaskList(
+        in text: String,
+        range: NSRange
+    ) -> (text: String, selectedRange: NSRange) {
+        let ns = text as NSString
+        let lineRange = ns.lineRange(for: clamp(range, in: ns.length))
+        var line = ns.substring(with: lineRange)
+        let hadNewline = line.hasSuffix("\n")
+        if hadNewline { line.removeLast() }
+
+        let taskPattern = #"^(\s*[-*+]\s+\[)([ xX])(\]\s*)(.*)$"#
+        if let regex = try? NSRegularExpression(pattern: taskPattern),
+           let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)),
+           match.numberOfRanges >= 4 {
+            let nsLine = line as NSString
+            let mark = nsLine.substring(with: match.range(at: 2))
+            let nextMark = mark.lowercased() == "x" ? " " : "x"
+            let prefix = nsLine.substring(with: match.range(at: 1))
+            let suffix = nsLine.substring(with: match.range(at: 3))
+            let body = match.numberOfRanges > 4 ? nsLine.substring(with: match.range(at: 4)) : ""
+            line = prefix + nextMark + suffix + body
+        } else if line.range(of: #"^\s*[-*+]\s+\[[ xX]\]\s+"#, options: .regularExpression) != nil {
+            line = line.replacingOccurrences(
+                of: #"^\s*[-*+]\s+\[[ xX]\]\s+"#,
+                with: "",
+                options: .regularExpression
+            )
+        } else {
+            line = "- [ ] " + line
+        }
+
+        if hadNewline { line += "\n" }
+        return replace(lineRange, with: line, in: text, selectLength: max(0, (line as NSString).length - (hadNewline ? 1 : 0)))
+    }
+
+    /// Enter on a task line continues with another checkbox; Enter on an empty task line exits to normal text.
+    static func newlineInTaskList(
+        in text: String,
+        selectedRange: NSRange
+    ) -> (text: String, selectedRange: NSRange)? {
+        let ns = text as NSString
+        let clamped = clamp(selectedRange, in: ns.length)
+        let lineRange = ns.lineRange(for: clamped)
+        var line = ns.substring(with: lineRange)
+        let hadNewline = line.hasSuffix("\n")
+        if hadNewline { line.removeLast() }
+
+        let taskPattern = #"^(\s*[-*+]\s+\[)([ xX])(\]\s*)(.*)$"#
+        guard let regex = try? NSRegularExpression(pattern: taskPattern),
+              let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)),
+              match.numberOfRanges >= 4 else { return nil }
+
+        let body = match.range(at: 4).location != NSNotFound
+            ? (line as NSString).substring(with: match.range(at: 4))
+            : ""
+
+        if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return replace(lineRange, with: "\n", in: text, selectLength: 0)
+        }
+
+        return insertPlainText("\n- [ ] ", in: text, range: clamped)
     }
 
     private static func toggleLinePrefix(

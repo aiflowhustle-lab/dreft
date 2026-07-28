@@ -71,6 +71,17 @@ struct CanvasCardView: View {
         !isSelected
     }
 
+    /// Reserved for future frame-level card drag while preview scrolling is active.
+    private var usesSelectedNoteFrameDragGesture: Bool {
+        false
+    }
+
+    /// Image cards keep the interior drag surface; note preview cards disable it so scroll gestures reach content.
+    private var interiorDragSurfaceAllowsHitTesting: Bool {
+        guard !isResizing, !isEditing else { return false }
+        return isImage
+    }
+
     private var showsResizeOverlay: Bool {
         isSelected && !isDragging && !isColorPickerOpen
     }
@@ -113,6 +124,15 @@ struct CanvasCardView: View {
                     view
                         .highPriorityGesture(cardDragGesture)
                         .canvasCardCursor(isGrabbing: isPressingCard)
+                }
+                .if(usesSelectedNoteFrameDragGesture) { view in
+                    view
+                        .simultaneousGesture(cardDragGesture)
+                        .simultaneousGesture(noteEditDoubleTapGesture)
+                        .canvasCardCursor(isGrabbing: isPressingCard)
+                }
+                .if(isSelected && !isImage && !isEditing) { view in
+                    view.simultaneousGesture(noteEditDoubleTapGesture)
                 }
 
             if isSelected {
@@ -241,7 +261,8 @@ struct CanvasCardView: View {
             isConnectingLine: isConnectingLine,
             isEditing: isEditing,
             imageCacheRevision: imageCacheRevision,
-            onImageLoaded: onImageLoaded
+            onImageLoaded: onImageLoaded,
+            onUpdateContent: onUpdateContent
         )
     }
 
@@ -482,12 +503,12 @@ struct CanvasCardView: View {
             }
     }
 
-    /// Hand + drag for card interior when selected.
+    /// Hand + drag for card interior when selected (image cards; note preview uses frame-level gestures).
     private var cardInteriorDragSurface: some View {
         Color.clear
             .frame(width: frameWidth, height: frameHeight)
             .contentShape(Rectangle())
-            .allowsHitTesting(!isResizing && !isEditing)
+            .allowsHitTesting(interiorDragSurfaceAllowsHitTesting)
             .highPriorityGesture(cardDragGesture)
             .simultaneousGesture(noteEditDoubleTapGesture)
             .canvasCardCursor(isGrabbing: isPressingCard)
