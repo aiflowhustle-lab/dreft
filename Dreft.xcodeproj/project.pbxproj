@@ -123,6 +123,15 @@
 		SM000086 /* GraphDocumentOptionsMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100086 /* GraphDocumentOptionsMenu.swift */; };
 		SM000087 /* NoteIPadFormattingToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100087 /* NoteIPadFormattingToolbar.swift */; };
 		SM000088 /* NoteFormattingToolbarBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100088 /* NoteFormattingToolbarBridge.swift */; };
+		SM000130 /* StoreConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100130 /* StoreConstants.swift */; };
+		SM000131 /* AppInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100131 /* AppInfo.swift */; };
+		SM000132 /* EntitlementCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100132 /* EntitlementCache.swift */; };
+		SM000133 /* DreftAccessState.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100133 /* DreftAccessState.swift */; };
+		SM000134 /* StoreManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100134 /* StoreManager.swift */; };
+		SM000135 /* EntitlementManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100135 /* EntitlementManager.swift */; };
+		SM000136 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100136 /* PaywallView.swift */; };
+		SM000137 /* ReadOnlyBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100137 /* ReadOnlyBanner.swift */; };
+		SM000139 /* SubscribeCTAButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100139 /* SubscribeCTAButton.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -251,6 +260,16 @@
 		SM100086 /* GraphDocumentOptionsMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphDocumentOptionsMenu.swift; sourceTree = "<group>"; };
 		SM100087 /* NoteIPadFormattingToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteIPadFormattingToolbar.swift; sourceTree = "<group>"; };
 		SM100088 /* NoteFormattingToolbarBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFormattingToolbarBridge.swift; sourceTree = "<group>"; };
+		SM100130 /* StoreConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/StoreConstants.swift; sourceTree = SOURCE_ROOT; };
+		SM100131 /* AppInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/AppInfo.swift; sourceTree = SOURCE_ROOT; };
+		SM100132 /* EntitlementCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/EntitlementCache.swift; sourceTree = SOURCE_ROOT; };
+		SM100133 /* DreftAccessState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/DreftAccessState.swift; sourceTree = SOURCE_ROOT; };
+		SM100134 /* StoreManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/StoreManager.swift; sourceTree = SOURCE_ROOT; };
+		SM100135 /* EntitlementManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/EntitlementManager.swift; sourceTree = SOURCE_ROOT; };
+		SM100136 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/PaywallView.swift; sourceTree = SOURCE_ROOT; };
+		SM100137 /* ReadOnlyBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/ReadOnlyBanner.swift; sourceTree = SOURCE_ROOT; };
+		SM100139 /* SubscribeCTAButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/SubscribeCTAButton.swift; sourceTree = SOURCE_ROOT; };
+		SM100138 /* Dreft.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Dreft.storekit; sourceTree = "<group>"; };
 		SM200001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		SM200002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		SM300001 /* Dreft.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dreft.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -333,6 +352,7 @@
 		SM500006 /* Store */ = {
 			isa = PBXGroup;
 			children = (
+				SM500015 /* Monetization */,
 				SM100005 /* CanvasStore.swift */,
 				SM100022 /* WorkspaceStore.swift */,
 				SM100026 /* CanvasDocumentRegistry.swift */,
@@ -342,6 +362,20 @@
 				SM100050 /* CanvasDocumentPersistence.swift */,
 			);
 			path = Store;
+			sourceTree = "<group>";
+		};
+		SM500015 /* Monetization */ = {
+			isa = PBXGroup;
+			children = (
+				SM100130 /* StoreConstants.swift */,
+				SM100131 /* AppInfo.swift */,
+				SM100132 /* EntitlementCache.swift */,
+				SM100133 /* DreftAccessState.swift */,
+				SM100134 /* StoreManager.swift */,
+				SM100135 /* EntitlementManager.swift */,
+				SM100138 /* Dreft.storekit */,
+			);
+			path = Monetization;
 			sourceTree = "<group>";
 		};
 		SM500008 /* Views */ = {
@@ -410,6 +444,9 @@
 				SM100060 /* CanvasVersionHistorySheet.swift */,
 				SM100061 /* CanvasImageExportSheet.swift */,
 				SM100065 /* AppearanceSettingsSection.swift */,
+				SM100136 /* PaywallView.swift */,
+				SM100137 /* ReadOnlyBanner.swift */,
+				SM100139 /* SubscribeCTAButton.swift */,
 				SM100068 /* IPadSidebarOverlay.swift */,
 			);
 			path = Shell;
@@ -678,6 +715,15 @@
 				SM000073 /* CanvasEdgeHitOverlay.swift in Sources */,
 				SM000074 /* MarkdownEditingSupport.swift in Sources */,
 				SM000088 /* NoteFormattingToolbarBridge.swift in Sources */,
+				SM000130 /* StoreConstants.swift in Sources */,
+				SM000131 /* AppInfo.swift in Sources */,
+				SM000132 /* EntitlementCache.swift in Sources */,
+				SM000133 /* DreftAccessState.swift in Sources */,
+				SM000134 /* StoreManager.swift in Sources */,
+				SM000135 /* EntitlementManager.swift in Sources */,
+				SM000136 /* PaywallView.swift in Sources */,
+				SM000137 /* ReadOnlyBanner.swift in Sources */,
+				SM000139 /* SubscribeCTAButton.swift in Sources */,
 				SM000075 /* NoteEditingMenuBuilder.swift in Sources */,
 				SM000076 /* CanvasNoteEditOverlay.swift in Sources */,
 				SM000077 /* NotePreviewCache.swift in Sources */,
@@ -825,7 +871,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = K2Q9PMD826;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -846,7 +892,7 @@
 					"@executable_path/../Frameworks",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -865,7 +911,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = K2Q9PMD826;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -886,7 +932,7 @@
 					"@executable_path/../Frameworks",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -903,13 +949,13 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -927,13 +973,13 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiflowhustle.dreft.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;

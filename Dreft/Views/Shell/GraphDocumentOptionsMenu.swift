@@ -6,6 +6,7 @@ extension Notification.Name {
 
 struct GraphDocumentOptionsMenu: View {
     @Bindable var workspace: WorkspaceStore
+    var entitlements: EntitlementManager
     let paneID: String
     var onSplitRight: () -> Void = {}
     var onSplitDown: () -> Void = {}
@@ -28,7 +29,9 @@ struct GraphDocumentOptionsMenu: View {
 
             if let bookmarkFileID {
                 Button {
-                    workspace.presentBookmarkEditor(for: bookmarkFileID)
+                    entitlements.performWrite {
+                        workspace.presentBookmarkEditor(for: bookmarkFileID)
+                    }
                 } label: {
                     if workspace.isBookmarked(bookmarkFileID) {
                         Label("Bookmark...", systemImage: "checkmark")

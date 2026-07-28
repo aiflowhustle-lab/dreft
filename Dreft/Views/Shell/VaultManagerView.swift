@@ -6,6 +6,8 @@ import AppKit
 
 struct VaultManagerView: View {
     @Bindable var workspace: WorkspaceStore
+    var entitlements: EntitlementManager
+    var storeManager: StoreManager
     #if os(iOS)
     var onRequestFolderPicker: ((VaultFolderPickerPurpose, @escaping (URL, VaultFolderPickerPurpose) -> Void) -> Void)? = nil
     #endif
@@ -18,13 +20,16 @@ struct VaultManagerView: View {
     #endif
     @FocusState private var nameFieldFocused: Bool
 
+    @State private var showPaywall = false
+    @Environment(\.openURL) private var openURL
+
     private enum Screen {
         case home
         case createLocal
     }
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        AppInfo.marketingVersion
     }
 
     var body: some View {
@@ -49,6 +54,9 @@ struct VaultManagerView: View {
             handleFolderImport(url, for: purpose)
         }
         #endif
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(storeManager: storeManager, entitlements: entitlements)
+        }
     }
 
     #if os(iOS)
@@ -259,10 +267,12 @@ struct VaultManagerView: View {
                 buttonTitle: "Create",
                 isPrimary: true
             ) {
-                newVaultName = ""
-                newVaultLocation = ""
-                createLocationBookmark = nil
-                withAnimation(.easeOut(duration: 0.12)) { screen = .createLocal }
+                entitlements.performWrite {
+                    newVaultName = ""
+                    newVaultLocation = ""
+                    createLocationBookmark = nil
+                    withAnimation(.easeOut(duration: 0.12)) { screen = .createLocal }
+                }
             }
 
             hairline
@@ -281,6 +291,10 @@ struct VaultManagerView: View {
             AppearanceSettingsSection()
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
+
+            hairline
+
+            subscriptionSection
 
             hairline
 
@@ -313,6 +327,61 @@ struct VaultManagerView: View {
                 .fill(AppColors.sidebarSelection.opacity(0.65))
         )
         .padding(.horizontal, 32)
+    }
+
+    @ViewBuilder
+    private var subscriptionSection: some View {
+        if entitlements.canWrite {
+            Button {
+                openURL(StoreConstants.manageSubscriptionsURL)
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entitlements.isLegacyUser ? "Dreft Pro (Legacy)" : "Manage Subscription")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                        Text(entitlements.isLegacyUser
+                             ? "Full access on this install — thank you for being an early Dreft writer."
+                             : "View or cancel your plan in App Store Settings.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(AppColors.textMuted)
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppColors.textMuted)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            Button {
+                showPaywall = true
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Upgrade to Dreft Pro")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                        Text(entitlements.isReadOnly
+                             ? "Your subscription ended. Subscribe to start writing again."
+                             : "Unlock writing on Mac and iPad with a Dreft Pro subscription.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(AppColors.textMuted)
+                    }
+                    Spacer()
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var createVaultSubtitle: String {
@@ -494,6 +563,8 @@ struct VaultManagerView: View {
     }
 
     private func createVault() {
+        guard entitlements.requireWriteAccess() else { return }
+
         let name = newVaultName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
 
@@ -533,6 +604,8 @@ struct VaultManagerView: View {
     }
 
     private func browseForLocation() {
+        guard entitlements.requireWriteAccess() else { return }
+
         #if os(macOS)
         let panel = NSOpenPanel()
         panel.canChooseFiles = false

@@ -8,6 +8,7 @@ import UIKit
 struct CanvasDocumentOptionsMenu: View {
     @Bindable var workspace: WorkspaceStore
     @Bindable var canvasStore: CanvasStore
+    var entitlements: EntitlementManager
     let fileID: String
     var onSplitRight: () -> Void = {}
     var onSplitDown: () -> Void = {}
@@ -37,24 +38,24 @@ struct CanvasDocumentOptionsMenu: View {
             Divider()
 
             Button("Rename...") {
-                revealAndRename()
+                entitlements.performWrite { revealAndRename() }
             }
 
             Menu("Move file to...") {
                 if file?.parentFolderID != nil {
                     Button("Vault root") {
-                        workspace.moveFile(fileID, toFolder: nil)
+                        entitlements.performWrite { workspace.moveFile(fileID, toFolder: nil) }
                     }
                 }
                 ForEach(workspace.availableMoveDestinations(for: fileID)) { folder in
                     Button(folder.name) {
-                        workspace.moveFile(fileID, toFolder: folder.id)
+                        entitlements.performWrite { workspace.moveFile(fileID, toFolder: folder.id) }
                     }
                 }
             }
 
             Button(workspace.isBookmarked(fileID) ? "Edit bookmark" : "Add bookmark") {
-                workspace.presentBookmarkEditor(for: fileID)
+                entitlements.performWrite { workspace.presentBookmarkEditor(for: fileID) }
             }
 
             Button("Export as image") {
@@ -109,7 +110,7 @@ struct CanvasDocumentOptionsMenu: View {
             Divider()
 
             Button("Delete file", role: .destructive) {
-                showDeleteConfirm = true
+                entitlements.performWrite { showDeleteConfirm = true }
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -142,6 +143,7 @@ struct CanvasDocumentOptionsMenu: View {
             CanvasVersionHistorySheet(
                 workspace: workspace,
                 canvasStore: canvasStore,
+                entitlements: entitlements,
                 fileID: fileID
             )
         }
@@ -175,6 +177,7 @@ struct CanvasDocumentOptionsMenu: View {
         let content = CanvasStandaloneWindowView(
             workspace: workspace,
             canvasStore: canvasStore,
+            entitlements: entitlements,
             documentTitle: file?.name ?? "Canvas"
         )
         let window = NSWindow(
@@ -224,6 +227,7 @@ private enum CanvasStandaloneWindowRegistry {
 private struct CanvasStandaloneWindowView: View {
     @Bindable var workspace: WorkspaceStore
     @Bindable var canvasStore: CanvasStore
+    var entitlements: EntitlementManager
     let documentTitle: String
 
     @State private var sidebarVisible = false
@@ -233,6 +237,7 @@ private struct CanvasStandaloneWindowView: View {
         InfiniteCanvasView(
             store: canvasStore,
             workspace: workspace,
+            entitlements: entitlements,
             sidebarVisible: $sidebarVisible,
             sidebarPanel: $sidebarPanel,
             documentTitle: documentTitle,

@@ -69,6 +69,7 @@ struct IconRailButton: View {
     let textLabel: String?
     let tooltip: String
     let isActive: Bool
+    var isDimmed: Bool = false
     let action: () -> Void
 
     @State private var isHovered = false
@@ -77,12 +78,14 @@ struct IconRailButton: View {
         systemName: String,
         tooltip: String,
         isActive: Bool = false,
+        isDimmed: Bool = false,
         action: @escaping () -> Void = {}
     ) {
         self.systemName = systemName
         self.textLabel = nil
         self.tooltip = tooltip
         self.isActive = isActive
+        self.isDimmed = isDimmed
         self.action = action
     }
 
@@ -90,12 +93,14 @@ struct IconRailButton: View {
         textLabel: String,
         tooltip: String,
         isActive: Bool = false,
+        isDimmed: Bool = false,
         action: @escaping () -> Void = {}
     ) {
         self.systemName = nil
         self.textLabel = textLabel
         self.tooltip = tooltip
         self.isActive = isActive
+        self.isDimmed = isDimmed
         self.action = action
     }
 
@@ -118,6 +123,7 @@ struct IconRailButton: View {
             )
         }
         .buttonStyle(.plain)
+        .opacity(isDimmed ? 0.42 : 1)
         #if os(macOS)
         .onHover { hovering in
             DispatchQueue.main.async {
@@ -146,6 +152,8 @@ struct IconRailView: View {
     @Binding var sidebarVisible: Bool
     var isGraphActive = false
     var isCanvasActive = false
+    var canWrite = true
+    var onCreateBlocked: () -> Void = {}
     var onGoToFile: () -> Void = {}
     var onOpenGraph: () -> Void = {}
     var onCreateCanvas: () -> Void = {}
@@ -216,12 +224,17 @@ struct IconRailView: View {
                     IconRailButton(
                         systemName: "square.grid.2x2",
                         tooltip: "Create new canvas",
-                        isActive: isCanvasActive
+                        isActive: isCanvasActive,
+                        isDimmed: !canWrite
                     ) {
-                        onCreateCanvas()
+                        if canWrite { onCreateCanvas() } else { onCreateBlocked() }
                     }
-                    IconRailButton(systemName: "doc.badge.plus", tooltip: "New note") {
-                        onCreateNote()
+                    IconRailButton(
+                        systemName: "doc.badge.plus",
+                        tooltip: "New note",
+                        isDimmed: !canWrite
+                    ) {
+                        if canWrite { onCreateNote() } else { onCreateBlocked() }
                     }
                     IconRailButton(systemName: "square.stack.3d.up", tooltip: "Manage vaults") {
                         onManageVaults()

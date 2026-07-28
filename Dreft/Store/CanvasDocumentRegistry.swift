@@ -18,11 +18,13 @@ final class CanvasDocumentRegistry {
     var onCanvasDirty: ((String) -> Void)?
     var onLinkedNoteBodyChanged: ((String, String) -> Void)?
     var vaultURL: URL?
+    var writeAccessChecker: () -> Bool = { true }
 
     func store(for documentID: String) -> CanvasStore {
         if let existing = stores[documentID] {
             existing.vaultURL = vaultURL
             existing.documentRelativePath = documentID
+            existing.writeAccessChecker = writeAccessChecker
             return existing
         }
         let store = CanvasStore()
@@ -34,6 +36,7 @@ final class CanvasDocumentRegistry {
     private func configure(_ store: CanvasStore, documentID: String) {
         store.documentRelativePath = documentID
         store.vaultURL = vaultURL
+        store.writeAccessChecker = writeAccessChecker
         store.onDidMutate = { [weak self, weak store] in
             guard let self, let store else { return }
             self.mutationGeneration += 1

@@ -8,6 +8,7 @@ import CoreText
 
 struct NoteDocumentOptionsMenu: View {
     @Bindable var workspace: WorkspaceStore
+    var entitlements: EntitlementManager
     let fileID: String
     @Binding var isReading: Bool
     var onSplitRight: () -> Void = {}
@@ -48,35 +49,41 @@ struct NoteDocumentOptionsMenu: View {
             Divider()
 
             Button("Split right") {
-                onSplitRight()
-                isReading = false
+                entitlements.performWrite {
+                    onSplitRight()
+                    isReading = false
+                }
             }
             Button("Split down") {
-                onSplitDown()
-                isReading = false
+                entitlements.performWrite {
+                    onSplitDown()
+                    isReading = false
+                }
             }
 
             Divider()
 
             Button("Rename...") {
-                sidebarPanel = .files
-                sidebarVisible = true
-                workspace.beginInlineRename(for: fileID)
+                entitlements.performWrite {
+                    sidebarPanel = .files
+                    sidebarVisible = true
+                    workspace.beginInlineRename(for: fileID)
+                }
             }
 
             Menu("Move file to...") {
                 Button("Vault root") {
-                    workspace.moveFile(fileID, toFolder: nil)
+                    entitlements.performWrite { workspace.moveFile(fileID, toFolder: nil) }
                 }
                 ForEach(workspace.availableMoveDestinations(for: fileID)) { folder in
                     Button(folder.name) {
-                        workspace.moveFile(fileID, toFolder: folder.id)
+                        entitlements.performWrite { workspace.moveFile(fileID, toFolder: folder.id) }
                     }
                 }
             }
 
             Button {
-                workspace.presentBookmarkEditor(for: fileID)
+                entitlements.performWrite { workspace.presentBookmarkEditor(for: fileID) }
             } label: {
                 if workspace.isBookmarked(fileID) {
                     Label("Bookmark...", systemImage: "checkmark")
@@ -92,12 +99,16 @@ struct NoteDocumentOptionsMenu: View {
             Divider()
 
             Button("Find...") {
-                showFindBar = true
-                isReading = false
+                entitlements.performWrite {
+                    showFindBar = true
+                    isReading = false
+                }
             }
             Button("Replace...") {
-                showFindBar = true
-                isReading = false
+                entitlements.performWrite {
+                    showFindBar = true
+                    isReading = false
+                }
             }
             .disabled(isReading)
 
@@ -147,7 +158,7 @@ struct NoteDocumentOptionsMenu: View {
             Divider()
 
             Button("Delete file", role: .destructive) {
-                showDeleteConfirm = true
+                entitlements.performWrite { showDeleteConfirm = true }
             }
         } label: {
             Image(systemName: "ellipsis")

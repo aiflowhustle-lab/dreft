@@ -21,6 +21,7 @@ private struct IPadRailButton: View {
     let systemName: String
     let label: String
     var isActive = false
+    var isDimmed = false
     let action: () -> Void
 
     var body: some View {
@@ -36,6 +37,7 @@ private struct IPadRailButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .opacity(isDimmed ? 0.42 : 1)
         .help(label)
         .accessibilityLabel(label)
         .accessibilityAddTraits(isActive ? .isSelected : [])
@@ -47,6 +49,8 @@ struct IPadIconRail: View {
     @Binding var sidebarPanel: SidebarPanel
     var isGraphActive = false
     var isCanvasActive = false
+    var canWrite = true
+    var onCreateBlocked: () -> Void = {}
     var onGoToFile: () -> Void = {}
     var onOpenGraph: () -> Void = {}
     var onCreateCanvas: () -> Void = {}
@@ -69,12 +73,17 @@ struct IPadIconRail: View {
             IPadRailButton(
                 systemName: "square.grid.2x2",
                 label: "Create new canvas",
-                isActive: isCanvasActive
+                isActive: isCanvasActive,
+                isDimmed: !canWrite
             ) {
-                onCreateCanvas()
+                if canWrite { onCreateCanvas() } else { onCreateBlocked() }
             }
-            IPadRailButton(systemName: "doc.badge.plus", label: "New note") {
-                onCreateNote()
+            IPadRailButton(
+                systemName: "doc.badge.plus",
+                label: "New note",
+                isDimmed: !canWrite
+            ) {
+                if canWrite { onCreateNote() } else { onCreateBlocked() }
             }
             IPadRailButton(systemName: "square.stack.3d.up", label: "Manage vaults") {
                 onManageVaults()
@@ -128,6 +137,7 @@ private struct IPadSidebarSwipeDismissModifier: ViewModifier {
 
 struct IPadFloatingSidebar: View {
     @Bindable var workspace: WorkspaceStore
+    var entitlements: EntitlementManager
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
     @Binding var isPinned: Bool
@@ -150,6 +160,7 @@ struct IPadFloatingSidebar: View {
 
             SidebarView(
                 workspace: workspace,
+                entitlements: entitlements,
                 sidebarVisible: $sidebarVisible,
                 sidebarPanel: $sidebarPanel,
                 activePanel: sidebarPanel,

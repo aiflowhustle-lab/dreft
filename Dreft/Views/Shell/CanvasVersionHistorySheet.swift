@@ -3,6 +3,7 @@ import SwiftUI
 struct CanvasVersionHistorySheet: View {
     @Bindable var workspace: WorkspaceStore
     @Bindable var canvasStore: CanvasStore
+    var entitlements: EntitlementManager
     let fileID: String
 
     @Environment(\.dismiss) private var dismiss
@@ -71,6 +72,7 @@ struct CanvasVersionHistorySheet: View {
     }
 
     private func restore(_ record: CanvasFileVersion) {
+        guard entitlements.requireWriteAccess() else { return }
         do {
             let data = try Data(contentsOf: record.url)
             guard case .success(let snapshot) = CanvasDocumentFormat.read(from: data) else {

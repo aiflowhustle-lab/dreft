@@ -67,8 +67,15 @@ final class WorkspaceStore {
     var onNoteContentDirty: ((String) -> Void)?
     /// Tabs, selection, or vault UI changed — drives workspace.json saves.
     var onWorkspaceStateDirty: (() -> Void)?
+    /// Subscription gate — return false to block writes (silent; UI shows paywall on intent).
+    var writeAccessChecker: () -> Bool = { true }
 
     private var vaultSnapshots: [String: VaultWorkspaceSnapshot] = [:]
+
+    @discardableResult
+    private func requireWriteAccess() -> Bool {
+        writeAccessChecker()
+    }
     private var graphLinkIndex = GraphLinkIndex()
     private var graphLinkRebuildTask: Task<Void, Never>?
     private var graphLinkCacheSaveTask: Task<Void, Never>?
@@ -224,6 +231,7 @@ final class WorkspaceStore {
     }
 
     func createVault(name: String, parentDirectory: String, parentBookmark: Data? = nil) throws {
+        guard requireWriteAccess() else { return }
         if let parentBookmark {
             _ = VaultSecurityAccess.beginParentAccess(bookmark: parentBookmark)
         }
@@ -638,6 +646,7 @@ final class WorkspaceStore {
         replacingTabID: String? = nil,
         autoNavigate: Bool = true
     ) -> WorkspaceFileEntry? {
+        guard requireWriteAccess() else { return nil }
         guard let vaultURL = activeVaultURL else {
             reportVaultError(title: "No vault available", message: VaultErrorMessages.noActiveVault)
             return nil
@@ -674,6 +683,7 @@ final class WorkspaceStore {
 
     @discardableResult
     func createCanvas(inFolder folderID: String? = nil, autoNavigate: Bool = true) -> WorkspaceFileEntry? {
+        guard requireWriteAccess() else { return nil }
         guard let vaultURL = activeVaultURL else {
             reportVaultError(title: "No vault available", message: VaultErrorMessages.noActiveVault)
             return nil
@@ -703,6 +713,7 @@ final class WorkspaceStore {
     }
 
     func createFolder(inFolder folderID: String? = nil) {
+        guard requireWriteAccess() else { return }
         guard let vaultURL = activeVaultURL else {
             reportVaultError(title: "No vault available", message: VaultErrorMessages.noActiveVault)
             return
@@ -867,6 +878,7 @@ final class WorkspaceStore {
     }
 
     func saveBookmark(fileID: String, title: String, group: String) {
+        guard requireWriteAccess() else { return }
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedGroup = group.trimmingCharacters(in: .whitespacesAndNewlines)
         guard files.contains(where: { $0.id == fileID }),
@@ -884,6 +896,7 @@ final class WorkspaceStore {
     }
 
     func removeBookmark(_ fileID: String) {
+        guard requireWriteAccess() else { return }
         bookmarks.removeAll { $0.fileID == fileID }
     }
 
@@ -926,6 +939,7 @@ final class WorkspaceStore {
     }
 
     func renameFile(_ id: String, to name: String) {
+        guard requireWriteAccess() else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               let index = files.firstIndex(where: { $0.id == id }),
@@ -969,6 +983,7 @@ final class WorkspaceStore {
     }
 
     func duplicateFile(_ id: String) {
+        guard requireWriteAccess() else { return }
         guard let original = files.first(where: { $0.id == id }),
               let vaultURL = activeVaultURL else {
             reportVaultError(title: "No vault available", message: VaultErrorMessages.noActiveVault)
@@ -992,6 +1007,7 @@ final class WorkspaceStore {
     }
 
     func deleteFile(_ id: String) {
+        guard requireWriteAccess() else { return }
         guard let vaultURL = activeVaultURL else {
             reportVaultError(title: "No vault available", message: VaultErrorMessages.noActiveVault)
             return
@@ -1068,6 +1084,7 @@ final class WorkspaceStore {
     }
 
     func updateNoteContent(for fileID: String, content: String) {
+        guard requireWriteAccess() else { return }
         guard let index = files.firstIndex(where: { $0.id == fileID }) else { return }
         guard files[index].noteContent != content else { return }
         files[index].noteContent = content
@@ -1076,6 +1093,7 @@ final class WorkspaceStore {
     }
 
     func updateNoteContent(forRelativePath relativePath: String, content: String) {
+        guard requireWriteAccess() else { return }
         guard let index = files.firstIndex(where: { $0.relativePath == relativePath && $0.kind == .note }) else { return }
         updateNoteContent(for: files[index].id, content: content)
     }
@@ -1104,6 +1122,7 @@ final class WorkspaceStore {
     }
 
     func moveFile(_ fileID: String, toFolder folderID: String?) {
+        guard requireWriteAccess() else { return }
         guard canMove(fileID: fileID, toFolder: folderID),
               let index = files.firstIndex(where: { $0.id == fileID }),
               let vaultURL = activeVaultURL else { return }

@@ -14,6 +14,9 @@ enum SidebarLayout {
 }
 
 struct WorkspaceShellView: View {
+    var entitlements: EntitlementManager
+    var storeManager: StoreManager
+
     @State private var workspace: WorkspaceStore
     @State private var canvasDocuments: CanvasDocumentRegistry
     @State private var persistenceCoordinator: WorkspacePersistenceCoordinator?
@@ -46,7 +49,10 @@ struct WorkspaceShellView: View {
     @State private var isShellReady = false
     @Environment(\.scenePhase) private var scenePhase
 
-    init() {
+    init(entitlements: EntitlementManager, storeManager: StoreManager) {
+        self.entitlements = entitlements
+        self.storeManager = storeManager
+
         let workspace = WorkspaceStore()
         let registry = CanvasDocumentRegistry()
 
@@ -111,6 +117,7 @@ struct WorkspaceShellView: View {
 
         startPersistenceIfNeeded()
         sidebarWidth = SidebarLayout.clamped(CGFloat(sidebarWidthStorage))
+        configureWriteAccessGating()
         if workspace.vaults.isEmpty {
             workspace.bootstrapDefaultVaultIfNeeded()
         }
@@ -118,6 +125,14 @@ struct WorkspaceShellView: View {
             workspace.openFirstCanvasIfAvailable()
         }
         workspace.checkActiveVaultAccessibility()
+    }
+
+    private func configureWriteAccessGating() {
+        let writeGate = { [entitlements] in
+            entitlements.canWrite
+        }
+        workspace.writeAccessChecker = writeGate
+        canvasDocuments.writeAccessChecker = writeGate
     }
 
     var body: some View {
@@ -143,6 +158,7 @@ struct WorkspaceShellView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     persistenceCoordinator?.refreshVaultFromDiskIfNeeded()
+                    configureWriteAccessGating()
                 }
                 #if os(iOS)
                 if phase == .inactive || phase == .background {
@@ -165,6 +181,9 @@ struct WorkspaceShellView: View {
         .task {
             bootstrapShellIfNeeded()
             isShellReady = true
+            if !entitlements.isLocked, storeManager.products.isEmpty {
+                await storeManager.loadProducts()
+            }
         }
     }
 
@@ -243,6 +262,8 @@ struct WorkspaceShellView: View {
                     sidebarVisible: $sidebarVisible,
                     isGraphActive: focusedPaneActiveTab?.kind == .graph,
                     isCanvasActive: focusedPaneActiveTab?.kind == .canvas,
+                    canWrite: entitlements.canWrite,
+                    onCreateBlocked: { entitlements.showPaywall = true },
                     onGoToFile: openGoToFileInFocusedPane,
                     onOpenGraph: openGraphInFocusedPane,
                     onCreateCanvas: createCanvasInFocusedPane,
@@ -324,6 +345,8 @@ struct WorkspaceShellView: View {
                                 sidebarPanel: $sidebarPanel,
                                 isGraphActive: focusedPaneActiveTab?.kind == .graph,
                                 isCanvasActive: focusedPaneActiveTab?.kind == .canvas,
+                                canWrite: entitlements.canWrite,
+                                onCreateBlocked: { entitlements.showPaywall = true },
                                 onGoToFile: openGoToFileInFocusedPane,
                                 onOpenGraph: openGraphInFocusedPane,
                                 onCreateCanvas: createCanvasInFocusedPane,
@@ -338,6 +361,7 @@ struct WorkspaceShellView: View {
                         }
                         IPadFloatingSidebar(
                             workspace: workspace,
+                            entitlements: entitlements,
                             sidebarVisible: $sidebarVisible,
                             sidebarPanel: $sidebarPanel,
                             isPinned: $ipadSidebarPinned,
@@ -391,6 +415,7 @@ struct WorkspaceShellView: View {
 
             SidebarView(
                 workspace: workspace,
+                entitlements: entitlements,
                 sidebarVisible: $sidebarVisible,
                 sidebarPanel: $sidebarPanel,
                 activePanel: sidebarPanel,
@@ -648,6 +673,18 @@ struct WorkspaceShellView: View {
         macSidebarToggleSlotWidth
         #else
         28
+        #endif
+    }
+
+    private var showsSubscribeCTA: Bool {
+        entitlements.isLocked && usesDesktopChrome
+    }
+
+    private var subscribeCTATrailingSlot: CGFloat {
+        #if os(iOS)
+        168
+        #else
+        176
         #endif
     }
 
@@ -1096,7 +1133,8 @@ struct WorkspaceShellView: View {
 
             HStack(spacing: 14) {
                 if tab?.kind == .note, let fileID = tab?.fileID {
-                    ObsidianViewModeButton(isReading: Binding(
+                    ObsidianViewModeButton(
+                        isReading: Binding(
                         get: { paneUI(for: paneID).isReading },
                         set: { newValue in
                             var state = paneUI(for: paneID)
@@ -1104,11 +1142,15 @@ struct WorkspaceShellView: View {
                             if newValue { state.showFindBar = false }
                             setPaneUI(paneID, state)
                         }
-                    )) {
+                    ),
+                        canEnterEditMode: entitlements.canWrite,
+                        onEditBlocked: { entitlements.showPaywall = true }
+                    ) {
                         if isRoot { noteSplitLayout = .none }
                     }
                     NoteDocumentOptionsMenu(
                         workspace: workspace,
+                        entitlements: entitlements,
                         fileID: fileID,
                         isReading: Binding(
                             get: { paneUI(for: paneID).isReading },
@@ -1138,6 +1180,7 @@ struct WorkspaceShellView: View {
                     CanvasDocumentOptionsMenu(
                         workspace: workspace,
                         canvasStore: canvasDocuments.store(for: fileID),
+                        entitlements: entitlements,
                         fileID: fileID,
                         onSplitRight: splitActions.0,
                         onSplitDown: splitActions.1,
@@ -1148,6 +1191,7 @@ struct WorkspaceShellView: View {
                 if tab?.kind == .graph {
                     GraphDocumentOptionsMenu(
                         workspace: workspace,
+                        entitlements: entitlements,
                         paneID: paneID,
                         onSplitRight: splitActions.0,
                         onSplitDown: splitActions.1,
@@ -1173,6 +1217,7 @@ struct WorkspaceShellView: View {
                 InfiniteCanvasView(
                     store: canvasDocuments.store(for: fileID),
                     workspace: workspace,
+                    entitlements: entitlements,
                     sidebarVisible: $sidebarVisible,
                     sidebarPanel: $sidebarPanel,
                     documentTitle: workspace.documentTitle(for: tab),
@@ -1191,6 +1236,7 @@ struct WorkspaceShellView: View {
             if let fileID = tab?.fileID {
                 NoteEditorView(
                     workspace: workspace,
+                    entitlements: entitlements,
                     fileID: fileID,
                     isReading: Binding(
                         get: { paneUI(for: paneID).isReading },
@@ -1247,7 +1293,9 @@ struct WorkspaceShellView: View {
 
     private func documentBookmarkButton(fileID: String) -> some View {
         Button {
-            workspace.presentBookmarkEditor(for: fileID)
+            entitlements.performWrite {
+                workspace.presentBookmarkEditor(for: fileID)
+            }
         } label: {
             Image(systemName: workspace.isBookmarked(fileID) ? "bookmark.fill" : "bookmark")
                 .font(.system(size: documentBookmarkIconSize, weight: .medium))
@@ -1266,7 +1314,9 @@ struct WorkspaceShellView: View {
     private func newTabPlaceholder(paneID: String) -> some View {
         VStack(spacing: 10) {
             newTabPill("Create new note") {
-                workspace.createNote()
+                entitlements.performWrite {
+                    workspace.createNote()
+                }
             }
             newTabPill("Go to file") {
                 goToFileTargetPaneID = paneID
@@ -1292,7 +1342,11 @@ struct WorkspaceShellView: View {
                 .animation(nil, value: showGoToFile)
 
             if workspace.isVaultManagerOpen {
-                VaultManagerView(workspace: workspace)
+                VaultManagerView(
+                    workspace: workspace,
+                    entitlements: entitlements,
+                    storeManager: storeManager
+                )
                     .zIndex(10)
                     .transition(.opacity)
             }
@@ -1304,7 +1358,7 @@ struct WorkspaceShellView: View {
             }
 
             if let bookmarkFileID = workspace.bookmarkEditorFileID {
-                AddBookmarkSheet(workspace: workspace, fileID: bookmarkFileID)
+                AddBookmarkSheet(workspace: workspace, entitlements: entitlements, fileID: bookmarkFileID)
                     .zIndex(15)
                     .transition(.opacity)
             }
@@ -1312,6 +1366,7 @@ struct WorkspaceShellView: View {
             if showGoToFile {
                 GoToFileSheet(
                     workspace: workspace,
+                    entitlements: entitlements,
                     isPresented: $showGoToFile,
                     replacingTabID: goToFileReplacingTabID,
                     onFileSelected: handleGoToFileSelection
@@ -1364,6 +1419,8 @@ struct WorkspaceShellView: View {
             if workspace.isVaultManagerOpen {
                 VaultManagerView(
                     workspace: workspace,
+                    entitlements: entitlements,
+                    storeManager: storeManager,
                     onRequestFolderPicker: { purpose, handler in
                         vaultFolderPickerHandler = handler
                         vaultFolderPickerPurpose = purpose
@@ -1380,7 +1437,7 @@ struct WorkspaceShellView: View {
             }
 
             if let bookmarkFileID = workspace.bookmarkEditorFileID {
-                AddBookmarkSheet(workspace: workspace, fileID: bookmarkFileID)
+                AddBookmarkSheet(workspace: workspace, entitlements: entitlements, fileID: bookmarkFileID)
                     .zIndex(15)
                     .transition(.opacity)
             }
@@ -1388,6 +1445,7 @@ struct WorkspaceShellView: View {
             if showGoToFile {
                 GoToFileSheet(
                     workspace: workspace,
+                    entitlements: entitlements,
                     isPresented: $showGoToFile,
                     replacingTabID: goToFileReplacingTabID,
                     onFileSelected: handleGoToFileSelection
@@ -1475,7 +1533,8 @@ struct WorkspaceShellView: View {
             leading()
 
             GeometryReader { geo in
-                let trailingSlot: CGFloat = showsTrailingChrome ? sidebarToggleTrailingSlot : 28
+                let subscribeSlot: CGFloat = showsSubscribeCTA ? subscribeCTATrailingSlot : 0
+                let trailingSlot: CGFloat = (showsTrailingChrome ? sidebarToggleTrailingSlot : 28) + subscribeSlot
                 let plusSlot: CGFloat = tabPlusSlotWidth
                 let available = max(0, geo.size.width - plusSlot - trailingSlot)
                 let count = max(tabs.count, 1)
@@ -1528,6 +1587,16 @@ struct WorkspaceShellView: View {
                 onSelect: onSelect,
                 onCloseAll: onCloseAll
             )
+
+            if showsSubscribeCTA {
+                SubscribeCTAButton(
+                    entitlements: entitlements,
+                    storeManager: storeManager
+                ) {
+                    entitlements.showPaywall = true
+                }
+                .padding(.leading, 8)
+            }
 
             if showsTrailingChrome {
                 chromeIconButton(
@@ -1814,8 +1883,12 @@ struct WorkspaceShellView: View {
 }
 
 #Preview {
-    WorkspaceShellView()
-        .frame(width: 1200, height: 800)
+    let storeManager = StoreManager()
+    WorkspaceShellView(
+        entitlements: EntitlementManager(storeManager: storeManager),
+        storeManager: storeManager
+    )
+    .frame(width: 1200, height: 800)
 }
 
 // MARK: - Shared chrome

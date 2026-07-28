@@ -49,6 +49,14 @@ final class CanvasStore {
     var pendingEndpointMenuCenter: CGPoint?
     /// Note card that should receive keyboard focus after creation.
     var focusCardID: String?
+
+    /// Subscription gate — return false to block canvas mutations.
+    var writeAccessChecker: () -> Bool = { true }
+
+    @discardableResult
+    private func requireWriteAccess() -> Bool {
+        writeAccessChecker()
+    }
     /// Fired after any document mutation (cards, edges, transform).
     var onDidMutate: (() -> Void)?
     /// When a linked note card (Obsidian `file` node) is edited, write body to the vault `.md` file.
@@ -177,6 +185,7 @@ final class CanvasStore {
     /// Replace the whole document (version-history restore) as an undoable step,
     /// so the user can always get back to what they had before restoring.
     func restoreDocumentSnapshot(_ snapshot: CanvasDocumentSnapshot) {
+        guard requireWriteAccess() else { return }
         withUndo {
             cards = snapshot.cards
             edges = snapshot.edges
@@ -190,6 +199,7 @@ final class CanvasStore {
     }
 
     func undo() {
+        guard requireWriteAccess() else { return }
         guard let previous = undoStack.popLast() else { return }
         suppressOverlayContentCommit = true
         endContentEdit(skipPersist: true)
@@ -208,6 +218,7 @@ final class CanvasStore {
     }
 
     func redo() {
+        guard requireWriteAccess() else { return }
         guard let next = redoStack.popLast() else { return }
         suppressOverlayContentCommit = true
         endContentEdit(skipPersist: true)
@@ -442,6 +453,7 @@ final class CanvasStore {
     // MARK: - Cards
 
     func addCard(kind: CardKind, at center: CGPoint) {
+        guard requireWriteAccess() else { return }
         withUndo {
             let card = CanvasCard.make(kind: kind, at: center)
             cards.append(card)
@@ -451,6 +463,7 @@ final class CanvasStore {
     }
 
     func addCompactNote(at center: CGPoint) {
+        guard requireWriteAccess() else { return }
         withUndo {
             let card = CanvasCard.makeCompactNote(at: center)
             cards.append(card)
@@ -460,6 +473,7 @@ final class CanvasStore {
     }
 
     func addCompactNoteAtCenter(canvasSize: CGSize, transform: CanvasViewTransform? = nil) {
+        guard requireWriteAccess() else { return }
         let t = transform ?? self.transform
         let center = screenToWorld(
             CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
@@ -476,6 +490,7 @@ final class CanvasStore {
     }
 
     func addImageCard(data: Data, title: String?, topLeft: CGPoint) {
+        guard requireWriteAccess() else { return }
         withUndo {
             let id = UUID().uuidString
             let pixelSize = ImagePixelSize.from(data: data) ?? CGSize(width: 320, height: 220)
@@ -530,6 +545,7 @@ final class CanvasStore {
     #endif
 
     func deleteCard(_ id: String) {
+        guard requireWriteAccess() else { return }
         withUndo {
             if contentEditSessionCardID == id { endContentEdit() }
             CanvasImageCache.shared.remove(cardID: id)
@@ -541,6 +557,7 @@ final class CanvasStore {
     }
 
     func swapImageCard(_ id: String, data: Data, suggestedTitle: String?) {
+        guard requireWriteAccess() else { return }
         guard let index = cards.firstIndex(where: { $0.id == id }),
               cards[index].kind == .image,
               let vaultURL else { return }
@@ -613,6 +630,7 @@ final class CanvasStore {
     }
 
     func updateContent(for id: String, content: String, fromTextUndo: Bool = false) {
+        guard requireWriteAccess() else { return }
         guard !isRestoringHistory, !suppressOverlayContentCommit else { return }
         guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
         if contentEditSessionCardID != id {
@@ -709,6 +727,7 @@ final class CanvasStore {
     }
 
     func updateTitle(for id: String, title: String) {
+        guard requireWriteAccess() else { return }
         guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = trimmed.isEmpty ? Self.defaultImageTitle : trimmed
@@ -741,6 +760,7 @@ final class CanvasStore {
     }
 
     func moveCard(_ id: String, to origin: CGPoint) {
+        guard requireWriteAccess() else { return }
         guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
         let card = cards[index]
         guard card.x != origin.x || card.y != origin.y else { return }
@@ -752,6 +772,7 @@ final class CanvasStore {
     }
 
     func resizeCard(_ id: String, frame: CGRect) {
+        guard requireWriteAccess() else { return }
         guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
         let card = cards[index]
         let resolved = CGRect(
@@ -1012,6 +1033,7 @@ final class CanvasStore {
     }
 
     func deleteEdge(_ id: String) {
+        guard requireWriteAccess() else { return }
         withUndo {
             edges.removeAll { $0.id == id }
             if selectedEdgeID == id { selectedEdgeID = nil }
@@ -1134,6 +1156,7 @@ final class CanvasStore {
     }
 
     func addConnectedCard(fromID: String, fromSide: CanvasSide) {
+        guard requireWriteAccess() else { return }
         guard let from = cards.first(where: { $0.id == fromID }) else { return }
         withUndo {
             let gap: CGFloat = 120
@@ -1170,6 +1193,7 @@ final class CanvasStore {
 
     /// Places a new note card centered where the add-card menu was shown.
     func addCardAtEndpoint(edgeID: String, atMenuCenter menuCenter: CGPoint) {
+        guard requireWriteAccess() else { return }
         guard let placement = endpointCardPlacement(for: edgeID, menuCenter: menuCenter) else { return }
 
         withUndo {
@@ -1197,6 +1221,7 @@ final class CanvasStore {
     }
 
     func addVaultFile(_ file: VaultFile, canvasSize: CGSize) {
+        guard requireWriteAccess() else { return }
         if let edgeID = pendingEndpointEdgeID, let menuCenter = pendingEndpointMenuCenter {
             pendingEndpointEdgeID = nil
             pendingEndpointMenuCenter = nil

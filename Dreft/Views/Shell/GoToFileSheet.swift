@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GoToFileSheet: View {
     @Bindable var workspace: WorkspaceStore
+    var entitlements: EntitlementManager
     @Binding var isPresented: Bool
     var replacingTabID: String?
     /// When set, chosen files open through this handler instead of the main tab group.
@@ -161,6 +162,7 @@ struct GoToFileSheet: View {
     private func createFromQuery() {
         let name = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
+        guard entitlements.requireWriteAccess() else { return }
         if onFileSelected != nil {
             workspace.reportVaultError(
                 title: "Create note",

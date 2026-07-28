@@ -149,6 +149,7 @@ private struct ShellToolbarSymbolButton: View {
     let systemName: String
     let label: String
     var isActive: Bool = false
+    var isDimmed: Bool = false
     let action: () -> Void
 
     @State private var isHovered = false
@@ -165,6 +166,7 @@ private struct ShellToolbarSymbolButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .opacity(isDimmed ? 0.42 : 1)
         #if os(macOS)
         .onHover { isHovered = $0 }
         #endif
@@ -279,6 +281,8 @@ private struct ShellTooltipArrowShape: Shape {
 
 struct SidebarFileToolbar: View {
     @Bindable var workspace: WorkspaceStore
+    var canWrite = true
+    var onCreateBlocked: () -> Void = {}
     var onNewNote: () -> Void
     var onNewFolder: () -> Void
 
@@ -289,8 +293,20 @@ struct SidebarFileToolbar: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 6) {
-                ShellToolbarSymbolButton(systemName: "square.and.pencil", label: "New note", action: onNewNote)
-                ShellToolbarSymbolButton(systemName: "folder.badge.plus", label: "New folder", action: onNewFolder)
+                ShellToolbarSymbolButton(
+                    systemName: "square.and.pencil",
+                    label: "New note",
+                    isDimmed: !canWrite
+                ) {
+                    if canWrite { onNewNote() } else { onCreateBlocked() }
+                }
+                ShellToolbarSymbolButton(
+                    systemName: "folder.badge.plus",
+                    label: "New folder",
+                    isDimmed: !canWrite
+                ) {
+                    if canWrite { onNewFolder() } else { onCreateBlocked() }
+                }
                 sortOrderMenu
                 expandCollapseAllButton
             }
@@ -397,6 +413,7 @@ private struct SidebarTreeGuide: View {
 
 private struct SidebarFileRowView: View {
     @Bindable var workspace: WorkspaceStore
+    var entitlements: EntitlementManager
     let row: SidebarFileRow
     @Binding var dropTarget: SidebarDropTarget
     var onOpenDocument: ((WorkspaceFileEntry) -> Void)? = nil
@@ -473,12 +490,12 @@ private struct SidebarFileRowView: View {
                 fileContextMenu
             }
         }
-        .if(file.isMovable) { view in
+        .if(file.isMovable && entitlements.canWrite) { view in
             view.draggable(file.id)
         }
         .if(file.kind == .folder) { view in
             view.dropDestination(for: String.self) { items, _ in
-                guard let draggedID = items.first else { return false }
+                guard entitlements.canWrite, let draggedID = items.first else { return false }
                 workspace.moveFile(draggedID, toFolder: file.id)
                 dropTarget = .none
                 return true
@@ -494,16 +511,16 @@ private struct SidebarFileRowView: View {
 
     @ViewBuilder
     private var folderContextMenu: some View {
-        Button("New note") { workspace.createNote(inFolder: file.id) }
-        Button("New folder") { workspace.createFolder(inFolder: file.id) }
-        Button("New canvas") { workspace.createCanvas(inFolder: file.id) }
+        Button("New note") { entitlements.performWrite { workspace.createNote(inFolder: file.id) } }
+        Button("New folder") { entitlements.performWrite { workspace.createFolder(inFolder: file.id) } }
+        Button("New canvas") { entitlements.performWrite { workspace.createCanvas(inFolder: file.id) } }
 
         Divider()
 
-        Button("Duplicate") { workspace.duplicateFile(file.id) }
+        Button("Duplicate") { entitlements.performWrite { workspace.duplicateFile(file.id) } }
         moveDestinationMenu(title: "Move folder to...")
         if workspace.isBookmarked(file.id) {
-            Button("Remove bookmark") { workspace.removeBookmark(file.id) }
+            Button("Remove bookmark") { entitlements.performWrite { workspace.removeBookmark(file.id) } }
         }
 
         Divider()
@@ -517,8 +534,8 @@ private struct SidebarFileRowView: View {
         Divider()
         #endif
 
-        Button("Rename...") { workspace.beginInlineRename(for: file.id) }
-        Button("Delete") { workspace.deleteFile(file.id) }
+        Button("Rename...") { entitlements.performWrite { workspace.beginInlineRename(for: file.id) } }
+        Button("Delete") { entitlements.performWrite { workspace.deleteFile(file.id) } }
     }
 
     @ViewBuilder
@@ -527,10 +544,10 @@ private struct SidebarFileRowView: View {
 
         Divider()
 
-        Button("Duplicate") { workspace.duplicateFile(file.id) }
+        Button("Duplicate") { entitlements.performWrite { workspace.duplicateFile(file.id) } }
         moveDestinationMenu(title: "Move file to...")
         Button {
-            workspace.presentBookmarkEditor(for: file.id)
+            entitlements.performWrite { workspace.presentBookmarkEditor(for: file.id) }
         } label: {
             if workspace.isBookmarked(file.id) {
                 Label("Bookmark...", systemImage: "checkmark")
@@ -551,8 +568,8 @@ private struct SidebarFileRowView: View {
         Divider()
         #endif
 
-        Button("Rename...") { workspace.beginInlineRename(for: file.id) }
-        Button("Delete") { workspace.deleteFile(file.id) }
+        Button("Rename...") { entitlements.performWrite { workspace.beginInlineRename(for: file.id) } }
+        Button("Delete") { entitlements.performWrite { workspace.deleteFile(file.id) } }
     }
 
     private var renameField: some View {
@@ -597,11 +614,11 @@ private struct SidebarFileRowView: View {
     private func moveDestinationMenu(title: String) -> some View {
         Menu(title) {
             if file.parentFolderID != nil {
-                Button("Vault root") { workspace.moveFile(file.id, toFolder: nil) }
+                Button("Vault root") { entitlements.performWrite { workspace.moveFile(file.id, toFolder: nil) } }
             }
             ForEach(workspace.availableMoveDestinations(for: file.id)) { folder in
                 if folder.id != file.parentFolderID {
-                    Button(folder.name) { workspace.moveFile(file.id, toFolder: folder.id) }
+                    Button(folder.name) { entitlements.performWrite { workspace.moveFile(file.id, toFolder: folder.id) } }
                 }
             }
         }
@@ -674,6 +691,7 @@ private extension View {
 
 struct SidebarView: View {
     @Bindable var workspace: WorkspaceStore
+    var entitlements: EntitlementManager
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
     var activePanel: SidebarPanel = .files
@@ -780,8 +798,10 @@ struct SidebarView: View {
         Group {
             SidebarFileToolbar(
                 workspace: workspace,
-                onNewNote: { workspace.createNote() },
-                onNewFolder: { workspace.createFolder() }
+                canWrite: entitlements.canWrite,
+                onCreateBlocked: { entitlements.showPaywall = true },
+                onNewNote: { entitlements.performWrite { workspace.createNote() } },
+                onNewFolder: { entitlements.performWrite { workspace.createFolder() } }
             )
 
             ScrollView {
@@ -789,6 +809,7 @@ struct SidebarView: View {
                     ForEach(workspace.visibleSidebarRows()) { row in
                         SidebarFileRowView(
                             workspace: workspace,
+                            entitlements: entitlements,
                             row: row,
                             dropTarget: $dropTarget,
                             onOpenDocument: onOpenDocument
@@ -807,7 +828,7 @@ struct SidebarView: View {
                     }
                 }
                 .dropDestination(for: String.self) { items, _ in
-                    guard let draggedID = items.first else { return false }
+                    guard entitlements.canWrite, let draggedID = items.first else { return false }
                     workspace.moveFile(draggedID, toFolder: nil)
                     dropTarget = .none
                     return true
@@ -1106,7 +1127,9 @@ struct SidebarView: View {
                 HStack(spacing: 14) {
                     ShellToolbarSymbolButton(systemName: "bookmark", label: "Bookmark active file") {
                         if let id = workspace.selectedFileID {
-                            workspace.presentBookmarkEditor(for: id)
+                            entitlements.performWrite {
+                                workspace.presentBookmarkEditor(for: id)
+                            }
                         }
                     }
                     ShellToolbarCustomIconButton(label: "Collapse all") {
@@ -1178,12 +1201,16 @@ struct SidebarView: View {
         Divider()
 
         Button("Rename...") {
-            sidebarPanel = .files
-            sidebarVisible = true
-            workspace.beginInlineRename(for: file.id)
+            entitlements.performWrite {
+                sidebarPanel = .files
+                sidebarVisible = true
+                workspace.beginInlineRename(for: file.id)
+            }
         }
         Button("Edit...") {
-            workspace.presentBookmarkEditor(for: file.id)
+            entitlements.performWrite {
+                workspace.presentBookmarkEditor(for: file.id)
+            }
         }
 
         Divider()
@@ -1197,7 +1224,9 @@ struct SidebarView: View {
         Divider()
 
         Button("Remove") {
-            workspace.removeBookmark(file.id)
+            entitlements.performWrite {
+                workspace.removeBookmark(file.id)
+            }
         }
     }
 }

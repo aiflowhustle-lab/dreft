@@ -5,12 +5,19 @@ struct AppRootView: View {
     @AppStorage(OnboardingStorage.completedKey) private var hasCompletedOnboarding = false
     @AppStorage("appearanceMode") private var appearanceModeRaw = AppearanceMode.light.rawValue
     @State private var showOnboarding: Bool
+    @State private var storeManager = StoreManager()
+    @State private var entitlements: EntitlementManager
+    @State private var showPaywallAfterOnboarding = false
+    @Environment(\.scenePhase) private var scenePhase
 
     private var appearanceMode: AppearanceMode {
         AppearanceMode(rawValue: appearanceModeRaw) ?? .light
     }
 
     init() {
+        let storeManager = StoreManager()
+        _storeManager = State(initialValue: storeManager)
+        _entitlements = State(initialValue: EntitlementManager(storeManager: storeManager))
         _showOnboarding = State(
             initialValue: !UserDefaults.standard.bool(forKey: OnboardingStorage.completedKey)
         )
@@ -18,15 +25,17 @@ struct AppRootView: View {
 
     var body: some View {
         ZStack {
-            WorkspaceShellView()
-                .opacity(showOnboarding ? 0 : 1)
-                .allowsHitTesting(!showOnboarding)
+            WorkspaceShellView(
+                entitlements: entitlements,
+                storeManager: storeManager
+            )
+            .opacity(showOnboarding ? 0 : 1)
+            .allowsHitTesting(!showOnboarding)
 
             if showOnboarding {
                 OnboardingPresentationContainer {
                     OnboardingFlowView {
-                        hasCompletedOnboarding = true
-                        showOnboarding = false
+                        finishOnboarding()
                     }
                 }
                 .transition(.opacity)
@@ -53,6 +62,34 @@ struct AppRootView: View {
                 hasCompletedOnboarding = true
                 showOnboarding = false
             }
+            await entitlements.configure()
+            await storeManager.loadProducts()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await entitlements.refresh() }
+            }
+        }
+        .sheet(isPresented: $showPaywallAfterOnboarding) {
+            PaywallView(storeManager: storeManager, entitlements: entitlements)
+        }
+        .sheet(isPresented: paywallBinding) {
+            PaywallView(storeManager: storeManager, entitlements: entitlements)
+        }
+    }
+
+    private var paywallBinding: Binding<Bool> {
+        Binding(
+            get: { entitlements.showPaywall && !showPaywallAfterOnboarding },
+            set: { entitlements.showPaywall = $0 }
+        )
+    }
+
+    private func finishOnboarding() {
+        hasCompletedOnboarding = true
+        showOnboarding = false
+        if entitlements.isLocked {
+            showPaywallAfterOnboarding = true
         }
     }
 

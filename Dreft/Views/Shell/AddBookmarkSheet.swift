@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AddBookmarkSheet: View {
     @Bindable var workspace: WorkspaceStore
+    var entitlements: EntitlementManager
     let fileID: String
 
     @State private var title = ""
@@ -222,6 +223,7 @@ struct AddBookmarkSheet: View {
     }
 
     private func save() {
+        guard entitlements.requireWriteAccess() else { return }
         workspace.saveBookmark(fileID: fileID, title: title, group: group)
     }
 }

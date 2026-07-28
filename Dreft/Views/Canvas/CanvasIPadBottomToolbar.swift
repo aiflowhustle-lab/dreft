@@ -17,6 +17,8 @@ enum CanvasBottomToolbarMetrics {
 struct CanvasIPadBottomToolbar: View {
     var imageSystemName: String = "doc.circle"
     var safeAreaBottom: CGFloat = 0
+    var isWriteEnabled: Bool = true
+    var onWriteBlocked: (() -> Void)? = nil
     var onAddCard: () -> Void
     var onVaultNote: () -> Void
     var onAddImage: () -> Void
@@ -53,10 +55,21 @@ struct CanvasIPadBottomToolbar: View {
         )
         .shadow(color: AppColors.floatingChromeShadow, radius: 12, y: 3)
         .padding(.bottom, bottomPadding)
+        .opacity(isWriteEnabled ? 1 : 0.42)
+    }
+
+    private func gated(_ action: @escaping () -> Void) -> () -> Void {
+        {
+            if isWriteEnabled {
+                action()
+            } else {
+                onWriteBlocked?()
+            }
+        }
     }
 
     private func bottomButton(_ name: String, tip: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: gated(action)) {
             Image(systemName: name)
                 .font(.system(size: CanvasBottomToolbarMetrics.iconSize, weight: .regular))
                 .symbolRenderingMode(.monochrome)

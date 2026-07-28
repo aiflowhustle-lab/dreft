@@ -9,6 +9,7 @@ import UIKit
 struct CanvasImageCardContextMenu: View {
     @Bindable var workspace: WorkspaceStore
     @Bindable var store: CanvasStore
+    var entitlements: EntitlementManager
     let card: CanvasCard
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
@@ -38,14 +39,18 @@ struct CanvasImageCardContextMenu: View {
         Divider()
 
         Button("Rename...") {
-            onRename()
+            entitlements.performWrite {
+                onRename()
+            }
         }
 
         if let linkedFileID {
             moveFileMenu(fileID: linkedFileID)
 
             Button {
-                workspace.presentBookmarkEditor(for: linkedFileID)
+                entitlements.performWrite {
+                    workspace.presentBookmarkEditor(for: linkedFileID)
+                }
             } label: {
                 if workspace.isBookmarked(linkedFileID) {
                     Label("Bookmark...", systemImage: "checkmark")
@@ -97,13 +102,17 @@ struct CanvasImageCardContextMenu: View {
         Menu("Move file to...") {
             if workspace.files.first(where: { $0.id == fileID })?.parentFolderID != nil {
                 Button("Vault root") {
-                    workspace.moveFile(fileID, toFolder: nil)
+                    entitlements.performWrite {
+                        workspace.moveFile(fileID, toFolder: nil)
+                    }
                 }
             }
             ForEach(workspace.availableMoveDestinations(for: fileID)) { folder in
                 if folder.id != workspace.files.first(where: { $0.id == fileID })?.parentFolderID {
                     Button(folder.name) {
-                        workspace.moveFile(fileID, toFolder: folder.id)
+                        entitlements.performWrite {
+                            workspace.moveFile(fileID, toFolder: folder.id)
+                        }
                     }
                 }
             }

@@ -8,6 +8,7 @@ enum NoteSplitLayout: String, Equatable {
 
 struct NoteEditorView: View {
     @Bindable var workspace: WorkspaceStore
+    var entitlements: EntitlementManager
     let fileID: String
     @Binding var isReading: Bool
     @Binding var splitLayout: NoteSplitLayout
@@ -54,10 +55,19 @@ struct NoteEditorView: View {
         return draftContent.components(separatedBy: findQuery).count - 1
     }
 
+    private var isWriteBlocked: Bool {
+        !entitlements.canWrite
+    }
+
     var body: some View {
         if file != nil {
             ZStack(alignment: .bottom) {
                 VStack(spacing: 0) {
+                    if entitlements.isReadOnly {
+                        ReadOnlyBanner {
+                            entitlements.showPaywall = true
+                        }
+                    }
                     if showFindBar {
                         findReplaceBar
                     }
@@ -68,14 +78,23 @@ struct NoteEditorView: View {
                 noteStatusBar
             }
             .background(AppColors.canvasBackground)
-            .onAppear { loadDraftIfNeeded() }
+            .onAppear {
+                loadDraftIfNeeded()
+                enforceReadOnlyModeIfNeeded()
+            }
             .onChange(of: fileID) { _, _ in
                 loadDraftIfNeeded()
+                enforceReadOnlyModeIfNeeded()
+            }
+            .onChange(of: entitlements.accessState) { _, _ in
+                enforceReadOnlyModeIfNeeded()
             }
             .onChange(of: draftTitle) { _, _ in
+                guard !isWriteBlocked else { return }
                 scheduleTitleCommit()
             }
             .onChange(of: draftContent) { _, newValue in
+                guard !isWriteBlocked else { return }
                 workspace.updateNoteContent(for: fileID, content: newValue)
             }
             .onDisappear {
@@ -93,20 +112,28 @@ struct NoteEditorView: View {
     private var editorSurface: some View {
         switch splitLayout {
         case .none:
-            if isReading {
+            if isReading || isWriteBlocked {
                 readingSurface
             } else {
                 editingSurface
             }
         case .right:
             HStack(spacing: 0) {
-                editingSurface
+                if isReading || isWriteBlocked {
+                    readingSurface
+                } else {
+                    editingSurface
+                }
                 Rectangle().fill(AppColors.borderSubtle).frame(width: 1)
                 previewSurface
             }
         case .down:
             VStack(spacing: 0) {
-                editingSurface
+                if isReading || isWriteBlocked {
+                    readingSurface
+                } else {
+                    editingSurface
+                }
                 Rectangle().fill(AppColors.borderSubtle).frame(height: 1)
                 previewSurface
             }
@@ -313,6 +340,14 @@ struct NoteEditorView: View {
         loadedFileID = fileID
     }
 
+    private func enforceReadOnlyModeIfNeeded() {
+        guard isWriteBlocked else { return }
+        isReading = true
+        isTitleFocused = false
+        isBodyFocused = false
+        showFindBar = false
+    }
+
     private func scheduleTitleCommit() {
         titleCommitTask?.cancel()
         titleCommitTask = Task { @MainActor in
@@ -339,6 +374,7 @@ struct NoteEditorView: View {
     }
 
     private func flushDraft() {
+        guard !isWriteBlocked else { return }
         titleCommitTask?.cancel()
         commitTitle()
         workspace.updateNoteContent(for: fileID, content: draftContent)
@@ -395,6 +431,8 @@ struct NoteMarkdownPreview: View {
 
 struct ObsidianViewModeButton: View {
     @Binding var isReading: Bool
+    var canEnterEditMode: Bool = true
+    var onEditBlocked: (() -> Void)? = nil
     var onToggle: (() -> Void)? = nil
     @State private var hovered = false
 
@@ -420,6 +458,10 @@ struct ObsidianViewModeButton: View {
 
     var body: some View {
         Button {
+            if isReading && !canEnterEditMode {
+                onEditBlocked?()
+                return
+            }
             isReading.toggle()
             onToggle?()
         } label: {

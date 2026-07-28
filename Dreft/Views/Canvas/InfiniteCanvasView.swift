@@ -7,6 +7,7 @@ import PhotosUI
 struct InfiniteCanvasView: View {
   @Bindable var store: CanvasStore
   @Bindable var workspace: WorkspaceStore
+  var entitlements: EntitlementManager
   @Binding var sidebarVisible: Bool
   @Binding var sidebarPanel: SidebarPanel
   var documentTitle: String = "Untitled"
@@ -337,6 +338,14 @@ struct InfiniteCanvasView: View {
       .overlay(alignment: .topLeading) {
         canvasTimelapseChrome(canvasSize: size)
           .zIndex(400)
+      }
+      .overlay(alignment: .top) {
+        if entitlements.isReadOnly {
+          ReadOnlyBanner {
+            entitlements.showPaywall = true
+          }
+          .zIndex(350)
+        }
       }
       .background(AppColors.canvasBackground)
   }
@@ -785,8 +794,27 @@ struct InfiniteCanvasView: View {
       return
     }
 
+    addNoteAndFocus(at: worldPoint)
+  }
+
+  private func addNoteAndFocus(at worldPoint: CGPoint) {
+    guard entitlements.canWrite else {
+      entitlements.showPaywall = true
+      return
+    }
     store.addCompactNote(at: worldPoint)
     store.focusCardID = store.selectedCardID
+  }
+
+  private func beginCardEdit(for card: CanvasCard) {
+    guard entitlements.canWrite else {
+      entitlements.showPaywall = true
+      return
+    }
+    store.selectedCardID = card.id
+    store.selectedEdgeID = nil
+    store.focusCardID = card.id
+    store.beginContentEdit(for: card.id)
   }
 
   #if os(iOS)
@@ -1134,6 +1162,7 @@ struct InfiniteCanvasView: View {
         CanvasImageCardContextMenu(
           workspace: workspace,
           store: store,
+          entitlements: entitlements,
           card: card,
           sidebarVisible: $sidebarVisible,
           sidebarPanel: $sidebarPanel,
@@ -1233,7 +1262,13 @@ struct InfiniteCanvasView: View {
       onUpdateTitle: { store.updateTitle(for: card.id, title: $0) },
       shouldAutoFocus: store.focusCardID == card.id,
       onDidFocus: {},
-      onBeginContentEdit: { store.beginContentEdit(for: card.id) },
+      onBeginContentEdit: {
+        guard entitlements.canWrite else {
+          entitlements.showPaywall = true
+          return
+        }
+        store.beginContentEdit(for: card.id)
+      },
       onEndContentEdit: { store.endContentEdit() },
       beginTitleRenameToken: imageTitleRenameTokens[card.id] ?? 0,
       isEditing: store.focusCardID == card.id,
@@ -1246,10 +1281,7 @@ struct InfiniteCanvasView: View {
         }
       },
       onRequestEdit: {
-        store.selectedCardID = card.id
-        store.selectedEdgeID = nil
-        store.focusCardID = card.id
-        store.beginContentEdit(for: card.id)
+        beginCardEdit(for: card)
       }
     )
 
@@ -1258,6 +1290,7 @@ struct InfiniteCanvasView: View {
         CanvasImageCardContextMenu(
           workspace: workspace,
           store: store,
+          entitlements: entitlements,
           card: card,
           sidebarVisible: $sidebarVisible,
           sidebarPanel: $sidebarPanel,
@@ -1288,7 +1321,8 @@ struct InfiniteCanvasView: View {
 
   @ViewBuilder
   private func canvasNoteEditOverlay(canvasSize: CGSize, vaultFiles: [VaultFile]) -> some View {
-    if let focusID = store.focusCardID,
+    if entitlements.canWrite,
+       let focusID = store.focusCardID,
        let card = cardIndex[focusID],
        card.kind != .image {
       noteEditOverlay(for: card, focusID: focusID, vaultFiles: vaultFiles)
@@ -1445,8 +1479,7 @@ struct InfiniteCanvasView: View {
         },
         onSetColor: { store.setCardColor(card.id, hex: $0) },
         onBeginEditingNote: {
-          store.beginContentEdit(for: card.id)
-          store.focusCardID = card.id
+          beginCardEdit(for: card)
         },
         onRenameImage: {
           imageTitleRenameTokens[card.id, default: 0] += 1
@@ -2003,7 +2036,13 @@ struct InfiniteCanvasView: View {
     CanvasIPadBottomToolbar(
       imageSystemName: "photo.on.rectangle.angled",
       safeAreaBottom: safeAreaBottom,
+      isWriteEnabled: entitlements.canWrite,
+      onWriteBlocked: { entitlements.showPaywall = true },
       onAddCard: {
+        guard entitlements.canWrite else {
+          entitlements.showPaywall = true
+          return
+        }
         store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
         store.focusCardID = store.selectedCardID
       },
@@ -2028,7 +2067,13 @@ struct InfiniteCanvasView: View {
     CanvasIPadBottomToolbar(
       imageSystemName: "photo.on.rectangle.angled",
       safeAreaBottom: safeAreaBottom,
+      isWriteEnabled: entitlements.canWrite,
+      onWriteBlocked: { entitlements.showPaywall = true },
       onAddCard: {
+        guard entitlements.canWrite else {
+          entitlements.showPaywall = true
+          return
+        }
         store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
         store.focusCardID = store.selectedCardID
       },
@@ -2385,6 +2430,10 @@ struct InfiniteCanvasView: View {
   ) -> some View {
     VStack(alignment: .leading, spacing: 2) {
       Button {
+        guard entitlements.requireWriteAccess() else {
+          store.contextMenu = nil
+          return
+        }
         switch menu.kind {
         case .canvas(let wx, let wy):
           store.addCard(kind: .note, at: CGPoint(x: wx, y: wy))
