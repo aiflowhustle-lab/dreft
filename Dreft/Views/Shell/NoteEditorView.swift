@@ -1,4 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
+#if canImport(PhotosUI)
+import PhotosUI
+#endif
+#if os(macOS)
+import AppKit
+#endif
 
 enum NoteSplitLayout: String, Equatable {
     case none
@@ -26,8 +33,15 @@ struct NoteEditorView: View {
     @State private var titleCommitTask: Task<Void, Never>?
     @FocusState private var isTitleFocused: Bool
     @FocusState private var isBodyFocused: Bool
-    #if os(iOS)
     @StateObject private var noteToolbarBridge = NoteFormattingToolbarBridge()
+    @State private var usesInlineImageEditor = false
+    #if os(iOS)
+    @State private var showNoteAttachmentDialog = false
+    @State private var showNotePhotoPicker = false
+    @State private var showNoteFileImporter = false
+    #endif
+    #if canImport(PhotosUI)
+    @State private var noteAttachmentPhotoItem: PhotosPickerItem?
     #endif
 
     private var file: WorkspaceFileEntry? {
@@ -57,6 +71,10 @@ struct NoteEditorView: View {
 
     private var isWriteBlocked: Bool {
         !entitlements.canWrite
+    }
+
+    private var editorHideResolvedImageEmbeds: Bool {
+        workspace.activeVaultURL != nil && usesInlineImageEditor
     }
 
     var body: some View {
@@ -210,48 +228,90 @@ struct NoteEditorView: View {
     }
 
     private var editingSurface: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                TextField("", text: $draftTitle, prompt: Text("Untitled"))
-                    .font(.system(size: 40, weight: .bold))
-                    .textFieldStyle(.plain)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .focused($isTitleFocused)
-                    .onSubmit {
-                        focusNoteBody()
-                    }
+        noteAttachmentModifiers {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    TextField("", text: $draftTitle, prompt: Text("Untitled"))
+                        .font(.system(size: 40, weight: .bold))
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .focused($isTitleFocused)
+                        .onSubmit {
+                            focusNoteBody()
+                        }
 
-                #if os(iOS)
-                NoteBodyTextView(
-                    text: $draftContent,
-                    selectedRange: $bodySelectedRange,
-                    caretRect: $wikilinkCaretRect,
-                    selectionRects: $bodySelectionRects,
-                    isFocused: $isBodyFocused,
-                    files: workspace.files,
-                    suggestSelectedIndex: $wikilinkSuggestIndex,
-                    toolbarBridge: noteToolbarBridge
-                )
-                #else
-                NoteBodyTextView(
-                    text: $draftContent,
-                    selectedRange: $bodySelectedRange,
-                    caretRect: $wikilinkCaretRect,
-                    selectionRects: $bodySelectionRects,
-                    isFocused: $isBodyFocused,
-                    files: workspace.files,
-                    suggestSelectedIndex: $wikilinkSuggestIndex
-                )
-                #endif
+                    NoteBodyTextView(
+                        text: $draftContent,
+                        selectedRange: $bodySelectedRange,
+                        caretRect: $wikilinkCaretRect,
+                        selectionRects: $bodySelectionRects,
+                        isFocused: $isBodyFocused,
+                        files: workspace.files,
+                        suggestSelectedIndex: $wikilinkSuggestIndex,
+                        vaultURL: workspace.activeVaultURL,
+                        hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
+                        imageEmbedMaxWidth: AppColors.noteReadableWidth,
+                        toolbarBridge: noteToolbarBridge,
+                        onImageAttachmentDrop: insertImageAttachment
+                    )
+                }
+                .padding(.horizontal, 56)
+                .padding(.top, 28)
+                .padding(.bottom, 56)
+                .frame(maxWidth: AppColors.noteReadableWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 56)
-            .padding(.top, 28)
-            .padding(.bottom, 56)
-            .frame(maxWidth: AppColors.noteReadableWidth, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            #if os(iOS)
+            .scrollDismissesKeyboard(.interactively)
+            #endif
         }
+    }
+
+    @ViewBuilder
+    private func noteAttachmentModifiers<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         #if os(iOS)
-        .scrollDismissesKeyboard(.interactively)
+        content()
+            .photosPicker(isPresented: $showNotePhotoPicker, selection: $noteAttachmentPhotoItem, matching: .images)
+            .onChange(of: noteAttachmentPhotoItem) { _, item in
+                guard let item else { return }
+                Task { await importNoteAttachmentPhoto(item) }
+            }
+            .confirmationDialog(
+                "Insert attachment",
+                isPresented: $showNoteAttachmentDialog,
+                titleVisibility: .visible
+            ) {
+                Button("Photo Library") { showNotePhotoPicker = true }
+                Button("Choose File") { showNoteFileImporter = true }
+                Button("Cancel", role: .cancel) {}
+            }
+            .fileImporter(
+                isPresented: $showNoteFileImporter,
+                allowedContentTypes: [.image],
+                allowsMultipleSelection: false
+            ) { result in
+                importNoteAttachmentFile(from: result)
+            }
+            .onAppear {
+                noteToolbarBridge.onInsertAttachment = {
+                    showNoteAttachmentDialog = true
+                }
+            }
+            .onDrop(of: [.image, .fileURL], isTargeted: nil) { providers in
+                handleNoteImageDrop(providers)
+            }
+        #elseif os(macOS)
+        content()
+            .onAppear {
+                noteToolbarBridge.onInsertAttachment = {
+                    openMacNoteAttachmentPanel()
+                }
+            }
+            .onDrop(of: [.image, .fileURL], isTargeted: nil) { providers in
+                handleNoteImageDrop(providers)
+            }
+        #else
+        content()
         #endif
     }
 
@@ -338,7 +398,87 @@ struct NoteEditorView: View {
         draftTitle = file.name
         draftContent = file.noteContent
         loadedFileID = fileID
+        if let vaultURL = workspace.activeVaultURL {
+            usesInlineImageEditor = !NoteCardEmbedSupport.imageEmbedRanges(
+                in: file.noteContent,
+                vaultURL: vaultURL
+            ).isEmpty
+        } else {
+            usesInlineImageEditor = false
+        }
     }
+
+    @discardableResult
+    private func insertImageAttachment(_ data: Data, _ suggestedName: String?) -> Bool {
+        guard let vaultURL = workspace.activeVaultURL else { return false }
+        guard let path = try? VaultFilesystem.saveCanvasImage(
+            data: data,
+            vaultURL: vaultURL,
+            suggestedName: suggestedName
+        ) else { return false }
+
+        let maxWidth = AppColors.noteReadableWidth
+        CanvasImageCache.shared.cacheDisplayImageSync(
+            data: data,
+            cardID: "note-embed|\(path)",
+            contentKey: path
+        )
+        if let cgImage = CanvasImageCache.shared.cachedImage(forCardID: "note-embed|\(path)", content: path) {
+            let size = NoteCardInlineImageMetrics.displaySize(for: cgImage, maxWidth: maxWidth)
+            NoteCardEmbedLayoutMetrics.store(height: size.height, path: path, maxWidth: maxWidth)
+        }
+
+        usesInlineImageEditor = true
+        noteToolbarBridge.insertSnippet("![[\(path)]]")
+        return true
+    }
+
+    private func handleNoteImageDrop(_ providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+                || provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                handled = true
+                NoteImageDropSupport.loadData(from: provider) { data, name in
+                    _ = insertImageAttachment(data, name)
+                }
+            }
+        }
+        return handled
+    }
+
+    #if os(iOS)
+    private func importNoteAttachmentPhoto(_ item: PhotosPickerItem) async {
+        defer {
+            Task { @MainActor in
+                noteAttachmentPhotoItem = nil
+            }
+        }
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        await MainActor.run {
+            _ = insertImageAttachment(data, item.itemIdentifier)
+        }
+    }
+
+    private func importNoteAttachmentFile(from result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { return }
+        _ = insertImageAttachment(data, url.lastPathComponent)
+    }
+    #endif
+
+    #if os(macOS)
+    private func openMacNoteAttachmentPanel() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let data = try? Data(contentsOf: url) else { return }
+        _ = insertImageAttachment(data, url.lastPathComponent)
+    }
+    #endif
 
     private func enforceReadOnlyModeIfNeeded() {
         guard isWriteBlocked else { return }

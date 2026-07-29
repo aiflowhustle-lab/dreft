@@ -41,6 +41,12 @@ final class EntitlementManager {
         isRefreshing = true
         defer { isRefreshing = false }
 
+        if await hydrateLegacyFromKeychainIfNeeded() {
+            accessState = .fullAccess
+            EntitlementCache.save(.fullAccess)
+            return
+        }
+
         if await resolveLegacyAccess() {
             accessState = .fullAccess
             EntitlementCache.save(.fullAccess)
@@ -107,9 +113,30 @@ final class EntitlementManager {
                 break
             }
         } catch {
+            let legacy = await Task.detached(priority: .utility) {
+                EntitlementCache.readLegacyFromKeychain()
+            }.value
+            if legacy {
+                isLegacyUser = true
+                EntitlementCache.persistLegacyUser(true)
+                return true
+            }
             return EntitlementCache.isLegacyUser
         }
 
         return false
+    }
+
+    private func hydrateLegacyFromKeychainIfNeeded() async -> Bool {
+        guard !isLegacyUser else {
+            return true
+        }
+        let legacy = await Task.detached(priority: .utility) {
+            EntitlementCache.readLegacyFromKeychain()
+        }.value
+        guard legacy else { return false }
+        isLegacyUser = true
+        EntitlementCache.persistLegacyUser(true)
+        return true
     }
 }

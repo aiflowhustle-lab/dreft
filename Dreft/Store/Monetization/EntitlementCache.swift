@@ -15,8 +15,7 @@ enum EntitlementCache {
     }
 
     static var isLegacyUser: Bool {
-        if UserDefaults.standard.bool(forKey: legacyUserKey) { return true }
-        return readLegacyFromKeychain()
+        UserDefaults.standard.bool(forKey: legacyUserKey)
     }
 
     static var hasEverSubscribed: Bool {
@@ -30,7 +29,9 @@ enum EntitlementCache {
     static func persistLegacyUser(_ isLegacy: Bool) {
         UserDefaults.standard.set(isLegacy, forKey: legacyUserKey)
         if isLegacy {
-            writeLegacyToKeychain(true)
+            Task.detached(priority: .utility) {
+                writeLegacyToKeychain(true)
+            }
         }
     }
 
@@ -53,7 +54,8 @@ enum EntitlementCache {
         return Date().timeIntervalSince(snapshot.lastVerified) < 60 * 60 * 24 * 7
     }
 
-    private static func readLegacyFromKeychain() -> Bool {
+    /// Keychain read — call off the main actor to avoid launch-time I/O warnings.
+    static func readLegacyFromKeychain() -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: keychainLegacyKey,

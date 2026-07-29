@@ -13,12 +13,12 @@ Mark each: ✅ Pass · ❌ Fail · ⏭ Skipped
 | 1 | Fresh install, locked browse | Delete app → install → complete onboarding → dismiss paywall (✕) | Seeded note + canvas open; read/pan works; no paywall spam | |
 | 2 | Create blocked | Tap New note / Create canvas while locked | Paywall appears | |
 | 3 | Export while locked | Export canvas PNG + note PDF | Works without paywall | |
-| 4 | Yearly trial purchase | Select yearly → Start free trial → sandbox purchase | Full write access; paywall dismisses | |
-| 5 | Write after trial | Create note, edit canvas | All mutations work | |
-| 6 | Restore purchases | Delete app → reinstall → Restore Purchases | Pro access restored (same sandbox Apple ID) | |
+| 4 | Yearly trial purchase | Select yearly → Start free trial → sandbox purchase | Full write access; paywall dismisses | ⏭ Not tested (monthly used instead) |
+| 5 | Write after trial | Create note, edit canvas | All mutations work | ✅ Pass (Jul 28 — post-purchase write on iPad + Mac) |
+| 6 | Restore purchases | Delete app → reinstall → Restore Purchases | Pro access restored (same sandbox Apple ID) | ✅ Pass (Jul 28 — iPad reinstall auto-restored Pro; manual Restore button not tapped) |
 | 7 | Grandfather upgrade | Install **old App Store build** (pre-1.2.0) → update to 1.2.0 | Full access; Vault manager shows Legacy | |
 | 8 | Fresh 1.2.0 install | New sandbox Apple ID, never had v1 | Locked after onboarding; read OK | |
-| 9 | Monthly plan | Purchase monthly (no trial) | CTA says "Subscribe"; full access | |
+| 9 | Monthly plan | Purchase monthly (no trial) | CTA says "Subscribe"; no trial in sheet; full access | ⏭ Re-test (Jul 28 — trial removed from monthly in ASC; wait ~15–60 min then verify on TestFlight) |
 | 10 | Lapsed subscription | Subscribe → cancel in sandbox → advance time / wait for expiry | Read-only banner; export works; create blocked | |
 
 ---
@@ -36,7 +36,7 @@ Mark each: ✅ Pass · ❌ Fail · ⏭ Skipped
 | 17 | Open existing vault when locked | Manage vaults → Open folder | Works (read access) | |
 | 18 | Offline subscribed | Enable airplane mode (<7 days since last verify) | Write still works (fail-open) | |
 | 19 | Mac + iPad same Apple ID | Subscribe on Mac, open on iPad | Universal entitlement | |
-| 20 | StoreKit local (Debug) | Run from Xcode with Dreft.storekit | Products load; prices show | |
+| 20 | StoreKit local (Debug) | Run from Xcode with DreftStore.storekit | Products load; prices show | |
 
 ---
 
@@ -54,6 +54,6 @@ Mark each: ✅ Pass · ❌ Fail · ⏭ Skipped
 
 | | Name | Date |
 |---|------|------|
-| Mac tested | | |
-| iPad tested | | |
-| Ready to submit | | |
+| Mac tested | In progress (Jul 28 — sandbox purchase OK) | 2026-07-28 |
+| iPad tested | In progress (Jul 28 — TestFlight purchase + reinstall OK) | 2026-07-28 |
+| Ready to submit | No — re-test monthly (#9); finish P0 #1–4, #7–8, #10 | |

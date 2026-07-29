@@ -269,7 +269,7 @@
 		SM100136 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/PaywallView.swift; sourceTree = SOURCE_ROOT; };
 		SM100137 /* ReadOnlyBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/ReadOnlyBanner.swift; sourceTree = SOURCE_ROOT; };
 		SM100139 /* SubscribeCTAButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/SubscribeCTAButton.swift; sourceTree = SOURCE_ROOT; };
-		SM100138 /* Dreft.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Dreft.storekit; sourceTree = "<group>"; };
+		SM100138 /* DreftStore.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = DreftStore.storekit; sourceTree = "<group>"; };
 		SM200001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		SM200002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		SM300001 /* Dreft.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dreft.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -300,6 +300,7 @@
 				SM500002 /* Dreft */,
 				SM500012 /* DreftTests */,
 				SM500003 /* Products */,
+				SM100138 /* DreftStore.storekit */,
 			);
 			sourceTree = "<group>";
 		};
@@ -373,7 +374,6 @@
 				SM100133 /* DreftAccessState.swift */,
 				SM100134 /* StoreManager.swift */,
 				SM100135 /* EntitlementManager.swift */,
-				SM100138 /* Dreft.storekit */,
 			);
 			path = Monetization;
 			sourceTree = "<group>";

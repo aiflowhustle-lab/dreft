@@ -1049,11 +1049,9 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
 
     var imageEmbedLayoutWidth: CGFloat? {
-        guard embeddedInCanvas, hideResolvedImageEmbeds else { return nil }
-        if let imageEmbedMaxWidth, imageEmbedMaxWidth > 1 {
-            return imageEmbedMaxWidth
-        }
-        guard let width = containerSize?.width, width > 1 else { return nil }
+        guard hideResolvedImageEmbeds else { return nil }
+        if let imageEmbedMaxWidth, imageEmbedMaxWidth > 1 { return imageEmbedMaxWidth }
+        guard embeddedInCanvas, let width = containerSize?.width, width > 1 else { return nil }
         return max(1, width)
     }
 
@@ -1916,11 +1914,9 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
 
     var imageEmbedLayoutWidth: CGFloat? {
-        guard embeddedInCanvas, hideResolvedImageEmbeds else { return nil }
-        if let imageEmbedMaxWidth, imageEmbedMaxWidth > 1 {
-            return imageEmbedMaxWidth
-        }
-        guard let width = containerSize?.width, width > 1 else { return nil }
+        guard hideResolvedImageEmbeds else { return nil }
+        if let imageEmbedMaxWidth, imageEmbedMaxWidth > 1 { return imageEmbedMaxWidth }
+        guard embeddedInCanvas, let width = containerSize?.width, width > 1 else { return nil }
         return max(1, width)
     }
 

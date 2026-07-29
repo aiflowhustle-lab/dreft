@@ -23,7 +23,7 @@ Complete these steps **before** submitting Dreft **1.2.0 (build 3)**.
 | **Reference name** | Dreft Pro Yearly |
 | **Duration** | 1 year |
 | **Price** | $59.99 USD (Tier 60) |
-| **Family Sharing** | On (matches `Dreft.storekit`) |
+| **Family Sharing** | On (matches `DreftStore.storekit`) |
 | **Introductory offer** | Free trial — **3 days** |
 | **Display name** | Dreft Pro Yearly |
 | **Description** | Full access to Dreft on Mac and iPad. Create and edit notes, canvases, and vaults. |
@@ -37,7 +37,7 @@ Complete these steps **before** submitting Dreft **1.2.0 (build 3)**.
 | **Duration** | 1 month |
 | **Price** | $7.99 USD (Tier 8) |
 | **Family Sharing** | On |
-| **Introductory offer** | None |
+| **Introductory offer** | None ✅ (removed Jul 28, 2026 — verify yearly still has 3-day trial only) |
 | **Display name** | Dreft Pro Monthly |
 | **Description** | Full access to Dreft on Mac and iPad. Billed monthly. |
 
