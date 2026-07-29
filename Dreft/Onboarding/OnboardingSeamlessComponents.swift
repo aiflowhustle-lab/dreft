@@ -60,7 +60,7 @@ struct SeamlessOnboardingProgress: View {
     let current: OnboardingStep
 
     private let trackedSteps: [OnboardingStep] = [
-        .displayName, .goals, .revealHome, .genre, .worldName,
+        .displayName, .goals, .mirror, .revealHome, .genre, .worldName,
     ]
 
     var body: some View {
@@ -651,5 +651,114 @@ struct SeamlessSpinner: View {
                     rotation = 360
                 }
             }
+    }
+}
+
+// MARK: - Mirror (post-goals)
+
+struct SeamlessMirrorScreen: View {
+    let headline: String
+    let onContinue: () -> Void
+
+    var body: some View {
+        SeamlessStepShell(
+            title: headline,
+            subtitle: OnboardingCopy.mirrorSubline
+        ) {
+            SeamlessPrimaryButton(
+                title: OnboardingCopy.mirrorContinueButton,
+                action: onContinue
+            )
+        }
+    }
+}
+
+// MARK: - Building moment (pre-world-ready)
+
+struct SeamlessBuildingMoment: View {
+    let worldName: String?
+    let onFinished: () -> Void
+
+    @State private var visibleChecks = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let checks = [
+        OnboardingCopy.buildingCheckCanvas,
+        OnboardingCopy.buildingCheckLore,
+        OnboardingCopy.buildingCheckGraph,
+    ]
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text(OnboardingCopy.buildingTitle(worldName: worldName))
+                .font(OnboardingTypography.display(size: titleSize, weight: .bold))
+                .foregroundStyle(AppColors.textPrimary)
+                .multilineTextAlignment(.center)
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(checks.enumerated()), id: \.offset) { index, label in
+                    HStack(spacing: 10) {
+                        Text("✓")
+                            .font(OnboardingTypography.body(size: checkSize, weight: .semibold))
+                            .foregroundStyle(
+                                index < visibleChecks ? AppColors.textPrimary : AppColors.textMuted.opacity(0.35)
+                            )
+                        Text(label)
+                            .font(OnboardingTypography.body(size: checkSize, weight: .medium))
+                            .foregroundStyle(
+                                index < visibleChecks ? AppColors.textPrimary : AppColors.textMuted
+                            )
+                    }
+                    .opacity(index < visibleChecks ? 1 : 0.45)
+                }
+            }
+            .frame(maxWidth: 220, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .task {
+            if reduceMotion {
+                visibleChecks = checks.count
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                onFinished()
+                return
+            }
+
+            let staggerNs: UInt64 = 300_000_000
+            let totalNs: UInt64 = 2_200_000_000
+            let start = DispatchTime.now().uptimeNanoseconds
+
+            for index in 1...checks.count {
+                try? await Task.sleep(nanoseconds: staggerNs)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    visibleChecks = index
+                }
+            }
+
+            let elapsed = DispatchTime.now().uptimeNanoseconds - start
+            if elapsed < totalNs {
+                try? await Task.sleep(nanoseconds: totalNs - elapsed)
+            }
+            guard !Task.isCancelled else { return }
+            onFinished()
+        }
+    }
+
+    private var titleSize: CGFloat {
+        #if os(iOS)
+        28
+        #else
+        34
+        #endif
+    }
+
+    private var checkSize: CGFloat {
+        #if os(iOS)
+        16
+        #else
+        17
+        #endif
     }
 }

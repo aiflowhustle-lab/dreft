@@ -46,21 +46,27 @@ enum CoreDesire: String, Codable, CaseIterable {
 enum OnboardingStep: Int, Codable, CaseIterable {
     case displayName = 0
     case goals = 1
-    case revealHome = 2
-    case genre = 3
-    case worldName = 4
-    case worldReady = 5
+    case mirror = 2
+    case revealHome = 3
+    case genre = 4
+    case worldName = 5
+    case building = 6
+    case worldReady = 7
 }
 
 struct OnboardingState: Codable, Equatable {
     var displayName: String?
     var selectedGoals: [OnboardingGoalID] = []
+    var coreDesire: CoreDesire?
     var worldGenre: OnboardingGenreID?
     var worldName: String?
     var currentStep: OnboardingStep = .displayName
     var hasCompletedOnboarding: Bool = false
+    /// Bumped when onboarding flow steps change (mirror + building added in v2).
+    var flowVersion: Int = 2
 
     static let storageKey = "onboardingDraftState"
+    static let currentFlowVersion = 2
 }
 
 enum OnboardingStorage {
@@ -73,10 +79,23 @@ enum OnboardingStorage {
 enum OnboardingPersistence {
     static func loadDraft() -> OnboardingState {
         guard let data = UserDefaults.standard.data(forKey: OnboardingState.storageKey),
-              let state = try? JSONDecoder().decode(OnboardingState.self, from: data) else {
+              var state = try? JSONDecoder().decode(OnboardingState.self, from: data) else {
             return OnboardingState()
         }
+        migrateFlowIfNeeded(&state)
         return state
+    }
+
+    private static func migrateFlowIfNeeded(_ state: inout OnboardingState) {
+        guard state.flowVersion < OnboardingState.currentFlowVersion else { return }
+        switch state.currentStep.rawValue {
+        case 2: state.currentStep = .revealHome
+        case 3: state.currentStep = .genre
+        case 4: state.currentStep = .worldName
+        case 5: state.currentStep = .worldReady
+        default: break
+        }
+        state.flowVersion = OnboardingState.currentFlowVersion
     }
 
     static func saveDraft(_ state: OnboardingState) {
@@ -139,6 +158,10 @@ extension OnboardingState {
     }
 
     func inferredCoreDesire() -> CoreDesire? {
+        coreDesire ?? Self.coreDesire(matching: selectedGoals)
+    }
+
+    static func coreDesire(matching selectedGoals: [OnboardingGoalID]) -> CoreDesire? {
         if selectedGoals.contains(.lore) { return .canon }
         if selectedGoals.contains(.wiki) { return .map }
         if selectedGoals.contains(.novel) || selectedGoals.contains(.fanfic) || selectedGoals.contains(.webtoon) {

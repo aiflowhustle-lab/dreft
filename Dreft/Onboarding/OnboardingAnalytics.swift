@@ -36,6 +36,7 @@ final class OnboardingCoordinator: ObservableObject {
     @Published var displayNameDraft = ""
     @Published var worldNameDraft = ""
     var usesExistingVault = false
+    private var trackBuildingCompleteAfterBuilding = false
 
     let analytics: OnboardingAnalyticsTracking
     let isPreview: Bool
@@ -62,7 +63,7 @@ final class OnboardingCoordinator: ObservableObject {
 
     var canGoBack: Bool {
         switch step {
-        case .displayName, .revealHome, .worldReady:
+        case .displayName, .mirror, .revealHome, .building, .worldReady:
             return false
         case .goals, .genre, .worldName:
             return true
@@ -84,7 +85,8 @@ final class OnboardingCoordinator: ObservableObject {
     }
 
     var usesBrightLandscape: Bool {
-        step == .worldName || step == .worldReady || (step == .genre && state.worldGenre != nil)
+        step == .worldName || step == .building || step == .worldReady
+            || (step == .genre && state.worldGenre != nil)
     }
 
     func persistDraft() {
@@ -118,6 +120,12 @@ final class OnboardingCoordinator: ObservableObject {
         analytics.track(.goalsContinue, properties: [
             "goals": state.selectedGoals.map(\.rawValue).joined(separator: ","),
         ])
+        go(to: .mirror)
+    }
+
+    func advanceFromMirror() {
+        state.coreDesire = OnboardingState.coreDesire(matching: state.selectedGoals)
+        persistDraft()
         go(to: .revealHome)
     }
 
@@ -152,8 +160,14 @@ final class OnboardingCoordinator: ObservableObject {
     }
 
     func goToWorldReady(trackBuildingComplete: Bool = false) {
-        if trackBuildingComplete {
+        trackBuildingCompleteAfterBuilding = trackBuildingComplete
+        go(to: .building)
+    }
+
+    func advanceFromBuilding() {
+        if trackBuildingCompleteAfterBuilding {
             analytics.track(.buildingComplete)
+            trackBuildingCompleteAfterBuilding = false
         }
         go(to: .worldReady)
     }
@@ -167,7 +181,7 @@ final class OnboardingCoordinator: ObservableObject {
     func completeOnboarding(fastLane: Bool) {
         state.hasCompletedOnboarding = true
         OnboardingPersistence.clearDraft()
-        if !fastLane, let desire = state.inferredCoreDesire() {
+        if !fastLane, let desire = state.coreDesire ?? state.inferredCoreDesire() {
             OnboardingPersistence.setPendingCoreDesire(desire)
             if desire == .finish {
                 OnboardingPersistence.requestAutoPlayTimelapse()
@@ -198,6 +212,7 @@ final class OnboardingCoordinator: ObservableObject {
 
     private func go(to step: OnboardingStep) {
         state.currentStep = step
+        state.flowVersion = OnboardingState.currentFlowVersion
         persistDraft()
     }
 }

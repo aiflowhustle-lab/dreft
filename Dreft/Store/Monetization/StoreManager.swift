@@ -16,6 +16,48 @@ enum StorePurchaseError: LocalizedError {
             return "Your purchase is pending approval."
         }
     }
+
+    static func friendlyMessage(for error: Error) -> String {
+        if let storeError = error as? StorePurchaseError {
+            return storeError.localizedDescription
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut:
+                return "You're offline. Check your connection and try again."
+            default:
+                break
+            }
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == SKErrorDomain,
+           let code = SKError.Code(rawValue: nsError.code) {
+            switch code {
+            case .paymentCancelled:
+                return ""
+            case .paymentNotAllowed:
+                return "In-App Purchases aren't allowed for this Apple ID. For testing, sign in with a Sandbox Account in Settings → App Store."
+            case .storeProductNotAvailable:
+                return "This plan isn't available in the App Store right now. Try again in a few minutes."
+            case .cloudServiceNetworkConnectionFailed, .cloudServicePermissionDenied:
+                return "Couldn't reach the App Store. Check your connection and try again."
+            default:
+                break
+            }
+        }
+
+        let description = error.localizedDescription.lowercased()
+        if description.contains("not authorized") && description.contains("sandbox") {
+            return "This Apple ID isn't set up for sandbox purchases. Add a Sandbox Tester in App Store Connect, then sign in under Settings → App Store → Sandbox Account."
+        }
+        if description.contains("unable to complete") {
+            return "The purchase couldn't be completed. Confirm your Sandbox Account in Settings → App Store and try again."
+        }
+
+        return error.localizedDescription
+    }
 }
 
 @MainActor
@@ -73,7 +115,7 @@ final class StoreManager {
                 loadError = "No subscription plans are available right now."
             }
         } catch {
-            loadError = error.localizedDescription
+            loadError = StorePurchaseError.friendlyMessage(for: error)
         }
     }
 

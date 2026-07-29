@@ -64,13 +64,27 @@ struct PaywallView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Unlock Dreft Pro")
+            Text(headerTitle)
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(AppColors.textPrimary)
-            Text("Your writing, everywhere — Mac and iPad.")
+            Text(headerSubtitle)
                 .font(.system(size: 15))
                 .foregroundStyle(AppColors.textSecondary)
         }
+    }
+
+    private var headerTitle: String {
+        if entitlements.isReadOnly {
+            return "Resume Dreft Pro"
+        }
+        return "Unlock Dreft Pro"
+    }
+
+    private var headerSubtitle: String {
+        if entitlements.isReadOnly {
+            return "Subscribe to start writing again on Mac and iPad. Your vault stays on your device — read and export anytime."
+        }
+        return "Create and edit notes, canvases, and vaults on Mac and iPad. Browse and export stay free."
     }
 
     @ViewBuilder
@@ -104,7 +118,7 @@ struct PaywallView: View {
                     plan: .monthly,
                     title: "Monthly",
                     priceLine: monthlyPriceLine,
-                    detailLine: "Billed monthly",
+                    detailLine: monthlyDetailLine,
                     highlighted: false
                 )
             }
@@ -198,10 +212,20 @@ struct PaywallView: View {
     private var secondaryActions: some View {
         VStack(spacing: 12) {
             HStack(spacing: 0) {
-                Button("Restore Purchases") {
+                Button {
                     Task { await restorePurchases() }
+                } label: {
+                    if storeManager.isRestoring {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.mini)
+                            Text("Restoring…")
+                        }
+                    } else {
+                        Text("Restore Purchases")
+                    }
                 }
-                .disabled(storeManager.isRestoring)
+                .disabled(storeManager.isRestoring || storeManager.isPurchasing)
 
                 Text("·")
                     .foregroundStyle(AppColors.textMuted)
@@ -244,10 +268,21 @@ struct PaywallView: View {
     }
 
     private var primaryCTATitle: String {
-        if selectedPlan == .monthly || entitlements.isReadOnly {
+        if selectedPlan == .monthly {
             return "Subscribe"
         }
-        return "Start your free trial"
+        if entitlements.isReadOnly {
+            return "Subscribe"
+        }
+        if let yearly = storeManager.yearlyProduct,
+           storeManager.isYearlyTrialEligible(yearly) {
+            return "Start your free trial"
+        }
+        return "Subscribe"
+    }
+
+    private var monthlyDetailLine: String {
+        "Billed monthly · No free trial"
     }
 
     private var yearlyPriceLine: String {
@@ -315,9 +350,15 @@ struct PaywallView: View {
         do {
             if try await storeManager.purchase(product) != nil {
                 await entitlements.handlePurchaseCompleted()
+                if entitlements.accessState == .fullAccess {
+                    dismiss()
+                }
             }
         } catch {
-            errorMessage = error.localizedDescription
+            let message = StorePurchaseError.friendlyMessage(for: error)
+            if !message.isEmpty {
+                errorMessage = message
+            }
         }
     }
 
@@ -328,11 +369,16 @@ struct PaywallView: View {
             await entitlements.refresh()
             if entitlements.accessState == .fullAccess {
                 dismiss()
+            } else if entitlements.isReadOnly {
+                errorMessage = "No active subscription was found. Your vault is still available to read and export."
             } else {
                 errorMessage = "No active subscription was found for this Apple ID."
             }
         } catch {
-            errorMessage = error.localizedDescription
+            let message = StorePurchaseError.friendlyMessage(for: error)
+            if !message.isEmpty {
+                errorMessage = message
+            }
         }
     }
 }

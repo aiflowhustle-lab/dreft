@@ -17,6 +17,26 @@ enum OnboardingCopy {
     static let goalsTitle = "What are you hoping Dreft helps you with?"
     static let goalsSubtitle = "Select as many as apply."
 
+    // MARK: - Mirror (post-goals)
+
+    static let mirrorSubline = "That's exactly what Dreft is built for."
+    static let mirrorContinueButton = "Show me"
+
+    static func mirrorHeadline(for selectedGoals: [OnboardingGoalID]) -> String {
+        let priority: [(OnboardingGoalID, String)] = [
+            (.lore, "So your canon never contradicts itself again."),
+            (.novel, "So you finally finish the story you've been carrying."),
+            (.fanfic, "So you finally finish the story you've been carrying."),
+            (.webtoon, "So you ship every episode with perfect continuity."),
+            (.campaign, "So you walk into every session ready."),
+            (.wiki, "So you can finally see your whole world clearly."),
+        ]
+        for (goal, headline) in priority where selectedGoals.contains(goal) {
+            return headline
+        }
+        return "So you can finally see your whole world clearly."
+    }
+
     // MARK: - Interstitial
 
     static let revealHomeLine = "A new home for your worlds"

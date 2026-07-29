@@ -27,6 +27,10 @@ struct SubscribeCTAButton: View {
         if entitlements.isReadOnly {
             return "Subscribe"
         }
-        return "Start your free trial"
+        if let yearly = storeManager.yearlyProduct,
+           storeManager.isYearlyTrialEligible(yearly) {
+            return "Start your free trial"
+        }
+        return "Subscribe"
     }
 }

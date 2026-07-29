@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import AppKit
 #endif
 
-/// Seamless onboarding (name → goals → reveal → genre → world → ready) then app.
+/// Seamless onboarding (name → goals → mirror → reveal → genre → world → building → ready) then app.
 struct OnboardingFlowView: View {
     let isPreview: Bool
     let onComplete: () -> Void
@@ -46,12 +46,16 @@ struct OnboardingFlowView: View {
                         displayNameScreen
                     case .goals:
                         goalsScreen
+                    case .mirror:
+                        mirrorScreen
                     case .revealHome:
                         revealHomeScreen
                     case .genre:
                         genreScreen
                     case .worldName:
                         worldNameScreen
+                    case .building:
+                        buildingScreen
                     case .worldReady:
                         worldReadyScreen
                     }
@@ -61,7 +65,7 @@ struct OnboardingFlowView: View {
 
                 Spacer(minLength: 0)
 
-                if coordinator.step != .worldReady {
+                if coordinator.step != .worldReady && coordinator.step != .building {
                     SeamlessOnboardingProgress(current: coordinator.step)
                 }
             }
@@ -142,7 +146,16 @@ struct OnboardingFlowView: View {
         }
     }
 
-    // MARK: - Step 3: Reveal
+    // MARK: - Step 3: Mirror
+
+    private var mirrorScreen: some View {
+        SeamlessMirrorScreen(
+            headline: OnboardingCopy.mirrorHeadline(for: coordinator.state.selectedGoals),
+            onContinue: { coordinator.advanceFromMirror() }
+        )
+    }
+
+    // MARK: - Step 4: Reveal
 
     private var revealHomeScreen: some View {
         SeamlessInterstitial(
@@ -320,7 +333,16 @@ struct OnboardingFlowView: View {
         }
     }
 
-    // MARK: - Step 6: World ready
+    // MARK: - Step 7: Building
+
+    private var buildingScreen: some View {
+        SeamlessBuildingMoment(
+            worldName: coordinator.state.worldName,
+            onFinished: { coordinator.advanceFromBuilding() }
+        )
+    }
+
+    // MARK: - Step 8: World ready
 
     private var worldReadyScreen: some View {
         SeamlessStepShell(
