@@ -309,9 +309,10 @@ struct CanvasCardView: View {
                         onSelect()
                     } else if isEditing {
                         return
+                    } else if isSelected {
+                        beginEditingNote()
                     } else {
                         onSelect()
-                        beginEditingNote()
                     }
                 }
                 dragOrigin = nil

@@ -2,11 +2,11 @@ import CoreGraphics
 
 /// Keeps a canvas note card above the iPad keyboard + formatting accessory while editing.
 enum CanvasNoteEditKeyboardAvoidance {
-    static let bottomPadding: CGFloat = 16
-    static let topSafeInset: CGFloat = 12
+    static let bottomPadding: CGFloat = 24
+    static let topSafeInset: CGFloat = 16
 
     /// Used before UIKit reports keyboard frame so the card starts moving immediately.
-    static let estimatedKeyboardOverlap: CGFloat = 340
+    static let estimatedKeyboardOverlap: CGFloat = 380
 
     /// Total bottom obstruction (keyboard + accessory toolbar + padding).
     static func requiredPanDeltaY(

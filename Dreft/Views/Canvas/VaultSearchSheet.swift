@@ -143,19 +143,8 @@ struct VaultSearchSheet: View {
     }
 
     private func open(_ file: VaultFile) {
-        if store.pendingEndpointEdgeID != nil {
-            store.addVaultFile(file, canvasSize: canvasSize)
-            dismiss()
-            return
-        }
-
         switch file.kind {
-        case .note, .canvas:
-            if let entry = workspace.files.first(where: { $0.id == file.id }) {
-                workspace.navigateToFile(entry)
-            }
-            dismiss()
-        case .image:
+        case .note, .canvas, .image:
             store.addVaultFile(file, canvasSize: canvasSize)
             dismiss()
         case .folder:
@@ -166,6 +155,7 @@ struct VaultSearchSheet: View {
     private func dismiss() {
         store.pendingEndpointEdgeID = nil
         store.pendingEndpointMenuCenter = nil
+        store.pendingVaultInsertCenter = nil
         store.isVaultOpen = false
     }
 }

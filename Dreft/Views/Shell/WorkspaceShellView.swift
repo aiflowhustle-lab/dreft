@@ -128,7 +128,7 @@ struct WorkspaceShellView: View {
     }
 
     private func configureWriteAccessGating() {
-        let writeGate = { [entitlements] in
+        let writeGate: () -> Bool = { [entitlements] in
             entitlements.canWrite
         }
         workspace.writeAccessChecker = writeGate
@@ -165,6 +165,9 @@ struct WorkspaceShellView: View {
                     persistenceCoordinator?.flushPendingChanges()
                 }
                 #endif
+            }
+            .onChange(of: entitlements.accessState) { _, _ in
+                configureWriteAccessGating()
             }
 
             if showOnboardingPreview {
@@ -371,7 +374,8 @@ struct WorkspaceShellView: View {
                         )
                     }
                     .padding(.leading, 6)
-                    .padding(.top, max(10, geo.safeAreaInsets.top))
+                    // Raised so the panel covers the tab strip behind it.
+                    .padding(.top, max(10, geo.safeAreaInsets.top - 16))
                     .padding(.bottom, 10)
                 }
             }
@@ -734,6 +738,14 @@ struct WorkspaceShellView: View {
             return
         }
         paneUIState[paneID] = state
+    }
+
+    private func toggleFocusedPaneFindBar() {
+        guard focusedPaneActiveTab?.kind == .note else { return }
+        var state = paneUI(for: focusedPaneID)
+        state.showFindBar.toggle()
+        if state.showFindBar { state.isReading = false }
+        setPaneUI(focusedPaneID, state)
     }
 
     private func splitPaneActions(for paneID: String) -> (() -> Void, () -> Void) {
@@ -1402,10 +1414,14 @@ struct WorkspaceShellView: View {
             }
         }
         .background {
-            Button("") { showGoToFile = true }
-                .keyboardShortcut("o", modifiers: .command)
-                .opacity(0)
-                .frame(width: 0, height: 0)
+            Group {
+                Button("") { showGoToFile = true }
+                    .keyboardShortcut("o", modifiers: .command)
+                Button("") { toggleFocusedPaneFindBar() }
+                    .keyboardShortcut("f", modifiers: .command)
+            }
+            .opacity(0)
+            .frame(width: 0, height: 0)
         }
     }
     #endif
@@ -1488,10 +1504,14 @@ struct WorkspaceShellView: View {
             }
         }
         .background {
-            Button("") { showGoToFile = true }
-                .keyboardShortcut("o", modifiers: .command)
-                .opacity(0)
-                .frame(width: 0, height: 0)
+            Group {
+                Button("") { showGoToFile = true }
+                    .keyboardShortcut("o", modifiers: .command)
+                Button("") { toggleFocusedPaneFindBar() }
+                    .keyboardShortcut("f", modifiers: .command)
+            }
+            .opacity(0)
+            .frame(width: 0, height: 0)
         }
         .vaultFolderPicker(purpose: $vaultFolderPickerPurpose) { url, purpose in
             vaultFolderPickerHandler?(url, purpose)

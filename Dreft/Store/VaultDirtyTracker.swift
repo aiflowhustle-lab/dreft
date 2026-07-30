@@ -30,6 +30,28 @@ struct VaultDirtyTracker {
         dirtyNotePaths.formUnion(relativePaths)
     }
 
+    mutating func rekeyNote(from oldPath: String, to newPath: String) {
+        guard oldPath != newPath else { return }
+        if dirtyNotePaths.remove(oldPath) != nil {
+            dirtyNotePaths.insert(newPath)
+        }
+    }
+
+    mutating func rekeyCanvas(from oldPath: String, to newPath: String) {
+        guard oldPath != newPath else { return }
+        if dirtyCanvasPaths.remove(oldPath) != nil {
+            dirtyCanvasPaths.insert(newPath)
+        }
+    }
+
+    func isNoteDirty(_ relativePath: String) -> Bool {
+        dirtyNotePaths.contains(relativePath)
+    }
+
+    mutating func clearNote(_ relativePath: String) {
+        dirtyNotePaths.remove(relativePath)
+    }
+
     mutating func consumeNotes() -> Set<String> {
         let pending = dirtyNotePaths
         dirtyNotePaths.removeAll()

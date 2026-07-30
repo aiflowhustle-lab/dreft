@@ -9,15 +9,11 @@ struct SubscribeCTAButton: View {
         Button(action: action) {
             Text(Self.title(entitlements: entitlements, storeManager: storeManager))
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AppColors.textPrimary)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(AppColors.sidebarSelection)
+                .background(AppColors.selectionStroke)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(AppColors.borderSubtle, lineWidth: 1)
-                )
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Self.title(entitlements: entitlements, storeManager: storeManager))

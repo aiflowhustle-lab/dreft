@@ -47,6 +47,8 @@ final class CanvasStore {
     var pendingEndpointEdgeID: String?
     /// World-space center of the add-card menu for the pending endpoint.
     var pendingEndpointMenuCenter: CGPoint?
+    /// World-space center for vault note insertion from the canvas background menu.
+    var pendingVaultInsertCenter: CGPoint?
     /// Note card that should receive keyboard focus after creation.
     var focusCardID: String?
 
@@ -334,6 +336,7 @@ final class CanvasStore {
     }
 
     func setEdgeLabel(_ edgeID: String, label: String) {
+        guard requireWriteAccess() else { return }
         guard let index = edges.firstIndex(where: { $0.id == edgeID }) else { return }
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = trimmed.isEmpty ? nil : trimmed
@@ -345,6 +348,7 @@ final class CanvasStore {
     }
 
     func setEdgeColor(_ edgeID: String, hex: String) {
+        guard requireWriteAccess() else { return }
         guard let index = edges.firstIndex(where: { $0.id == edgeID }) else { return }
         let resolved = hex.isEmpty ? nil : hex
         guard edges[index].colorHex != resolved else { return }
@@ -798,6 +802,7 @@ final class CanvasStore {
     }
 
     func setCardColor(_ id: String, hex: String) {
+        guard requireWriteAccess() else { return }
         withUndo {
             guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
             cards[index].colorHex = hex.isEmpty ? nil : hex
@@ -842,6 +847,7 @@ final class CanvasStore {
         positionOverrides: [String: CGPoint] = [:],
         resizeOverrides: [String: CGRect] = [:]
     ) {
+        guard requireWriteAccess() else { return }
         editingEdgeID = nil
         guard let card = cards.first(where: { $0.id == fromID }) else { return }
         connectOrigin = (fromID, side)
@@ -856,6 +862,7 @@ final class CanvasStore {
         positionOverrides: [String: CGPoint] = [:],
         resizeOverrides: [String: CGRect] = [:]
     ) {
+        guard requireWriteAccess() else { return }
         if let editingID = editingEdgeID,
            let index = edges.firstIndex(where: { $0.id == editingID }) {
             let edge = edges[index]
@@ -889,6 +896,10 @@ final class CanvasStore {
         positionOverrides: [String: CGPoint] = [:],
         resizeOverrides: [String: CGRect] = [:]
     ) {
+        guard requireWriteAccess() else {
+            clearConnecting()
+            return
+        }
         if let editingID = editingEdgeID,
            let index = edges.firstIndex(where: { $0.id == editingID }) {
             let edge = edges[index]
@@ -1005,6 +1016,7 @@ final class CanvasStore {
     }
 
     func setEdgeDirection(_ edgeID: String, direction: CanvasEdgeDirection) {
+        guard requireWriteAccess() else { return }
         guard let index = edges.firstIndex(where: { $0.id == edgeID }),
               edges[index].direction != direction else { return }
         withUndo {
@@ -1016,6 +1028,7 @@ final class CanvasStore {
 
     /// Apply direction to every edge touching this card (including dangling lines).
     func setConnectedEdgeDirection(forCard cardID: String, direction: CanvasEdgeDirection) {
+        guard requireWriteAccess() else { return }
         let indexes = edges.indices.filter { i in
             let edge = edges[i]
             return edge.fromID == cardID || edge.toID == cardID
@@ -1061,6 +1074,7 @@ final class CanvasStore {
         positionOverrides: [String: CGPoint] = [:],
         resizeOverrides: [String: CGRect] = [:]
     ) {
+        guard requireWriteAccess() else { return }
         guard let index = edges.firstIndex(where: { $0.id == edgeID }),
               cards.first(where: { $0.id == edges[index].fromID }) != nil else { return }
 
@@ -1135,6 +1149,7 @@ final class CanvasStore {
     }
 
     func connect(fromID: String, fromSide: CanvasSide, toID: String, toSide: CanvasSide) {
+        guard requireWriteAccess() else { return }
         withUndo {
             edges.append(CanvasEdge(fromID: fromID, fromSide: fromSide, toID: toID, toSide: toSide))
             clearConnecting()
@@ -1144,6 +1159,7 @@ final class CanvasStore {
 
     @discardableResult
     func connectToPoint(fromID: String, fromSide: CanvasSide, point: CGPoint) -> String {
+        guard requireWriteAccess() else { return "" }
         var edgeID = ""
         withUndo {
             let edge = CanvasEdge(fromID: fromID, fromSide: fromSide, toPoint: point)
@@ -1181,6 +1197,7 @@ final class CanvasStore {
     }
 
     func attachCardToEndpoint(edgeID: String, cardID: String, toSide: CanvasSide? = nil) {
+        guard requireWriteAccess() else { return }
         guard let index = edges.firstIndex(where: { $0.id == edgeID }) else { return }
         edges[index].toID = cardID
         edges[index].toPoint = nil
@@ -1285,10 +1302,16 @@ final class CanvasStore {
 
     private func insertVaultNoteCard(_ file: VaultFile, canvasSize: CGSize) {
         withUndo {
-            let center = screenToWorld(
-                CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
-                in: canvasSize
-            )
+            let center: CGPoint
+            if let insertCenter = pendingVaultInsertCenter {
+                center = insertCenter
+                pendingVaultInsertCenter = nil
+            } else {
+                center = screenToWorld(
+                    CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
+                    in: canvasSize
+                )
+            }
             let card = makeVaultNoteCard(
                 file,
                 origin: CGPoint(x: center.x - 130, y: center.y - 90),
@@ -1363,17 +1386,12 @@ final class CanvasStore {
     }
 
     private func noteCardContent(for file: VaultFile) -> String {
-        if file.kind == .note {
-            if let content = file.noteContent, !content.isEmpty {
-                return content
-            }
-            if let vaultURL,
-               let content = VaultFilesystem.readNoteContent(relativePath: file.relativePath, vaultURL: vaultURL),
-               !content.isEmpty {
-                return content
-            }
+        switch file.kind {
+        case .note, .canvas:
+            return file.relativePath
+        default:
+            return "# \(vaultDisplayName(for: file))\n"
         }
-        return "# \(vaultDisplayName(for: file))\n"
     }
 
     private func vaultDisplayName(for file: VaultFile) -> String {
@@ -1412,6 +1430,7 @@ final class CanvasStore {
     func dismissPendingEndpoint() {
         pendingEndpointEdgeID = nil
         pendingEndpointMenuCenter = nil
+        pendingVaultInsertCenter = nil
         var removedEdge = false
         if case .endpoint(let edgeID, _, _) = contextMenu?.kind {
             withUndo {

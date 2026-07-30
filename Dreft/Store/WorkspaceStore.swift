@@ -65,6 +65,10 @@ final class WorkspaceStore {
     var onFlushActiveVaultToDisk: (() -> Void)?
     /// Relative path of a note whose body changed — drives per-file vault saves.
     var onNoteContentDirty: ((String) -> Void)?
+    /// Write one note immediately if it has unsaved edits (used before rename/move).
+    var onFlushNoteToDisk: ((String) -> Void)?
+    /// A vault file's relative path changed on disk/in-memory (rename/move/rekey).
+    var onFileRelativePathChanged: ((String, String) -> Void)?
     /// Tabs, selection, or vault UI changed — drives workspace.json saves.
     var onWorkspaceStateDirty: (() -> Void)?
     /// Subscription gate — return false to block writes (silent; UI shows paywall on intent).
@@ -955,8 +959,12 @@ final class WorkspaceStore {
             return
         }
 
+        let oldRelativePath = file.relativePath
+        suppressFilesystemWatch()
+        onFlushNoteToDisk?(oldRelativePath)
+
         do {
-            try VaultFilesystem.renameOnDisk(from: file.relativePath, to: newRelativePath, vaultURL: vaultURL)
+            try VaultFilesystem.renameOnDisk(from: oldRelativePath, to: newRelativePath, vaultURL: vaultURL)
         } catch {
             reportVaultError(title: "Couldn't rename \"\(file.name)\"", message: error.localizedDescription)
             return
@@ -966,8 +974,9 @@ final class WorkspaceStore {
         file.name = trimmed
         file.relativePath = newRelativePath
         file.id = newRelativePath
-        file.modifiedAt = Date()
         files[index] = file
+
+        onFileRelativePathChanged?(oldRelativePath, newRelativePath)
 
         if file.kind == .folder {
             rekeyDescendants(of: oldID, to: newRelativePath)
@@ -1128,12 +1137,16 @@ final class WorkspaceStore {
               let vaultURL = activeVaultURL else { return }
 
         var file = files.remove(at: index)
+        let oldRelativePath = file.relativePath
         let newRelativePath = VaultFilesystem.uniqueRelativePath(
             baseName: file.name, kind: file.kind,
             parentRelativePath: folderID, vaultURL: vaultURL
         )
+        suppressFilesystemWatch()
+        onFlushNoteToDisk?(oldRelativePath)
+
         do {
-            try VaultFilesystem.renameOnDisk(from: file.relativePath, to: newRelativePath, vaultURL: vaultURL)
+            try VaultFilesystem.renameOnDisk(from: oldRelativePath, to: newRelativePath, vaultURL: vaultURL)
         } catch {
             files.insert(file, at: min(index, files.count))
             reportVaultError(title: "Couldn't move \"\(file.name)\"", message: error.localizedDescription)
@@ -1147,6 +1160,8 @@ final class WorkspaceStore {
 
         if file.kind == .folder {
             rekeyDescendants(of: oldID, to: newRelativePath)
+        } else {
+            onFileRelativePathChanged?(oldRelativePath, newRelativePath)
         }
         rekeyTabs(from: oldID, to: newRelativePath, newTitle: file.name)
         rekeyBookmarkFileID(from: oldID, to: newRelativePath)
@@ -1154,7 +1169,8 @@ final class WorkspaceStore {
         let insertIndex = insertionIndex(for: file, under: folderID)
         files.insert(file, at: insertIndex)
         if let folderID { expandedFolderIDs.insert(folderID) }
-        reloadFromDisk()
+        markSidebarRowsDirty()
+        scheduleGraphLinkRebuild()
     }
 
     func canMove(fileID: String, toFolder folderID: String?) -> Bool {
@@ -1424,6 +1440,7 @@ final class WorkspaceStore {
 
             files[index].relativePath = newPath
             files[index].id = newPath
+            onFileRelativePathChanged?(oldPath, newPath)
             if let parentID = files[index].parentFolderID {
                 if parentID == oldFolderID {
                     files[index].parentFolderID = newFolderID

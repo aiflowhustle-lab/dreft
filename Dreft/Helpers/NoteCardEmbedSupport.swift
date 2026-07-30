@@ -2,7 +2,7 @@ import Foundation
 
 enum NoteCardContentSegment: Equatable {
     case text(String)
-    case image(vaultPath: String)
+    case image(vaultPath: String, alias: String? = nil)
 }
 
 enum NoteCardEmbedSupport {
@@ -30,7 +30,12 @@ enum NoteCardEmbedSupport {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if VaultFilesystem.isImageEmbedTarget(target) {
                 let path = VaultFilesystem.preferredCanvasAssetPath(for: target)
-                segments.append(.image(vaultPath: path))
+                var alias: String?
+                if match.numberOfRanges > 2, match.range(at: 2).location != NSNotFound {
+                    let rawAlias = ns.substring(with: match.range(at: 2))
+                    alias = rawAlias.isEmpty ? nil : rawAlias
+                }
+                segments.append(.image(vaultPath: path, alias: alias))
             } else {
                 appendText(ns.substring(with: range), to: &segments)
             }
@@ -47,8 +52,23 @@ enum NoteCardEmbedSupport {
 
     static func imagePaths(from content: String, vaultURL: URL?) -> [String] {
         segments(from: content, vaultURL: vaultURL).compactMap { segment in
-            if case .image(let vaultPath) = segment { return vaultPath }
+            if case .image(let vaultPath, _) = segment { return vaultPath }
             return nil
+        }
+    }
+
+    static func embedMarkdown(path: String, alias: String?) -> String {
+        if let alias, !alias.isEmpty {
+            return "![[\(path)|\(alias)]]"
+        }
+        return "![[\(path)]]"
+    }
+
+    static func embedSignatures(from content: String, vaultURL: URL?) -> [String] {
+        segments(from: content, vaultURL: vaultURL).compactMap { segment in
+            guard case .image(let vaultPath, let alias) = segment else { return nil }
+            if let alias, !alias.isEmpty { return "\(vaultPath)|\(alias)" }
+            return vaultPath
         }
     }
 
@@ -214,12 +234,13 @@ enum NoteCardEmbedEditingSupport {
             }
         }
 
-        while mutable.hasSuffix("\n\n") {
+        while (mutable as NSString).hasSuffix("\n\n") {
             mutable.removeLast()
-            if cursorLocation > mutable.count {
-                cursorLocation = mutable.count
-            } else if cursorLocation == mutable.count + 1 {
-                cursorLocation = mutable.count
+            let length = (mutable as NSString).length
+            if cursorLocation > length {
+                cursorLocation = length
+            } else if cursorLocation == length + 1 {
+                cursorLocation = length
             }
         }
 

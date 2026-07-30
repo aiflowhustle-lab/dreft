@@ -26,7 +26,6 @@ struct CanvasEdgeLabelLayer: View {
                 }
             }
         }
-        .allowsHitTesting(false)
     }
 
     private func edgeBorderColor(for edge: CanvasEdge) -> Color {

@@ -39,9 +39,6 @@ struct GraphDocumentOptionsMenu: View {
                         Text("Bookmark...")
                     }
                 }
-            } else {
-                Button("Bookmark...") {}
-                    .disabled(true)
             }
         } label: {
             Image(systemName: "ellipsis")

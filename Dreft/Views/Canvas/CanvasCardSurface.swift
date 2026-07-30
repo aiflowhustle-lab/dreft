@@ -335,9 +335,11 @@ struct CanvasCardCompactView: View {
                         suppressNextSelect = false
                     } else {
                         onSelect()
+                        #if os(macOS)
                         if card.kind != .image {
                             onRequestEdit()
                         }
+                        #endif
                     }
                 }
                 dragOrigin = nil

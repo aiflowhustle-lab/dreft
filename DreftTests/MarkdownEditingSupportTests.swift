@@ -46,7 +46,7 @@ final class MarkdownEditingSupportTests: XCTestCase {
 
     func testBoldItalicDisplayShowsStyledTextWithoutMarkers() {
         let display = WikilinkEditorSupport.displayAttributedString(
-            for: "***hello***",
+            from: "***hello***",
             fontSize: WikilinkEditorSupport.bodyFontSize,
             hiddenDelimiterOn: AppColors.noteCardBackground
         )
@@ -306,7 +306,7 @@ final class MarkdownEditingSupportTests: XCTestCase {
 
     func testDisplayAttributedStringStripsBoldMarkers() {
         let display = WikilinkEditorSupport.displayAttributedString(
-            for: "**hello**",
+            from: "**hello**",
             fontSize: WikilinkEditorSupport.bodyFontSize,
             hiddenDelimiterOn: AppColors.noteCardBackground
         )

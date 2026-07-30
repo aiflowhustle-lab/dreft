@@ -1132,11 +1132,6 @@ struct SidebarView: View {
                             }
                         }
                     }
-                    ShellToolbarCustomIconButton(label: "Collapse all") {
-                        workspace.collapseAllFolders()
-                    } icon: {
-                        FolderTreeChevronPairIcon(style: .collapseAll)
-                    }
                 }
                 Spacer(minLength: 0)
             }

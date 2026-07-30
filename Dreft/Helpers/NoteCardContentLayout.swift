@@ -48,7 +48,7 @@ enum NoteCardContentLayout {
 
         while index < segments.count {
             guard case .text(let text) = segments[index] else {
-                if case .image(let path) = segments[index] {
+                if case .image(let path, _) = segments[index] {
                     rows.append(.image(path: path))
                     previousWasImage = true
                 }
@@ -56,7 +56,7 @@ enum NoteCardContentLayout {
                 continue
             }
 
-            if index + 1 < segments.count, case .image(let path) = segments[index + 1] {
+            if index + 1 < segments.count, case .image(let path, _) = segments[index + 1] {
                 let split = splitTextBeforeEmbed(text)
                 if split.endsWithLineBreak {
                     let displayText = trailingNewlineTrimmed(split.fullText)

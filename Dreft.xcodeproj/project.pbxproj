@@ -107,6 +107,11 @@
 		SM000105 /* OnboardingTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100105 /* OnboardingTypography.swift */; };
 		SM000106 /* SpaceGrotesk.ttf in Resources */ = {isa = PBXBuildFile; fileRef = SM200003 /* SpaceGrotesk.ttf */; };
 		SM000107 /* MarkdownEditingSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100107 /* MarkdownEditingSupportTests.swift */; };
+		SM000121 /* NoteImageEmbedRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100121 /* NoteImageEmbedRoundTripTests.swift */; };
+		SM000122 /* VaultDirtyTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100122 /* VaultDirtyTrackerTests.swift */; };
+		SM000123 /* NoteFindReplaceSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100123 /* NoteFindReplaceSupport.swift */; };
+		SM000124 /* NoteFindReplaceSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100124 /* NoteFindReplaceSupportTests.swift */; };
+		SM000125 /* CanvasNoteCardContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100125 /* CanvasNoteCardContextMenu.swift */; };
 		SM000108 /* CanvasCardColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100108 /* CanvasCardColors.swift */; };
 		SM000109 /* NoteCardEmbedSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100109 /* NoteCardEmbedSupport.swift */; };
 		SM000120 /* NoteImageTextAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100120 /* NoteImageTextAttachment.swift */; };
@@ -250,6 +255,11 @@
 		SM100104 /* OnboardingSeamlessComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSeamlessComponents.swift; sourceTree = "<group>"; };
 		SM100105 /* OnboardingTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTypography.swift; sourceTree = "<group>"; };
 		SM100107 /* MarkdownEditingSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditingSupportTests.swift; sourceTree = "<group>"; };
+		SM100121 /* NoteImageEmbedRoundTripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteImageEmbedRoundTripTests.swift; sourceTree = "<group>"; };
+		SM100122 /* VaultDirtyTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultDirtyTrackerTests.swift; sourceTree = "<group>"; };
+		SM100123 /* NoteFindReplaceSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFindReplaceSupport.swift; sourceTree = "<group>"; };
+		SM100124 /* NoteFindReplaceSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFindReplaceSupportTests.swift; sourceTree = "<group>"; };
+		SM100125 /* CanvasNoteCardContextMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteCardContextMenu.swift; sourceTree = "<group>"; };
 		SM100108 /* CanvasCardColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardColors.swift; sourceTree = "<group>"; };
 		SM100109 /* NoteCardEmbedSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCardEmbedSupport.swift; sourceTree = "<group>"; };
 		SM100120 /* NoteImageTextAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteImageTextAttachment.swift; sourceTree = "<group>"; };
@@ -418,6 +428,7 @@
 				SM100038 /* CanvasCardFloatingToolbarLayer.swift */,
 				SM100039 /* CanvasCardColorSwatchRow.swift */,
 				SM100043 /* CanvasImageCardContextMenu.swift */,
+				SM100125 /* CanvasNoteCardContextMenu.swift */,
 				SM100059 /* CanvasExportView.swift */,
 				SM100064 /* CanvasFloatingToolbarChrome.swift */,
 				SM100066 /* CanvasIPadRightToolbar.swift */,
@@ -507,6 +518,7 @@
 				SM100035 /* VaultErrors.swift */,
 				SM100036 /* NoteMarkdownRenderer.swift */,
 				SM100073 /* MarkdownEditingSupport.swift */,
+				SM100123 /* NoteFindReplaceSupport.swift */,
 				SM100088 /* NoteFormattingToolbarBridge.swift */,
 				SM100074 /* NoteEditingMenuBuilder.swift */,
 				SM100076 /* NotePreviewCache.swift */,
@@ -524,6 +536,9 @@
 			children = (
 				SM100051 /* DataSafetyUpgradeTests.swift */,
 				SM100107 /* MarkdownEditingSupportTests.swift */,
+				SM100121 /* NoteImageEmbedRoundTripTests.swift */,
+				SM100122 /* VaultDirtyTrackerTests.swift */,
+				SM100124 /* NoteFindReplaceSupportTests.swift */,
 			);
 			path = DreftTests;
 			sourceTree = "<group>";
@@ -693,6 +708,7 @@
 				SM000041 /* NoteLinkedLinksSheet.swift in Sources */,
 				SM000042 /* ShellSidebarResizeHandle.swift in Sources */,
 				SM000043 /* CanvasImageCardContextMenu.swift in Sources */,
+				SM000125 /* CanvasNoteCardContextMenu.swift in Sources */,
 				SM000044 /* GraphLayoutPersistence.swift in Sources */,
 				SM000045 /* GraphLinkIndexPersistence.swift in Sources */,
 				SM000046 /* GraphBarnesHut.swift in Sources */,
@@ -739,6 +755,7 @@
 				SM000072 /* CanvasEdgeLabelLayer.swift in Sources */,
 				SM000073 /* CanvasEdgeHitOverlay.swift in Sources */,
 				SM000074 /* MarkdownEditingSupport.swift in Sources */,
+				SM000123 /* NoteFindReplaceSupport.swift in Sources */,
 				SM000088 /* NoteFormattingToolbarBridge.swift in Sources */,
 				SM000130 /* StoreConstants.swift in Sources */,
 				SM000131 /* AppInfo.swift in Sources */,
@@ -782,6 +799,9 @@
 			files = (
 				SM000051 /* DataSafetyUpgradeTests.swift in Sources */,
 				SM000107 /* MarkdownEditingSupportTests.swift in Sources */,
+				SM000121 /* NoteImageEmbedRoundTripTests.swift in Sources */,
+				SM000122 /* VaultDirtyTrackerTests.swift in Sources */,
+				SM000124 /* NoteFindReplaceSupportTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -898,7 +918,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = YES;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = K2Q9PMD826;
@@ -939,7 +962,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = YES;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = K2Q9PMD826;
@@ -979,9 +1005,10 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = YES;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = K2Q9PMD826;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -1003,9 +1030,10 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = YES;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = K2Q9PMD826;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;

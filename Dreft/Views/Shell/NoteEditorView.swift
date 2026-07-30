@@ -26,6 +26,9 @@ struct NoteEditorView: View {
     @State private var loadedFileID: String?
     @State private var findQuery = ""
     @State private var replaceQuery = ""
+    @State private var findCaseInsensitive = false
+    @State private var findMatchRange = NSRange(location: NSNotFound, length: 0)
+    @State private var selectionRevealToken = 0
     @State private var bodySelectedRange = NSRange(location: 0, length: 0)
     @State private var wikilinkCaretRect: CGRect = .zero
     @State private var bodySelectionRects: [CGRect] = []
@@ -33,6 +36,7 @@ struct NoteEditorView: View {
     @State private var titleCommitTask: Task<Void, Never>?
     @FocusState private var isTitleFocused: Bool
     @FocusState private var isBodyFocused: Bool
+    @FocusState private var isFindFieldFocused: Bool
     @StateObject private var noteToolbarBridge = NoteFormattingToolbarBridge()
     @State private var usesInlineImageEditor = false
     #if os(iOS)
@@ -65,9 +69,27 @@ struct NoteEditorView: View {
         draftContent.count
     }
 
+    private var findOptions: NoteFindReplaceOptions {
+        findCaseInsensitive ? .caseInsensitive : []
+    }
+
     private var findMatchCount: Int {
-        guard !findQuery.isEmpty else { return 0 }
-        return draftContent.components(separatedBy: findQuery).count - 1
+        NoteFindReplaceSupport.matchCount(of: findQuery, in: draftContent, options: findOptions)
+    }
+
+    private var findStatusLabel: String {
+        guard !findQuery.isEmpty else { return "" }
+        if findMatchCount == 0 { return "No matches" }
+        if findMatchRange.location != NSNotFound,
+           let ordinal = NoteFindReplaceSupport.matchOrdinal(
+            for: findMatchRange,
+            query: findQuery,
+            in: draftContent,
+            options: findOptions
+           ) {
+            return "\(ordinal.index) of \(ordinal.total)"
+        }
+        return "\(findMatchCount) matches"
     }
 
     private var isWriteBlocked: Bool {
@@ -129,6 +151,28 @@ struct NoteEditorView: View {
                 syncAccessoryStatusToToolbarBridge()
                 #endif
             }
+            .onChange(of: showFindBar) { _, isVisible in
+                if isVisible {
+                    isReading = false
+                    isFindFieldFocused = true
+                    if !findQuery.isEmpty {
+                        findNextMatch()
+                    }
+                } else {
+                    findMatchRange = NSRange(location: NSNotFound, length: 0)
+                }
+            }
+            .onChange(of: findQuery) { _, _ in
+                guard showFindBar, !findQuery.isEmpty else {
+                    findMatchRange = NSRange(location: NSNotFound, length: 0)
+                    return
+                }
+                findNextMatch()
+            }
+            .onChange(of: findCaseInsensitive) { _, _ in
+                guard showFindBar, !findQuery.isEmpty else { return }
+                findNextMatch()
+            }
             .onDisappear {
                 titleCommitTask?.cancel()
                 flushDraft()
@@ -185,12 +229,47 @@ struct NoteEditorView: View {
                 .padding(.vertical, 5)
                 .background(AppColors.toolbarBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .focused($isFindFieldFocused)
+                .onSubmit { findNextMatch() }
+                #if os(macOS)
+                .onExitCommand { showFindBar = false }
+                #endif
+
+            Button {
+                findPreviousMatch()
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(AppColors.textSecondary)
+            .disabled(isReading || findQuery.isEmpty)
+
+            Button {
+                findNextMatch()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(AppColors.textSecondary)
+            .disabled(isReading || findQuery.isEmpty)
 
             if !findQuery.isEmpty {
-                Text("\(findMatchCount) matches")
+                Text(findStatusLabel)
                     .font(.system(size: 11))
-                    .foregroundStyle(AppColors.textMuted)
+                    .foregroundStyle(findMatchCount == 0 ? AppColors.textMuted : AppColors.textSecondary)
+                    .frame(minWidth: 72, alignment: .leading)
             }
+
+            Toggle(isOn: $findCaseInsensitive) {
+                Text("Aa")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.plain)
+            .foregroundStyle(findCaseInsensitive ? AppColors.textPrimary : AppColors.textMuted)
+            .help("Match case")
 
             TextField("Replace", text: $replaceQuery)
                 .textFieldStyle(.plain)
@@ -201,8 +280,9 @@ struct NoteEditorView: View {
                 .background(AppColors.toolbarBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .disabled(isReading)
+                .onSubmit { replaceCurrentMatch() }
 
-            Button("Replace") { replaceFirstMatch() }
+            Button("Replace") { replaceCurrentMatch() }
                 .buttonStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundStyle(AppColors.textSecondary)
@@ -212,7 +292,7 @@ struct NoteEditorView: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundStyle(AppColors.textSecondary)
-                .disabled(isReading || findQuery.isEmpty)
+                .disabled(isReading || findQuery.isEmpty || findMatchCount == 0)
 
             Spacer()
 
@@ -228,20 +308,85 @@ struct NoteEditorView: View {
         .padding(.horizontal, 56)
         .padding(.vertical, 8)
         .background(AppColors.tabBarBackground)
+        #if os(macOS)
+        .background {
+            Group {
+                Button("") { findNextMatch() }
+                    .keyboardShortcut("g", modifiers: .command)
+                Button("") { findPreviousMatch() }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+            }
+            .hidden()
+        }
+        #endif
     }
 
     private var previewSurface: some View {
         NoteMarkdownPreview(content: draftContent) { openWikilink($0) }
     }
 
-    private func replaceFirstMatch() {
-        guard let range = draftContent.range(of: findQuery) else { return }
-        draftContent.replaceSubrange(range, with: replaceQuery)
+    private func revealFindMatch(_ range: NSRange) {
+        findMatchRange = range
+        bodySelectedRange = range
+        selectionRevealToken &+= 1
+        isBodyFocused = true
+    }
+
+    private func findNextMatch() {
+        guard !findQuery.isEmpty else { return }
+        let start = bodySelectedRange.location + bodySelectedRange.length
+        guard let match = NoteFindReplaceSupport.findNext(
+            in: draftContent,
+            query: findQuery,
+            after: start,
+            wrap: true,
+            options: findOptions
+        ) else {
+            findMatchRange = NSRange(location: NSNotFound, length: 0)
+            return
+        }
+        revealFindMatch(match)
+    }
+
+    private func findPreviousMatch() {
+        guard !findQuery.isEmpty else { return }
+        let start = bodySelectedRange.location
+        guard let match = NoteFindReplaceSupport.findPrevious(
+            in: draftContent,
+            query: findQuery,
+            before: start,
+            wrap: true,
+            options: findOptions
+        ) else {
+            findMatchRange = NSRange(location: NSNotFound, length: 0)
+            return
+        }
+        revealFindMatch(match)
+    }
+
+    private func replaceCurrentMatch() {
+        guard !findQuery.isEmpty else { return }
+        guard let result = NoteFindReplaceSupport.replaceCurrent(
+            in: draftContent,
+            query: findQuery,
+            replacement: replaceQuery,
+            selectedRange: bodySelectedRange,
+            options: findOptions
+        ) else { return }
+        draftContent = result.text
+        revealFindMatch(result.selectedRange)
     }
 
     private func replaceAllMatches() {
         guard !findQuery.isEmpty else { return }
-        draftContent = draftContent.replacingOccurrences(of: findQuery, with: replaceQuery)
+        draftContent = NoteFindReplaceSupport.replaceAll(
+            in: draftContent,
+            query: findQuery,
+            replacement: replaceQuery,
+            options: findOptions
+        )
+        findMatchRange = NSRange(location: NSNotFound, length: 0)
+        bodySelectedRange = NSRange(location: 0, length: 0)
     }
 
     @ViewBuilder
@@ -292,6 +437,7 @@ struct NoteEditorView: View {
                         imageEmbedMaxWidth: AppColors.noteReadableWidth,
                         toolbarBridge: noteToolbarBridge,
                         onImageAttachmentDrop: insertImageAttachment,
+                        selectionRevealToken: selectionRevealToken,
                         fillsAvailableHeight: true
                     )
                     .frame(width: geometry.size.width, height: max(240, geometry.size.height - 52))
@@ -353,7 +499,8 @@ struct NoteEditorView: View {
                         hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
                         imageEmbedMaxWidth: AppColors.noteReadableWidth,
                         toolbarBridge: noteToolbarBridge,
-                        onImageAttachmentDrop: insertImageAttachment
+                        onImageAttachmentDrop: insertImageAttachment,
+                        selectionRevealToken: selectionRevealToken
                     )
                 }
                 .padding(.horizontal, 56)
@@ -628,7 +775,18 @@ struct NoteEditorView: View {
         guard !isWriteBlocked else { return }
         titleCommitTask?.cancel()
         commitTitle()
-        workspace.updateNoteContent(for: fileID, content: draftContent)
+        workspace.updateNoteContent(for: resolvedNoteFileID(), content: draftContent)
+    }
+
+    private func resolvedNoteFileID() -> String {
+        if workspace.files.contains(where: { $0.id == fileID }) {
+            return fileID
+        }
+        if let tabFileID = workspace.tabs.first(where: { $0.id == workspace.activeTabID })?.fileID,
+           workspace.files.contains(where: { $0.id == tabFileID }) {
+            return tabFileID
+        }
+        return fileID
     }
 
     private func openWikilink(_ target: String) {

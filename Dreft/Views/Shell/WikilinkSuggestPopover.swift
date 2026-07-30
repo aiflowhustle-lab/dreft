@@ -6,10 +6,12 @@ struct WikilinkSuggestPopover: View {
     var onSelect: (WorkspaceFileEntry) -> Void
 
     static let preferredWidth: CGFloat = 300
+    static let rowHeight: CGFloat = 28
+    static let footerHeight: CGFloat = 68
 
-    private let rowHeight: CGFloat = 28
+    private let rowHeight: CGFloat = Self.rowHeight
     private let maxVisibleRows = 8
-    private let footerHeight: CGFloat = 68
+    private let footerHeight: CGFloat = Self.footerHeight
 
     static func estimatedHeight(resultCount: Int) -> CGFloat {
         let rows = min(resultCount, 8)

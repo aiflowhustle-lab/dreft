@@ -223,11 +223,13 @@ struct NoteBodyTextView: View {
     var toolbarBridge: NoteFormattingToolbarBridge? = nil
     var onImageAttachmentDrop: ((Data, String?) -> Bool)? = nil
     var layoutRefreshToken: Int = 0
+    var selectionRevealToken: Int = 0
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
     var fillsAvailableHeight: Bool = false
 
     @State private var activeQuery: WikilinkActiveQuery?
     @State private var suggestAnchorRect = CGRect.zero
+    @State private var wikilinkInsertRevision = 0
 
     private var suggestions: [WorkspaceFileEntry] {
         guard let activeQuery else { return [] }
@@ -308,6 +310,12 @@ struct NoteBodyTextView: View {
                     selectionRects: $selectionRects,
                     suggestAnchorRect: $suggestAnchorRect,
                     wikilinkSuggestPassthroughRect: wikilinkSuggestPassthroughRect,
+                    wikilinkSuggestResultCount: min(suggestions.count, 8),
+                    wikilinkInsertRevision: wikilinkInsertRevision,
+                    onSuggestRowSelect: { index in
+                        guard index >= 0, index < suggestions.count else { return }
+                        insertSuggestion(suggestions[index])
+                    },
                     isFocused: isFocused,
                     fontSize: fontSize,
                     embeddedInCanvas: embeddedInCanvas,
@@ -323,6 +331,7 @@ struct NoteBodyTextView: View {
                     toolbarBridge: toolbarBridge,
                     onImageAttachmentDrop: onImageAttachmentDrop,
                     layoutRefreshToken: layoutRefreshToken,
+                    selectionRevealToken: selectionRevealToken,
                     onContentScroll: onContentScroll
                 )
                 #else
@@ -347,6 +356,7 @@ struct NoteBodyTextView: View {
                     toolbarBridge: toolbarBridge,
                     onImageAttachmentDrop: onImageAttachmentDrop,
                     layoutRefreshToken: layoutRefreshToken,
+                    selectionRevealToken: selectionRevealToken,
                     onContentScroll: onContentScroll,
                     fillsAvailableHeight: fillsAvailableHeight
                 )
@@ -420,6 +430,7 @@ struct NoteBodyTextView: View {
         text = result.text
         selectedRange = NSRange(location: result.cursor, length: 0)
         activeQuery = nil
+        wikilinkInsertRevision += 1
     }
 }
 
@@ -528,6 +539,28 @@ enum NoteTextEditingCoordinatorSupport {
         #endif
     }
 
+    /// Maps a text-view selection into markdown indices for SwiftUI bindings when inline image attachments are active.
+    static func markdownBindingRange(
+        fromAttributedRange attributedRange: NSRange,
+        markdown: String,
+        hideResolvedImageEmbeds: Bool,
+        vaultURL: URL?,
+        imageEmbedMaxWidth: CGFloat?
+    ) -> NSRange {
+        guard NoteImageEmbedAttributedSupport.usesInlineAttachments(
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        ) else {
+            return attributedRange
+        }
+        return NoteImageEmbedAttributedSupport.markdownRange(
+            fromAttributedRange: attributedRange,
+            in: markdown,
+            vaultURL: vaultURL
+        )
+    }
+
     static func applySelectedRange(
         _ markdownRange: NSRange,
         markdown: String,
@@ -600,6 +633,131 @@ enum NoteTextEditingCoordinatorSupport {
         )
     }
 
+    private static func markdownReplacementDelta(from source: String, to result: String) -> (range: NSRange, replacement: String) {
+        let oldNS = source as NSString
+        let newNS = result as NSString
+        var start = 0
+        while start < oldNS.length && start < newNS.length && oldNS.character(at: start) == newNS.character(at: start) {
+            start += 1
+        }
+        var oldEnd = oldNS.length
+        var newEnd = newNS.length
+        while oldEnd > start && newEnd > start && oldNS.character(at: oldEnd - 1) == newNS.character(at: newEnd - 1) {
+            oldEnd -= 1
+            newEnd -= 1
+        }
+        let range = NSRange(location: start, length: oldEnd - start)
+        let replacement = newNS.substring(with: NSRange(location: start, length: newEnd - start))
+        return (range, replacement)
+    }
+
+    #if os(macOS)
+    private static func applyMarkdownTextMutation(
+        to textView: NSTextView,
+        source: String,
+        result: (text: String, selectedRange: NSRange),
+        usesAttachments: Bool,
+        fontSize: CGFloat,
+        editorBackground: Color,
+        vaultURL: URL?,
+        hideResolvedImageEmbeds: Bool,
+        imageEmbedMaxWidth: CGFloat?,
+        hideTaskListMarkers: Bool
+    ) {
+        guard let storage = textView.textStorage else { return }
+        textView.undoManager?.beginUndoGrouping()
+        defer { textView.undoManager?.endUndoGrouping() }
+
+        if usesAttachments {
+            let styled = styledContent(
+                result.text,
+                selectedRange: result.selectedRange,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                vaultURL: vaultURL,
+                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+            storage.setAttributedString(styled)
+        } else {
+            let (replaceRange, _) = markdownReplacementDelta(from: source, to: result.text)
+            let fullStyled = styledContent(
+                result.text,
+                selectedRange: NSRange(location: NSNotFound, length: 0),
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                vaultURL: vaultURL,
+                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+            let styledReplacement = fullStyled.attributedSubstring(from: replaceRange)
+            storage.replaceCharacters(in: replaceRange, with: styledReplacement)
+        }
+
+        applySelectedRange(
+            result.selectedRange,
+            markdown: result.text,
+            to: textView,
+            usesAttachments: usesAttachments,
+            vaultURL: vaultURL
+        )
+    }
+    #else
+    private static func applyMarkdownTextMutation(
+        to textView: UITextView,
+        source: String,
+        result: (text: String, selectedRange: NSRange),
+        usesAttachments: Bool,
+        fontSize: CGFloat,
+        editorBackground: Color,
+        vaultURL: URL?,
+        hideResolvedImageEmbeds: Bool,
+        imageEmbedMaxWidth: CGFloat?,
+        hideTaskListMarkers: Bool
+    ) {
+        textView.undoManager?.beginUndoGrouping()
+        defer { textView.undoManager?.endUndoGrouping() }
+
+        if usesAttachments {
+            textView.attributedText = styledContent(
+                result.text,
+                selectedRange: result.selectedRange,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                vaultURL: vaultURL,
+                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+        } else {
+            let storage = textView.textStorage
+            let (replaceRange, _) = markdownReplacementDelta(from: source, to: result.text)
+            let fullStyled = styledContent(
+                result.text,
+                selectedRange: NSRange(location: NSNotFound, length: 0),
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                vaultURL: vaultURL,
+                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+            let styledReplacement = fullStyled.attributedSubstring(from: replaceRange)
+            storage.replaceCharacters(in: replaceRange, with: styledReplacement)
+        }
+
+        applySelectedRange(
+            result.selectedRange,
+            markdown: result.text,
+            to: textView,
+            usesAttachments: usesAttachments,
+            vaultURL: vaultURL
+        )
+    }
+    #endif
+
     static func applyMarkdownEdit(
         _ action: MarkdownEditAction,
         textView: AnyObject,
@@ -624,20 +782,21 @@ enum NoteTextEditingCoordinatorSupport {
 
         #if os(macOS)
         guard let textView = textView as? NSTextView else { return ("", NSRange(location: 0, length: 0)) }
-        NoteUndoRegistration.perform(on: textView.undoManager) {
-            if source != result.text {
-                let styled = styledContent(
-                    result.text,
-                    selectedRange: result.selectedRange,
-                    fontSize: fontSize,
-                    editorBackground: editorBackground,
-                    vaultURL: vaultURL,
-                    hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: imageEmbedMaxWidth,
-                    hideTaskListMarkers: hideTaskListMarkers
-                )
-                textView.textStorage?.setAttributedString(styled)
-            } else {
+        if source != result.text {
+            applyMarkdownTextMutation(
+                to: textView,
+                source: source,
+                result: result,
+                usesAttachments: usesAttachments,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                vaultURL: vaultURL,
+                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+        } else {
+            NoteUndoRegistration.perform(on: textView.undoManager) {
                 restyleInPlace(
                     textView: textView,
                     fontSize: fontSize,
@@ -647,30 +806,32 @@ enum NoteTextEditingCoordinatorSupport {
                     imageEmbedMaxWidth: imageEmbedMaxWidth,
                     hideTaskListMarkers: hideTaskListMarkers
                 )
+                applySelectedRange(
+                    result.selectedRange,
+                    markdown: result.text,
+                    to: textView,
+                    usesAttachments: usesAttachments,
+                    vaultURL: vaultURL
+                )
             }
-            applySelectedRange(
-                result.selectedRange,
-                markdown: result.text,
-                to: textView,
-                usesAttachments: usesAttachments,
-                vaultURL: vaultURL
-            )
         }
         #else
         guard let textView = textView as? UITextView else { return ("", NSRange(location: 0, length: 0)) }
-        NoteUndoRegistration.perform(on: textView.undoManager) {
-            if source != result.text {
-                textView.attributedText = styledContent(
-                    result.text,
-                    selectedRange: result.selectedRange,
-                    fontSize: fontSize,
-                    editorBackground: editorBackground,
-                    vaultURL: vaultURL,
-                    hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: imageEmbedMaxWidth,
-                    hideTaskListMarkers: hideTaskListMarkers
-                )
-            } else {
+        if source != result.text {
+            applyMarkdownTextMutation(
+                to: textView,
+                source: source,
+                result: result,
+                usesAttachments: usesAttachments,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                vaultURL: vaultURL,
+                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+        } else {
+            NoteUndoRegistration.perform(on: textView.undoManager) {
                 restyleInPlace(
                     textView: textView,
                     fontSize: fontSize,
@@ -680,14 +841,14 @@ enum NoteTextEditingCoordinatorSupport {
                     imageEmbedMaxWidth: imageEmbedMaxWidth,
                     hideTaskListMarkers: hideTaskListMarkers
                 )
+                applySelectedRange(
+                    result.selectedRange,
+                    markdown: result.text,
+                    to: textView,
+                    usesAttachments: usesAttachments,
+                    vaultURL: vaultURL
+                )
             }
-            applySelectedRange(
-                result.selectedRange,
-                markdown: result.text,
-                to: textView,
-                usesAttachments: usesAttachments,
-                vaultURL: vaultURL
-            )
         }
         #endif
 
@@ -728,47 +889,32 @@ enum NoteTextEditingCoordinatorSupport {
 
         #if os(macOS)
         guard let textView = textView as? NSTextView else { return ("", NSRange(location: 0, length: 0)) }
-        NoteUndoRegistration.perform(on: textView.undoManager) {
-            let styled = styledContent(
-                finalResult.text,
-                selectedRange: finalResult.selectedRange,
-                fontSize: fontSize,
-                editorBackground: editorBackground,
-                vaultURL: vaultURL,
-                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: imageEmbedMaxWidth,
-                hideTaskListMarkers: hideTaskListMarkers
-            )
-            textView.textStorage?.setAttributedString(styled)
-            applySelectedRange(
-                finalResult.selectedRange,
-                markdown: finalResult.text,
-                to: textView,
-                usesAttachments: usesAttachments,
-                vaultURL: vaultURL
-            )
-        }
+        applyMarkdownTextMutation(
+            to: textView,
+            source: source,
+            result: finalResult,
+            usesAttachments: usesAttachments,
+            fontSize: fontSize,
+            editorBackground: editorBackground,
+            vaultURL: vaultURL,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            imageEmbedMaxWidth: imageEmbedMaxWidth,
+            hideTaskListMarkers: hideTaskListMarkers
+        )
         #else
         guard let textView = textView as? UITextView else { return ("", NSRange(location: 0, length: 0)) }
-        NoteUndoRegistration.perform(on: textView.undoManager) {
-            textView.attributedText = styledContent(
-                finalResult.text,
-                selectedRange: finalResult.selectedRange,
-                fontSize: fontSize,
-                editorBackground: editorBackground,
-                vaultURL: vaultURL,
-                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: imageEmbedMaxWidth,
-                hideTaskListMarkers: hideTaskListMarkers
-            )
-            applySelectedRange(
-                finalResult.selectedRange,
-                markdown: finalResult.text,
-                to: textView,
-                usesAttachments: usesAttachments,
-                vaultURL: vaultURL
-            )
-        }
+        applyMarkdownTextMutation(
+            to: textView,
+            source: source,
+            result: finalResult,
+            usesAttachments: usesAttachments,
+            fontSize: fontSize,
+            editorBackground: editorBackground,
+            vaultURL: vaultURL,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            imageEmbedMaxWidth: imageEmbedMaxWidth,
+            hideTaskListMarkers: hideTaskListMarkers
+        )
         #endif
 
         return (finalResult.text, finalResult.selectedRange)
@@ -1088,13 +1234,52 @@ final class NoteEditingNSTextView: NSTextView {
     var imageDropHandler: ((Data, String?) -> Bool)?
     /// When non-empty, mouse hits in this rect pass through to the SwiftUI suggest popover above.
     var wikilinkSuggestPassthroughRect: CGRect = .zero
+    var wikilinkSuggestResultCount: Int = 0
+    var onWikilinkSuggestRowSelected: ((Int) -> Void)?
+
+    /// Converts a point in the text view's coordinate space to visible (scroll-adjusted) coords
+    /// used by the SwiftUI suggest popover overlay.
+    private func visiblePoint(for documentPoint: NSPoint) -> NSPoint {
+        var point = documentPoint
+        if let scrollView = enclosingScrollView {
+            point.x -= scrollView.contentView.bounds.origin.x
+            point.y -= scrollView.contentView.bounds.origin.y
+        }
+        return point
+    }
+
+    private func wikilinkSuggestRowIndex(at visiblePoint: NSPoint) -> Int? {
+        let rect = wikilinkSuggestPassthroughRect
+        guard rect != .zero, rect.contains(visiblePoint) else { return nil }
+
+        let footerHeight = WikilinkSuggestPopover.footerHeight
+        let listBottom = rect.maxY - footerHeight
+        guard visiblePoint.y < listBottom else { return nil }
+
+        let relativeY = visiblePoint.y - rect.minY - 4
+        guard relativeY >= 0 else { return nil }
+
+        let index = Int(relativeY / WikilinkSuggestPopover.rowHeight)
+        guard index >= 0, index < wikilinkSuggestResultCount else { return nil }
+        return index
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         if wikilinkSuggestPassthroughRect != .zero,
-           wikilinkSuggestPassthroughRect.contains(point) {
+           wikilinkSuggestPassthroughRect.contains(visiblePoint(for: point)) {
             return nil
         }
         return super.hitTest(point)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let visible = visiblePoint(for: point)
+        if let index = wikilinkSuggestRowIndex(at: visible) {
+            onWikilinkSuggestRowSelected?(index)
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     static var imageDragTypes: [NSPasteboard.PasteboardType] {
@@ -1200,6 +1385,9 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
     @Binding var selectionRects: [CGRect]
     @Binding var suggestAnchorRect: CGRect
     var wikilinkSuggestPassthroughRect: CGRect
+    var wikilinkSuggestResultCount: Int = 0
+    var wikilinkInsertRevision: Int = 0
+    var onSuggestRowSelect: (Int) -> Void = { _ in }
     var isFocused: FocusState<Bool>.Binding
     var fontSize: CGFloat
     var embeddedInCanvas: Bool
@@ -1215,6 +1403,7 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
     var toolbarBridge: NoteFormattingToolbarBridge? = nil
     var onImageAttachmentDrop: ((Data, String?) -> Bool)? = nil
     var layoutRefreshToken: Int = 0
+    var selectionRevealToken: Int = 0
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
 
     var imageEmbedLayoutWidth: CGFloat? {
@@ -1267,6 +1456,14 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         context.coordinator.parent = self
         context.coordinator.syncFontSizeIfNeeded(in: textView, container: nsView as? CanvasNoteTextContainerView)
         context.coordinator.syncIfNeeded(text: text, selectedRange: selectedRange, in: textView)
+        if wikilinkInsertRevision != context.coordinator.lastWikilinkInsertRevision {
+            context.coordinator.lastWikilinkInsertRevision = wikilinkInsertRevision
+            if context.coordinator.isLiveEditing(in: textView) {
+                context.coordinator.applyContent(text, selectedRange: selectedRange, to: textView)
+                context.coordinator.syncEditingChrome(in: textView)
+            }
+        }
+        context.coordinator.revealSelectionIfNeeded(token: selectionRevealToken, in: textView)
         context.coordinator.configureToolbarBridge(toolbarBridge)
         textView.imageDropHandler = onImageAttachmentDrop
         if onImageAttachmentDrop != nil {
@@ -1296,6 +1493,18 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             context.coordinator.syncEditingChrome(in: textView)
         }
         textView.wikilinkSuggestPassthroughRect = wikilinkSuggestPassthroughRect
+        textView.wikilinkSuggestResultCount = wikilinkSuggestResultCount
+        textView.onWikilinkSuggestRowSelected = { index in
+            context.coordinator.parent.onSuggestRowSelect(index)
+        }
+        context.coordinator.updateWikilinkSuggestClickMonitor(
+            passthroughRect: wikilinkSuggestPassthroughRect,
+            resultCount: wikilinkSuggestResultCount,
+            textView: textView,
+            onSelect: { index in
+                context.coordinator.parent.onSuggestRowSelect(index)
+            }
+        )
     }
 
     private func configure(textView: NoteEditingNSTextView, coordinator: Coordinator) {
@@ -1339,10 +1548,103 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         weak var containerView: CanvasNoteTextContainerView?
         private var isApplyingProgrammaticChange = false
         private var lastLayoutRefreshToken = -1
+        private var lastSelectionRevealToken = -1
         private var lastAppliedFontSize: CGFloat = -1
+        var lastWikilinkInsertRevision = -1
+        private var wikilinkSuggestClickMonitor: Any?
+        private var wikilinkSuggestPassthroughRect: CGRect = .zero
+        private var wikilinkSuggestResultCount = 0
+        private var wikilinkSuggestOnSelect: ((Int) -> Void)?
+        private weak var wikilinkSuggestTextView: NSTextView?
 
         init(parent: NoteBodyTextViewRepresentable) {
             self.parent = parent
+        }
+
+        deinit {
+            removeWikilinkSuggestClickMonitor()
+        }
+
+        func updateWikilinkSuggestClickMonitor(
+            passthroughRect: CGRect,
+            resultCount: Int,
+            textView: NSTextView,
+            onSelect: @escaping (Int) -> Void
+        ) {
+            wikilinkSuggestPassthroughRect = passthroughRect
+            wikilinkSuggestResultCount = resultCount
+            wikilinkSuggestOnSelect = onSelect
+            wikilinkSuggestTextView = textView
+
+            guard passthroughRect != .zero, resultCount > 0 else {
+                removeWikilinkSuggestClickMonitor()
+                return
+            }
+
+            guard wikilinkSuggestClickMonitor == nil else { return }
+
+            wikilinkSuggestClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+                guard let self else { return event }
+                return self.handleWikilinkSuggestClick(event) ?? event
+            }
+        }
+
+        private func handleWikilinkSuggestClick(_ event: NSEvent) -> NSEvent? {
+            guard let textView = wikilinkSuggestTextView,
+                  let window = textView.window,
+                  event.window === window,
+                  wikilinkSuggestPassthroughRect != .zero else {
+                return nil
+            }
+
+            let visible = Self.wikilinkSuggestVisiblePoint(
+                in: textView,
+                documentPoint: textView.convert(event.locationInWindow, from: nil)
+            )
+            guard let index = Self.wikilinkSuggestRowIndex(
+                at: visible,
+                in: wikilinkSuggestPassthroughRect,
+                resultCount: wikilinkSuggestResultCount
+            ) else {
+                return nil
+            }
+
+            wikilinkSuggestOnSelect?(index)
+            return nil
+        }
+
+        private func removeWikilinkSuggestClickMonitor() {
+            if let wikilinkSuggestClickMonitor {
+                NSEvent.removeMonitor(wikilinkSuggestClickMonitor)
+                self.wikilinkSuggestClickMonitor = nil
+            }
+        }
+
+        private static func wikilinkSuggestVisiblePoint(in textView: NSTextView, documentPoint: NSPoint) -> NSPoint {
+            var point = documentPoint
+            if let scrollView = textView.enclosingScrollView {
+                point.x -= scrollView.contentView.bounds.origin.x
+                point.y -= scrollView.contentView.bounds.origin.y
+            }
+            return point
+        }
+
+        private static func wikilinkSuggestRowIndex(
+            at visiblePoint: NSPoint,
+            in passthroughRect: CGRect,
+            resultCount: Int
+        ) -> Int? {
+            guard passthroughRect.contains(visiblePoint) else { return nil }
+
+            let listBottom = passthroughRect.maxY - WikilinkSuggestPopover.footerHeight
+            guard visiblePoint.y < listBottom else { return nil }
+
+            let relativeY = visiblePoint.y - passthroughRect.minY - 4
+            guard relativeY >= 0 else { return nil }
+
+            let index = Int(relativeY / WikilinkSuggestPopover.rowHeight)
+            guard index >= 0, index < resultCount else { return nil }
+            return index
         }
 
         func syncFontSizeIfNeeded(in textView: NSTextView, container: CanvasNoteTextContainerView? = nil) {
@@ -1706,7 +2008,13 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView, !isApplyingProgrammaticChange else { return }
-            let newRange = textView.selectedRange()
+            let newRange = NoteTextEditingCoordinatorSupport.markdownBindingRange(
+                fromAttributedRange: textView.selectedRange(),
+                markdown: parent.text,
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
             if !NoteImageEmbedAttributedSupport.usesInlineAttachments(
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                 vaultURL: parent.vaultURL,
@@ -1785,6 +2093,12 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             }
         }
 
+        func revealSelectionIfNeeded(token: Int, in textView: NSTextView) {
+            guard token != lastSelectionRevealToken else { return }
+            lastSelectionRevealToken = token
+            scrollCaretIntoView(textView)
+        }
+
         func emitContentScroll(from scrollView: NSScrollView, textView: NSTextView, deferUpdate: Bool = false) {
             guard let handler = parent.onContentScroll else { return }
             let metrics = CanvasNoteScrollMetrics(
@@ -1820,9 +2134,21 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                 parent.suggestAnchorRect = .zero
                 return
             }
+            let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+            let anchorIndex = usesAttachments
+                ? NoteImageEmbedAttributedSupport.attributedRange(
+                    fromMarkdownRange: NSRange(location: query.replaceRange.location, length: 0),
+                    in: parent.text,
+                    vaultURL: parent.vaultURL
+                ).location
+                : query.replaceRange.location
             parent.suggestAnchorRect = NoteEditingChromeSupport.wikilinkSuggestAnchor(
                 in: textView,
-                characterIndex: query.replaceRange.location,
+                characterIndex: anchorIndex,
                 fontSize: parent.fontSize
             )
         }
@@ -2097,6 +2423,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     var toolbarBridge: NoteFormattingToolbarBridge? = nil
     var onImageAttachmentDrop: ((Data, String?) -> Bool)? = nil
     var layoutRefreshToken: Int = 0
+    var selectionRevealToken: Int = 0
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
     var fillsAvailableHeight: Bool = false
 
@@ -2159,6 +2486,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         textView.imageDropHandler = onImageAttachmentDrop
         textView.refreshDropInteraction()
         context.coordinator.syncIfNeeded(text: text, selectedRange: selectedRange, in: textView)
+        context.coordinator.revealSelectionIfNeeded(token: selectionRevealToken, in: textView)
         container?.relayoutDocumentTextView()
         context.coordinator.refreshLayoutIfNeeded(
             token: layoutRefreshToken,
@@ -2233,6 +2561,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         weak var containerView: CanvasNoteUITextContainerView?
         private var isApplyingProgrammaticChange = false
         private var lastLayoutRefreshToken = -1
+        private var lastSelectionRevealToken = -1
         private var lastAppliedFontSize: CGFloat = -1
         private let standaloneKeyboardObserver = NoteStandaloneEditorKeyboardObserver()
 
@@ -2637,7 +2966,13 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard !isApplyingProgrammaticChange else { return }
-            let newRange = textView.selectedRange
+            let newRange = NoteTextEditingCoordinatorSupport.markdownBindingRange(
+                fromAttributedRange: textView.selectedRange,
+                markdown: parent.text,
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
             if !NoteImageEmbedAttributedSupport.usesInlineAttachments(
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                 vaultURL: parent.vaultURL,
@@ -2705,6 +3040,15 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             }
         }
 
+        func revealSelectionIfNeeded(token: Int, in textView: UITextView) {
+            guard token != lastSelectionRevealToken else { return }
+            lastSelectionRevealToken = token
+            scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
+            if parent.fillsAvailableHeight {
+                NoteStandaloneEditorKeyboardSupport.scrollSelectionIntoView(textView, fontSize: parent.fontSize)
+            }
+        }
+
         private func updateEditingChrome(for textView: UITextView) {
             let scrollOffset = contentScrollOffset(for: textView)
             let rect = NoteEditingChromeSupport.caretRect(
@@ -2730,9 +3074,21 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             guard let query = WikilinkEditorSupport.activeQuery(in: parent.text, cursor: cursor) else {
                 return .zero
             }
+            let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+            let anchorIndex = usesAttachments
+                ? NoteImageEmbedAttributedSupport.attributedRange(
+                    fromMarkdownRange: NSRange(location: query.replaceRange.location, length: 0),
+                    in: parent.text,
+                    vaultURL: parent.vaultURL
+                ).location
+                : query.replaceRange.location
             return NoteEditingChromeSupport.wikilinkSuggestAnchor(
                 in: textView,
-                characterIndex: query.replaceRange.location,
+                characterIndex: anchorIndex,
                 fontSize: parent.fontSize,
                 contentScrollOffset: scrollOffset
             )

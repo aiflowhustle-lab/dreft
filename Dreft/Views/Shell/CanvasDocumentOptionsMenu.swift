@@ -205,13 +205,6 @@ struct CanvasDocumentOptionsMenu: View {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
     #else
-    private func openInNewWindow() {
-        workspace.reportVaultError(
-            title: "Open in new window",
-            message: "Separate canvas windows are available on macOS."
-        )
-    }
-
     private func openInDefaultApp() {
         guard let path = workspace.diskPath(for: fileID) else { return }
         UIApplication.shared.open(URL(fileURLWithPath: path))

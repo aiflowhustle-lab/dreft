@@ -74,6 +74,7 @@ struct InfiniteCanvasView: View {
   #if os(iOS)
   @StateObject private var noteEditKeyboardObserver = KeyboardHeightObserver()
   @State private var canvasPanYOffsetForKeyboard: CGFloat = 0
+  @State private var canvasSafeAreaBottom: CGFloat = 0
   @State private var keyboardAvoidanceTask: Task<Void, Never>?
   #endif
 
@@ -95,7 +96,7 @@ struct InfiniteCanvasView: View {
     let edgesInView = mountedEdges(for: size)
 
     canvasImportAndPlatformModifiers(size: size) {
-      canvasGestureAndLifecycleModifiers(size: size) {
+      canvasGestureAndLifecycleModifiers(size: size, safeBottom: safeBottom) {
         canvasChromeOverlays(
           size: size,
           safeBottom: safeBottom,
@@ -165,7 +166,7 @@ struct InfiniteCanvasView: View {
           editingEdgeLabelID = nil
         },
         onBeginEdit: { edgeID in
-          editingEdgeLabelID = edgeID
+          beginEdgeLabelEdit(edgeID: edgeID)
         }
       )
       .zIndex(6)
@@ -251,8 +252,8 @@ struct InfiniteCanvasView: View {
         if isOpen { settleInFlightCardInteraction() }
       }
       .onChange(of: store.selectedEdgeID) { _, newValue in
-        if newValue != editingEdgeLabelID {
-          editingEdgeLabelID = nil
+        if let editingID = editingEdgeLabelID, newValue != editingID {
+          commitEdgeLabelEdit(for: editingID)
         }
         if newValue == nil {
           edgeToolbarColorRowOpen = false
@@ -363,10 +364,10 @@ struct InfiniteCanvasView: View {
       }
       .onReceive(noteEditKeyboardObserver.$isVisible) { visible in
         Task { @MainActor in
-          if visible {
+          if visible, store.focusCardID != nil {
             updateCanvasKeyboardAvoidance(canvasSize: size)
           } else {
-            resetCanvasKeyboardAvoidance()
+            resetCanvasKeyboardAvoidance(animated: true)
           }
         }
       }
@@ -375,7 +376,7 @@ struct InfiniteCanvasView: View {
           keyboardAvoidanceTask?.cancel()
           keyboardAvoidanceTask = nil
           Task { @MainActor in
-            resetCanvasKeyboardAvoidance()
+            resetCanvasKeyboardAvoidance(animated: true)
           }
         } else {
           scheduleCanvasKeyboardAvoidance(canvasSize: size)
@@ -436,10 +437,17 @@ struct InfiniteCanvasView: View {
   @ViewBuilder
   private func canvasGestureAndLifecycleModifiers<Content: View>(
     size: CGSize,
+    safeBottom: CGFloat = 0,
     @ViewBuilder content: () -> Content
   ) -> some View {
     canvasMacScrollModifiers(size: size) {
       content()
+        #if os(iOS)
+        .onAppear { canvasSafeAreaBottom = safeBottom }
+        .onChange(of: safeBottom) { _, newValue in
+          canvasSafeAreaBottom = newValue
+        }
+        #endif
         .simultaneousGesture(edgeInteractionGesture(canvasSize: size))
         .onAppear {
           displayTransform = store.transform
@@ -638,9 +646,19 @@ struct InfiniteCanvasView: View {
         .keyboardShortcut("1", modifiers: .shift)
       Button("") { zoomToSelection(canvasSize: canvasSize) }
         .keyboardShortcut("2", modifiers: .shift)
+      Button("") { deleteSelectedCard() }
+        .keyboardShortcut(.delete, modifiers: [])
+      Button("") { deleteSelectedCard() }
+        .keyboardShortcut(KeyEquivalent("\u{8}"), modifiers: [])
     }
     .opacity(0)
     .frame(width: 0, height: 0)
+  }
+
+  private func deleteSelectedCard() {
+    guard store.focusCardID == nil, let id = store.selectedCardID else { return }
+    guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+    store.deleteCard(id)
   }
   #endif
 
@@ -800,7 +818,7 @@ struct InfiniteCanvasView: View {
         store.selectedEdgeID = nil
         store.endContentEdit()
         store.focusCardID = nil
-        editingEdgeLabelID = nil
+        commitEdgeLabelEditIfNeeded()
         canvasNoteToolbarBridge.dismissKeyboard()
       }
   }
@@ -859,6 +877,26 @@ struct InfiniteCanvasView: View {
     store.selectedEdgeID = nil
     store.focusCardID = card.id
     store.beginContentEdit(for: card.id)
+  }
+
+  private func commitEdgeLabelEditIfNeeded() {
+    guard let edgeID = editingEdgeLabelID else { return }
+    commitEdgeLabelEdit(for: edgeID)
+  }
+
+  private func commitEdgeLabelEdit(for edgeID: String) {
+    store.setEdgeLabel(edgeID, label: edgeLabelDraft)
+    if editingEdgeLabelID == edgeID {
+      editingEdgeLabelID = nil
+    }
+  }
+
+  private func beginEdgeLabelEdit(edgeID: String) {
+    guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+    if let editingID = editingEdgeLabelID, editingID != edgeID {
+      commitEdgeLabelEdit(for: editingID)
+    }
+    editingEdgeLabelID = edgeID
   }
 
   #if os(iOS)
@@ -1219,6 +1257,7 @@ struct InfiniteCanvasView: View {
             displayTransform = store.transform
           },
           onSwap: {
+            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
             swapImageCardID = card.id
             #if os(macOS)
             openMacImageSwapPanel(for: card.id)
@@ -1226,7 +1265,34 @@ struct InfiniteCanvasView: View {
             showImageSwapPicker = true
             #endif
           },
-          onRemove: { store.deleteCard(card.id) },
+          onRemove: {
+            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+            store.deleteCard(card.id)
+          },
+          onRename: {
+            store.selectedCardID = card.id
+            imageTitleRenameTokens[card.id, default: 0] += 1
+          }
+        )
+      }
+    } else if card.kind == .note || card.kind == .text {
+      cardView.contextMenu {
+        CanvasNoteCardContextMenu(
+          workspace: workspace,
+          store: store,
+          entitlements: entitlements,
+          card: card,
+          sidebarVisible: $sidebarVisible,
+          sidebarPanel: $sidebarPanel,
+          onZoom: {
+            store.selectedCardID = card.id
+            store.zoomToSelection(canvasSize: canvasSize)
+            displayTransform = store.transform
+          },
+          onRemove: {
+            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+            store.deleteCard(card.id)
+          },
           onRename: {
             store.selectedCardID = card.id
             imageTitleRenameTokens[card.id, default: 0] += 1
@@ -1274,17 +1340,21 @@ struct InfiniteCanvasView: View {
         endCardInteractionFreeze()
         settleMountedContent()
       },
-      onDelete: { store.deleteCard(card.id) },
+      onDelete: {
+        guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+        store.deleteCard(card.id)
+      },
       onZoomToCard: {
         clearCardInteractionState()
         isCanvasInteracting = false
         store.zoomToSelection(canvasSize: canvasSize)
         displayTransform = store.transform
       },
-      onBeginConnect: {
+      onBeginConnect: { side in
+        guard entitlements.requireWriteAccess(context: documentTitle) else { return }
         store.beginConnecting(
           fromID: card.id,
-          side: $0,
+          side: side,
           positionOverrides: cardDragOverrides,
           resizeOverrides: cardResizeOverrides
         )
@@ -1347,6 +1417,7 @@ struct InfiniteCanvasView: View {
             displayTransform = store.transform
           },
           onSwap: {
+            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
             swapImageCardID = card.id
             #if os(macOS)
             openMacImageSwapPanel(for: card.id)
@@ -1354,7 +1425,34 @@ struct InfiniteCanvasView: View {
             showImageSwapPicker = true
             #endif
           },
-          onRemove: { store.deleteCard(card.id) },
+          onRemove: {
+            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+            store.deleteCard(card.id)
+          },
+          onRename: {
+            store.selectedCardID = card.id
+            imageTitleRenameTokens[card.id, default: 0] += 1
+          }
+        )
+      }
+    } else if card.kind == .note || card.kind == .text {
+      cardView.contextMenu {
+        CanvasNoteCardContextMenu(
+          workspace: workspace,
+          store: store,
+          entitlements: entitlements,
+          card: card,
+          sidebarVisible: $sidebarVisible,
+          sidebarPanel: $sidebarPanel,
+          onZoom: {
+            store.selectedCardID = card.id
+            store.zoomToSelection(canvasSize: canvasSize)
+            displayTransform = store.transform
+          },
+          onRemove: {
+            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+            store.deleteCard(card.id)
+          },
           onRename: {
             store.selectedCardID = card.id
             imageTitleRenameTokens[card.id, default: 0] += 1
@@ -1517,6 +1615,7 @@ struct InfiniteCanvasView: View {
             store.endContentEdit()
             store.focusCardID = nil
           }
+          guard entitlements.requireWriteAccess(context: documentTitle) else { return }
           store.deleteCard(card.id)
         },
         onZoomToCard: {
@@ -1525,7 +1624,10 @@ struct InfiniteCanvasView: View {
           store.zoomToSelection(canvasSize: canvasSize)
           displayTransform = store.transform
         },
-        onSetColor: { store.setCardColor(card.id, hex: $0) },
+        onSetColor: { hex in
+          guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+          store.setCardColor(card.id, hex: hex)
+        },
         onBeginEditingNote: {
           beginCardEdit(for: card)
         },
@@ -1579,16 +1681,20 @@ struct InfiniteCanvasView: View {
           hasActiveColor: edge.colorHex != nil && !(edge.colorHex?.isEmpty ?? true),
           showColorRow: $edgeToolbarColorRowOpen,
           onDelete: {
-            editingEdgeLabelID = nil
+            commitEdgeLabelEditIfNeeded()
+            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
             store.deleteEdge(edge.id)
           },
           onZoomToLine: {
             store.zoomToEdge(edge.id, canvasSize: canvasSize)
             displayTransform = store.transform
           },
-          onSetDirection: { store.setEdgeDirection(edge.id, direction: $0) },
+          onSetDirection: { direction in
+            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+            store.setEdgeDirection(edge.id, direction: direction)
+          },
           onEditLabel: {
-            editingEdgeLabelID = edge.id
+            beginEdgeLabelEdit(edgeID: edge.id)
             edgeLabelDraft = edge.label ?? ""
           }
         )
@@ -1600,7 +1706,10 @@ struct InfiniteCanvasView: View {
             zoom: displayTransform.zoom,
             cardColors: store.cardColors,
             showCustomColorPicker: $edgeToolbarCustomColorOpen,
-            onSetColor: { store.setEdgeColor(edge.id, hex: $0) }
+            onSetColor: { hex in
+              guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+              store.setEdgeColor(edge.id, hex: hex)
+            }
           )
           .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
         }
@@ -1799,24 +1908,32 @@ struct InfiniteCanvasView: View {
 
     guard let keyboardOverlap else { return }
 
-    let bottomObstruction = keyboardOverlap + NoteFormattingToolbarAccessoryContainer.preferredHeight
+    let bottomObstruction = keyboardOverlap
+      + NoteFormattingToolbarAccessoryContainer.preferredHeight
+      + canvasSafeAreaBottom
     let cardRect = noteCardScreenRect(for: card)
     let requiredPan = CanvasNoteEditKeyboardAvoidance.requiredPanDeltaY(
       cardScreenRect: cardRect,
       canvasHeight: canvasSize.height,
       bottomObstructionHeight: bottomObstruction
     )
-    applyCanvasKeyboardPan(requiredPan)
+    applyCanvasKeyboardPan(requiredPan, animated: true)
   }
 
-  private func resetCanvasKeyboardAvoidance() {
-    applyCanvasKeyboardPan(0)
+  private func resetCanvasKeyboardAvoidance(animated: Bool = false) {
+    applyCanvasKeyboardPan(0, animated: animated)
   }
 
-  private func applyCanvasKeyboardPan(_ requiredPan: CGFloat) {
+  private func applyCanvasKeyboardPan(_ requiredPan: CGFloat, animated: Bool = false) {
     let delta = requiredPan - canvasPanYOffsetForKeyboard
     guard abs(delta) > 0.5 else { return }
-    displayTransform.y -= delta
+    if animated {
+      withAnimation(.easeOut(duration: 0.28)) {
+        displayTransform.y -= delta
+      }
+    } else {
+      displayTransform.y -= delta
+    }
     canvasPanYOffsetForKeyboard = requiredPan
   }
   #endif
@@ -1827,6 +1944,8 @@ struct InfiniteCanvasView: View {
     if store.focusCardID != nil {
       return importDroppedImagesIntoFocusedNote(providers)
     }
+
+    guard entitlements.requireWriteAccess(context: documentTitle) else { return false }
 
     let topLeft = store.screenToWorld(location, in: canvasSize, transform: displayTransform)
     var offset: CGFloat = 0
@@ -2050,7 +2169,7 @@ struct InfiniteCanvasView: View {
     store.selectedEdgeID = nil
     store.focusCardID = nil
     store.endContentEdit()
-    editingEdgeLabelID = nil
+    commitEdgeLabelEditIfNeeded()
 
     timelapsePlaying = true
     timelapseVisibleCardIDs = []
@@ -2575,7 +2694,7 @@ struct InfiniteCanvasView: View {
       .buttonStyle(.plain)
 
       switch menu.kind {
-      case .endpoint, .edge:
+      case .canvas, .endpoint, .edge:
         vaultNoteButton(menu, canvasSize: canvasSize)
       default:
         EmptyView()
@@ -2596,18 +2715,19 @@ struct InfiniteCanvasView: View {
     canvasSize: CGSize
   ) -> some View {
     Button {
-      let edgeID: String? = switch menu.kind {
-      case .endpoint(let id, _, _), .edge(let id): id
-      default: nil
-      }
-      if let edgeID {
-        store.pendingEndpointEdgeID = edgeID
+      switch menu.kind {
+      case .canvas(let wx, let wy):
+        store.pendingVaultInsertCenter = CGPoint(x: wx, y: wy)
+      case .endpoint(let id, _, _), .edge(let id):
+        store.pendingEndpointEdgeID = id
         store.pendingEndpointMenuCenter = endpointMenuCenterWorld(menu, canvasSize: canvasSize)
-        store.setVaultFiles(workspace.files)
-        store.isVaultOpen = true
-        store.vaultSearchQuery = ""
-        store.vaultSelectedIndex = 0
+      default:
+        break
       }
+      store.setVaultFiles(workspace.files)
+      store.isVaultOpen = true
+      store.vaultSearchQuery = ""
+      store.vaultSelectedIndex = 0
       store.contextMenu = nil
     } label: {
       Text("Add note from vault")
@@ -2706,6 +2826,10 @@ struct InfiniteCanvasView: View {
           if moved >= ContextMenuLayout.edgeDragThreshold {
             edgeInteractionActive = true
             pendingEdgeInteractionID = nil
+            guard entitlements.requireWriteAccess(context: documentTitle) else {
+              edgeInteractionActive = false
+              return
+            }
             store.beginEditingEdgeEndpoint(
               pendingID,
               positionOverrides: cardDragOverrides,

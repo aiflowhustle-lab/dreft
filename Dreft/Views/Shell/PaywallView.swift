@@ -44,9 +44,10 @@ struct PaywallView: View {
             if storeManager.products.isEmpty {
                 await storeManager.loadProducts()
             }
-            if let yearly = storeManager.yearlyProduct {
-                selectedPlanID = yearly.id
-            }
+            normalizePlanSelection()
+        }
+        .onChange(of: storeManager.products) { _, _ in
+            normalizePlanSelection()
         }
     }
 
@@ -68,16 +69,7 @@ struct PaywallView: View {
                 .textCase(.uppercase)
                 .foregroundStyle(AppColors.textSecondary)
 
-            Text(
-                PaywallCopy.headline(
-                    trigger: entitlements.paywallTrigger,
-                    worldName: worldName,
-                    coreDesire: onboardingDraft.inferredCoreDesire(),
-                    selectedGoals: onboardingDraft.selectedGoals,
-                    isReadOnly: entitlements.isReadOnly,
-                    context: entitlements.paywallContext
-                )
-            )
+            Text(paywallHeadline)
             .font(OnboardingTypography.display(size: headlineSize, weight: .bold))
             .foregroundStyle(AppColors.textPrimary)
             .padding(.top, 8)
@@ -204,10 +196,14 @@ struct PaywallView: View {
                         label: "Yearly",
                         note: PaywallCopy.yearlyNote(
                             yearlyProduct: storeManager.yearlyProduct,
-                            monthlyProduct: storeManager.monthlyProduct
+                            includesTrial: isYearlyTrialEligible,
+                            introOffer: yearly.subscription?.introductoryOffer
                         ),
                         unit: "/year",
-                        badge: PaywallCopy.bestValueBadge
+                        discountPercent: PaywallCopy.yearlyDiscountPercent(
+                            yearlyProduct: storeManager.yearlyProduct,
+                            monthlyProduct: storeManager.monthlyProduct
+                        )
                     )
                 }
                 if let monthly = storeManager.monthlyProduct {
@@ -216,7 +212,7 @@ struct PaywallView: View {
                         label: "Monthly",
                         note: PaywallCopy.monthlyNote(),
                         unit: "/month",
-                        badge: nil
+                        discountPercent: nil
                     )
                 }
             }
@@ -228,71 +224,76 @@ struct PaywallView: View {
         label: String,
         note: String,
         unit: String,
-        badge: String?
+        discountPercent: Int?
     ) -> some View {
         let isSelected = selectedPlanID == product.id
+        let cardCornerRadius: CGFloat = 16
 
         return Button {
             selectedPlanID = product.id
         } label: {
-            HStack(spacing: 16) {
-                ZStack {
-                    Circle()
-                        .stroke(isSelected ? AppColors.textPrimary : AppColors.border, lineWidth: 1.5)
-                        .frame(width: 18, height: 18)
-                    if isSelected {
-                        Circle()
-                            .fill(AppColors.textPrimary)
-                            .frame(width: 18, height: 18)
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(OnboardingColors.buttonText(for: colorScheme))
-                    }
+            VStack(spacing: 0) {
+                if let discountPercent {
+                    Text("\(discountPercent)% OFF")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(1.2)
+                        .foregroundStyle(OnboardingColors.buttonText(for: colorScheme))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(AppColors.textPrimary)
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
+                HStack(spacing: 16) {
+                    ZStack {
+                        Circle()
+                            .stroke(isSelected ? AppColors.textPrimary : AppColors.border, lineWidth: 1.5)
+                            .frame(width: 18, height: 18)
+                        if isSelected {
+                            Circle()
+                                .fill(AppColors.textPrimary)
+                                .frame(width: 18, height: 18)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(OnboardingColors.buttonText(for: colorScheme))
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(label)
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(AppColors.textPrimary)
-                        if let badge {
-                            Text(badge.uppercased())
-                                .font(.system(size: 9.5, weight: .semibold))
-                                .tracking(1.1)
-                                .foregroundStyle(OnboardingColors.buttonText(for: colorScheme))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(AppColors.textPrimary)
-                                .clipShape(Capsule())
-                        }
+                        Text(note)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(AppColors.textSecondary)
                     }
-                    Text(note)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(AppColors.textSecondary)
-                }
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(product.displayPrice)
-                        .font(OnboardingTypography.display(size: 17, weight: .semibold))
-                        .foregroundStyle(AppColors.textPrimary)
-                    Text(unit)
-                        .font(.system(size: 11))
-                        .foregroundStyle(AppColors.textSecondary)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(product.displayPrice)
+                            .font(OnboardingTypography.display(size: 17, weight: .semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                        Text(unit)
+                            .font(.system(size: 11))
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                     .fill(isSelected ? AppColors.textPrimary.opacity(0.05) : AppColors.textPrimary.opacity(0.025))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isSelected ? AppColors.textPrimary.opacity(0.55) : AppColors.border, lineWidth: 1)
+                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                    .stroke(
+                        isSelected ? AppColors.textPrimary.opacity(0.55) : AppColors.border,
+                        lineWidth: 1
+                    )
             )
+            .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
             .shadow(color: isSelected ? Color.black.opacity(0.08) : .clear, radius: 12, x: 0, y: 6)
         }
         .buttonStyle(.plain)
@@ -386,10 +387,27 @@ struct PaywallView: View {
         #endif
     }
 
+    private var paywallHeadline: String {
+        let base = PaywallCopy.headline(
+            trigger: entitlements.paywallTrigger,
+            worldName: worldName,
+            coreDesire: onboardingDraft.inferredCoreDesire(),
+            selectedGoals: onboardingDraft.selectedGoals,
+            isReadOnly: entitlements.isReadOnly,
+            isTrialEligible: showsTrialReminder,
+            context: entitlements.paywallContext
+        )
+        return base
+    }
+
+    private var isYearlyTrialEligible: Bool {
+        storeManager.yearlyProduct.map { storeManager.isYearlyTrialEligible($0) } == true
+    }
+
     private var showsTrialReminder: Bool {
         !entitlements.isReadOnly
             && selectedPlanID == StoreConstants.yearlyProductID
-            && storeManager.yearlyProduct.map { storeManager.isYearlyTrialEligible($0) } == true
+            && isYearlyTrialEligible
     }
 
     private var selectedProduct: Product? {
@@ -397,6 +415,14 @@ struct PaywallView: View {
             return storeManager.yearlyProduct
         }
         return storeManager.monthlyProduct
+    }
+
+    /// Keeps the selection on a product that actually loaded (e.g. yearly missing, monthly present).
+    private func normalizePlanSelection() {
+        if selectedProduct == nil,
+           let available = storeManager.yearlyProduct ?? storeManager.monthlyProduct {
+            selectedPlanID = available.id
+        }
     }
 
     private var primaryCTATitle: String {
@@ -407,7 +433,7 @@ struct PaywallView: View {
             return "Subscribe"
         }
         if showsTrialReminder {
-            return "Try Dreft Pro free"
+            return "Try Now"
         }
         return "Subscribe"
     }
@@ -420,7 +446,7 @@ struct PaywallView: View {
         if product.id == StoreConstants.yearlyProductID,
            storeManager.isYearlyTrialEligible(product),
            let intro = product.subscription?.introductoryOffer {
-            let trial = PaywallCopy.introPeriodDescription(intro)
+            let trial = PaywallCopy.shortTrialPhrase(intro)
             return "\(trial), then \(product.displayPrice)/year. \(PaywallCopy.subscriptionRenewalDisclaimer)"
         }
 

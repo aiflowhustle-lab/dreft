@@ -10,10 +10,12 @@ import AppKit
 /// Inline canvas note image rendered by TextKit at exact bounds (no overlay guesswork).
 final class NoteImageTextAttachment: NSTextAttachment {
     let vaultPath: String
+    let alias: String?
 
     #if canImport(UIKit)
-    init(vaultPath: String, cgImage: CGImage, size: CGSize) {
+    init(vaultPath: String, alias: String? = nil, cgImage: CGImage, size: CGSize) {
         self.vaultPath = vaultPath
+        self.alias = alias
         super.init(data: nil, ofType: nil)
         let scale = UIScreen.main.scale
         image = UIImage(cgImage: cgImage, scale: scale, orientation: .up)
@@ -45,8 +47,9 @@ final class NoteImageTextAttachment: NSTextAttachment {
         fatalError("init(coder:) has not been implemented")
     }
     #elseif canImport(AppKit)
-    init(vaultPath: String, cgImage: CGImage, size: CGSize) {
+    init(vaultPath: String, alias: String? = nil, cgImage: CGImage, size: CGSize) {
         self.vaultPath = vaultPath
+        self.alias = alias
         super.init(data: nil, ofType: nil)
         image = NSImage(cgImage: cgImage, size: NSSize(width: size.width, height: size.height))
         bounds = CGRect(x: 0, y: 0, width: size.width, height: size.height)
@@ -95,9 +98,10 @@ enum NoteImageEmbedAttributedSupport {
                     hideTaskListMarkers: hideTaskListMarkers
                 )
                 result.append(styled)
-            case .image(let path):
+            case .image(let path, let alias):
                 appendImageAttachment(
                     path: path,
+                    alias: alias,
                     to: result,
                     fontSize: fontSize,
                     vaultURL: vaultURL,
@@ -142,7 +146,7 @@ enum NoteImageEmbedAttributedSupport {
                     at: index,
                     effectiveRange: nil
                 ) as? NoteImageTextAttachment {
-                    markdown += "![[\(attachment.vaultPath)]]"
+                    markdown += NoteCardEmbedSupport.embedMarkdown(path: attachment.vaultPath, alias: attachment.alias)
                 } else if fallbackEmbedIndex < fallbackEmbeds.count, let fallbackMarkdown {
                     let embed = fallbackEmbeds[fallbackEmbedIndex]
                     markdown += (fallbackMarkdown as NSString).substring(with: embed)
@@ -157,7 +161,7 @@ enum NoteImageEmbedAttributedSupport {
                 at: index,
                 effectiveRange: nil
             ) as? NoteImageTextAttachment {
-                markdown += "![[\(attachment.vaultPath)]]"
+                markdown += NoteCardEmbedSupport.embedMarkdown(path: attachment.vaultPath, alias: attachment.alias)
                 index += 1
                 continue
             }
@@ -188,6 +192,29 @@ enum NoteImageEmbedAttributedSupport {
         return paths
     }
 
+    static func embedSignatures(from attributed: NSAttributedString) -> [String] {
+        var signatures: [String] = []
+        let ns = attributed.string as NSString
+        var index = 0
+        while index < ns.length {
+            if let attachment = attributed.attribute(
+                .attachment,
+                at: index,
+                effectiveRange: nil
+            ) as? NoteImageTextAttachment {
+                if let alias = attachment.alias, !alias.isEmpty {
+                    signatures.append("\(attachment.vaultPath)|\(alias)")
+                } else {
+                    signatures.append(attachment.vaultPath)
+                }
+                index += 1
+                continue
+            }
+            index += 1
+        }
+        return signatures
+    }
+
     static func markdownPreservingEmbeds(
         from attributed: NSAttributedString,
         previousMarkdown: String,
@@ -200,7 +227,8 @@ enum NoteImageEmbedAttributedSupport {
         )
         let previousPaths = NoteCardEmbedSupport.imagePaths(from: previousMarkdown, vaultURL: vaultURL)
         let extractedPaths = NoteCardEmbedSupport.imagePaths(from: extracted, vaultURL: vaultURL)
-        if !previousPaths.isEmpty, extractedPaths.isEmpty {
+        let attributedPaths = embedPaths(from: attributed)
+        if !previousPaths.isEmpty, extractedPaths.isEmpty, !attributedPaths.isEmpty {
             return previousMarkdown
         }
         return extracted
@@ -248,15 +276,15 @@ enum NoteImageEmbedAttributedSupport {
         currentAttributed: NSAttributedString,
         vaultURL: URL?
     ) -> Bool {
-        let bindingPaths = NoteCardEmbedSupport.imagePaths(from: bindingMarkdown, vaultURL: vaultURL)
-        let viewPaths = embedPaths(from: currentAttributed)
-        if viewPaths.isEmpty, !bindingPaths.isEmpty {
+        let bindingSignatures = NoteCardEmbedSupport.embedSignatures(from: bindingMarkdown, vaultURL: vaultURL)
+        let viewSignatures = embedSignatures(from: currentAttributed)
+        if viewSignatures.isEmpty, !bindingSignatures.isEmpty {
             return true
         }
-        if !bindingPaths.isEmpty, viewPaths.isEmpty {
+        if !bindingSignatures.isEmpty, viewSignatures.isEmpty {
             return true
         }
-        return Set(bindingPaths) != Set(viewPaths)
+        return bindingSignatures != viewSignatures
     }
 
     static func attributedRange(fromMarkdownRange markdownRange: NSRange, in markdown: String, vaultURL: URL?) -> NSRange {
@@ -390,6 +418,7 @@ enum NoteImageEmbedAttributedSupport {
 
     private static func appendImageAttachment(
         path: String,
+        alias: String?,
         to result: NSMutableAttributedString,
         fontSize: CGFloat,
         vaultURL: URL?,
@@ -404,11 +433,12 @@ enum NoteImageEmbedAttributedSupport {
         let cgImage = CanvasImageCache.shared.cachedImage(forCardID: cacheID, content: path)
             ?? CanvasImageCache.shared.displayImage(forCardID: cacheID, content: path, vaultURL: vaultURL)
         if let cgImage {
-            if result.length > 0,
-               !result.string.hasSuffix("\n") {
-                result.append(NSAttributedString(string: "\n", attributes: baseAttributes(fontSize: fontSize)))
-            }
-            let attachment = NoteImageTextAttachment(vaultPath: path, cgImage: cgImage, size: blockSize)
+            let attachment = NoteImageTextAttachment(
+                vaultPath: path,
+                alias: alias,
+                cgImage: cgImage,
+                size: blockSize
+            )
             let attachmentString = NSMutableAttributedString(attachment: attachment)
             attachmentString.addAttributes(
                 blockParagraphAttributes(fontSize: fontSize),
@@ -419,13 +449,11 @@ enum NoteImageEmbedAttributedSupport {
         } else {
             result.append(
                 NSAttributedString(
-                    string: "![[\(path)]]",
+                    string: NoteCardEmbedSupport.embedMarkdown(path: path, alias: alias),
                     attributes: baseAttributes(fontSize: fontSize)
                 )
             )
         }
-
-        result.append(NSAttributedString(string: "\n", attributes: baseAttributes(fontSize: fontSize)))
     }
 
     private static func blockParagraphAttributes(fontSize: CGFloat) -> [NSAttributedString.Key: Any] {

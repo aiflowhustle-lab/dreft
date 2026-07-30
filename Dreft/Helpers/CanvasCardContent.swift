@@ -8,7 +8,7 @@ enum CanvasCardContent {
         guard !trimmed.isEmpty, !trimmed.contains("\n") else { return false }
         guard !trimmed.hasPrefix("#") else { return false }
         let ext = (trimmed as NSString).pathExtension.lowercased()
-        return ext == "md" || ext == "markdown"
+        return ext == "md" || ext == "markdown" || ext == "canvas"
     }
 
     static func linkedNotePath(for card: CanvasCard) -> String? {

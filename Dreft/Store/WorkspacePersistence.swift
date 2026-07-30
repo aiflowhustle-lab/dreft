@@ -162,6 +162,13 @@ final class WorkspacePersistenceCoordinator {
             self?.dirtyTracker.markNote(relativePath)
             self?.scheduleSave()
         }
+        workspace.onFlushNoteToDisk = { [weak self] relativePath in
+            self?.flushNoteToDisk(relativePath: relativePath)
+        }
+        workspace.onFileRelativePathChanged = { [weak self] oldPath, newPath in
+            self?.dirtyTracker.rekeyNote(from: oldPath, to: newPath)
+            self?.dirtyTracker.rekeyCanvas(from: oldPath, to: newPath)
+        }
         workspace.onWorkspaceStateDirty = { [weak self] in
             self?.dirtyTracker.markWorkspaceState()
             self?.scheduleSave()
@@ -285,10 +292,15 @@ final class WorkspacePersistenceCoordinator {
 
         if !dirtyNotes.isEmpty {
             let noteResult = writeDirtyNotes(dirtyNotes, vaultURL: vaultURL)
-            if noteResult.hasFailures {
+            let writtenNotes = noteResult.writtenPaths
+            let unmatchedNotes = dirtyNotes.subtracting(writtenNotes)
+            if !unmatchedNotes.isEmpty {
+                dirtyTracker.markAllNotes(Array(unmatchedNotes))
+            }
+            if noteResult.result.hasFailures {
                 workspace.reportVaultError(
                     title: "Couldn't save to vault",
-                    message: noteResult.summaryMessage
+                    message: noteResult.result.summaryMessage
                 )
             }
         }
@@ -297,6 +309,13 @@ final class WorkspacePersistenceCoordinator {
             let snapshots = documents.snapshotAll(validIDs: workspace.allKnownFileIDs())
             let pending = snapshots.filter { dirtyCanvases.contains($0.key) }
             let canvasResult = VaultFilesystem.writeCanvases(pending, vaultURL: vaultURL)
+            let writtenCanvases = Set(pending.keys.filter { key in
+                !canvasResult.failures.contains(where: { $0.path == key })
+            })
+            let unmatchedCanvases = dirtyCanvases.subtracting(writtenCanvases)
+            if !unmatchedCanvases.isEmpty {
+                dirtyTracker.markAllCanvases(Array(unmatchedCanvases))
+            }
             if canvasResult.hasFailures {
                 workspace.reportVaultError(
                     title: "Couldn't save to vault",
@@ -306,16 +325,41 @@ final class WorkspacePersistenceCoordinator {
         }
     }
 
-    private func writeDirtyNotes(_ paths: Set<String>, vaultURL: URL) -> VaultBatchWriteResult {
+    private struct DirtyNoteWriteOutcome {
+        var result: VaultBatchWriteResult
+        var writtenPaths: Set<String>
+    }
+
+    private func flushNoteToDisk(relativePath: String) {
+        guard dirtyTracker.isNoteDirty(relativePath),
+              let vault = workspace.activeVault else { return }
+        workspace.suppressFilesystemWatch()
+        let vaultURL = VaultSecurityAccess.resolvedURL(for: vault)
+        documents.setVaultURL(vaultURL)
+        let outcome = writeDirtyNotes([relativePath], vaultURL: vaultURL)
+        if outcome.result.hasFailures {
+            workspace.reportVaultError(
+                title: "Couldn't save note",
+                message: outcome.result.summaryMessage
+            )
+        }
+        if outcome.writtenPaths.contains(relativePath) {
+            dirtyTracker.clearNote(relativePath)
+        }
+    }
+
+    private func writeDirtyNotes(_ paths: Set<String>, vaultURL: URL) -> DirtyNoteWriteOutcome {
         var result = VaultBatchWriteResult()
+        var writtenPaths = Set<String>()
         for file in workspace.files where file.kind == .note && paths.contains(file.relativePath) {
             do {
                 try VaultFilesystem.writeNote(file, vaultURL: vaultURL)
+                writtenPaths.insert(file.relativePath)
             } catch {
                 result.failures.append((file.relativePath, error))
             }
         }
-        return result
+        return DirtyNoteWriteOutcome(result: result, writtenPaths: writtenPaths)
     }
 
     private func markEntireActiveVaultDirty() {

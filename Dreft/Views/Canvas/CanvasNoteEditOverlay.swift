@@ -203,9 +203,6 @@ struct CanvasNoteEditOverlay: View {
         draftText = prepared
         usesInlineImageEditor = vaultURL != nil
             && !NoteCardEmbedSupport.imageEmbedRanges(in: prepared, vaultURL: vaultURL).isEmpty
-        if prepared != initialText {
-            onTextEdited(prepared, false)
-        }
         onRegisterImageInserter?(insertImageAttachment)
         #if os(macOS)
         DispatchQueue.main.async {

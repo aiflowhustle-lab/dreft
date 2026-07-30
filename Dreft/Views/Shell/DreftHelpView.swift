@@ -21,79 +21,81 @@ struct DreftHelpView: View {
                     closeHelp()
                 }
 
-            VStack(spacing: 0) {
-                DreftAppMark(cornerRadius: 12)
-                    .frame(width: 52, height: 52)
-                    .padding(.top, 28)
-
-                Text("Dreft")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-                    .padding(.top, 14)
-
-                Text("Version \(appVersion)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .padding(.top, 2)
-
-                Spacer().frame(height: 24)
-
+            ScrollView {
                 VStack(spacing: 0) {
-                    helpActionRow(
-                        icon: "book",
-                        title: "Official help site",
-                        subtitle: "Read the official help documentation for Dreft.",
-                        buttonTitle: "Visit",
-                        isPrimary: true
-                    ) {
-                        openURL(Self.documentationURL)
+                    DreftAppMark(cornerRadius: 12)
+                        .frame(width: 52, height: 52)
+                        .padding(.top, 28)
+
+                    Text("Dreft")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                        .padding(.top, 14)
+
+                    Text("Version \(appVersion)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .padding(.top, 2)
+
+                    Spacer().frame(height: 24)
+
+                    VStack(spacing: 0) {
+                        helpActionRow(
+                            icon: "book",
+                            title: "Official help site",
+                            subtitle: "Read the official help documentation for Dreft.",
+                            buttonTitle: "Visit",
+                            isPrimary: true
+                        ) {
+                            openURL(Self.documentationURL)
+                        }
+
+                        Divider()
+                            .background(AppColors.borderSubtle)
+                            .padding(.leading, 48)
+
+                        helpActionRow(
+                            icon: "hand.raised",
+                            title: "Privacy policy",
+                            subtitle: "How Dreft handles your data on your device.",
+                            buttonTitle: "View",
+                            isPrimary: false
+                        ) {
+                            openURL(StoreConstants.privacyPolicyURL)
+                        }
+
+                        Divider()
+                            .background(AppColors.borderSubtle)
+                            .padding(.leading, 48)
+
+                        helpActionRow(
+                            icon: "doc.text",
+                            title: "Terms of service",
+                            subtitle: "Subscription terms, billing, and usage.",
+                            buttonTitle: "View",
+                            isPrimary: false
+                        ) {
+                            openURL(StoreConstants.termsOfUseURL)
+                        }
                     }
-
-                    Divider()
-                        .background(AppColors.borderSubtle)
-                        .padding(.leading, 48)
-
-                    helpActionRow(
-                        icon: "hand.raised",
-                        title: "Privacy policy",
-                        subtitle: "How Dreft handles your data on your device.",
-                        buttonTitle: "View",
-                        isPrimary: false
-                    ) {
-                        openURL(StoreConstants.privacyPolicyURL)
-                    }
-
-                    Divider()
-                        .background(AppColors.borderSubtle)
-                        .padding(.leading, 48)
-
-                    helpActionRow(
-                        icon: "doc.text",
-                        title: "Terms of service",
-                        subtitle: "Subscription terms, billing, and usage.",
-                        buttonTitle: "View",
-                        isPrimary: false
-                    ) {
-                        openURL(StoreConstants.termsOfUseURL)
-                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(AppColors.sidebarSelection)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(AppColors.borderSubtle, lineWidth: 1)
+                    )
+                    .padding(.horizontal, 28)
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(AppColors.sidebarSelection)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(AppColors.borderSubtle, lineWidth: 1)
-                )
-                .padding(.horizontal, 28)
-
-                Spacer()
+                .padding(.bottom, 28)
             }
+            .scrollIndicators(.visible)
             #if os(iOS)
-            .frame(maxWidth: 420, maxHeight: 360)
+            .frame(maxWidth: 420, maxHeight: 420)
             .padding(.horizontal, 20)
             #else
-            .frame(width: 420, height: 400)
+            .frame(width: 420, height: 440)
             #endif
             .background(AppColors.overlayPanel)
             .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -120,12 +122,11 @@ struct DreftHelpView: View {
         isPrimary: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(AppColors.textPrimary.opacity(0.85))
-                .frame(width: 22, height: 22)
-                .padding(.top, 1)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AppColors.textSecondary)
+                .frame(width: 24, height: 24)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -133,7 +134,7 @@ struct DreftHelpView: View {
                     .foregroundStyle(AppColors.textPrimary)
                 Text(subtitle)
                     .font(.system(size: 11.5))
-                    .foregroundStyle(AppColors.textSecondary)
+                    .foregroundStyle(AppColors.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -142,12 +143,12 @@ struct DreftHelpView: View {
             Button(action: action) {
                 Text(buttonTitle)
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(isPrimary ? Color.white : AppColors.textPrimary)
+                    .foregroundStyle(isPrimary ? .white : AppColors.textPrimary)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(isPrimary ? AppColors.selectionStroke : AppColors.pillButtonFill)
+                            .fill(isPrimary ? AppColors.selectionStroke : AppColors.sidebarSelection)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 6)
                                     .stroke(

@@ -93,10 +93,9 @@ struct VaultManagerView: View {
             mainPanel
         }
         #if os(iOS)
-        .frame(maxWidth: 680, maxHeight: 620)
-        .padding(.horizontal, 20)
+        .frame(maxWidth: 680, maxHeight: 700)
         #else
-        .frame(width: 710, height: 560)
+        .frame(width: 710, height: 600)
         #endif
         .background(AppColors.overlayPanel)
         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -106,6 +105,10 @@ struct VaultManagerView: View {
         )
         .shadow(color: AppColors.floatingChromeShadow, radius: 40, y: 18)
         .onTapGesture { }
+        #if os(iOS)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 24)
+        #endif
     }
 
     @ViewBuilder
@@ -151,15 +154,17 @@ struct VaultManagerView: View {
     #endif
 
     private var vaultListPanel: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Spacer().frame(height: 40)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                Spacer().frame(height: 40)
 
-            ForEach(workspace.vaults) { vault in
-                vaultRow(vault)
+                ForEach(workspace.vaults) { vault in
+                    vaultRow(vault)
+                }
             }
-
-            Spacer()
+            .padding(.bottom, 16)
         }
+        .scrollIndicators(.visible)
         #if os(iOS)
         .frame(maxWidth: 220)
         #else
@@ -234,34 +239,39 @@ struct VaultManagerView: View {
     }
 
     private var mainPanel: some View {
-        VStack(spacing: 0) {
-            Spacer().frame(height: 40)
+        ScrollView {
+            VStack(spacing: 0) {
+                Spacer().frame(height: 40)
 
-            DreftAppMark(cornerRadius: 18)
-                .frame(width: 88, height: 88)
+                DreftAppMark(cornerRadius: 18)
+                    .frame(width: 88, height: 88)
 
-            Spacer().frame(height: 16)
+                Spacer().frame(height: 16)
 
-            Text("Dreft")
-                .font(.system(size: 34, weight: .bold))
-                .foregroundStyle(AppColors.textPrimary)
+                Text("Dreft")
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(AppColors.textPrimary)
 
-            Text("Version \(appVersion)")
-                .font(.system(size: 12))
-                .foregroundStyle(AppColors.textMuted)
-                .padding(.top, 2)
+                Text("Version \(appVersion)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppColors.textMuted)
+                    .padding(.top, 2)
 
-            Spacer().frame(height: 28)
+                Spacer().frame(height: 28)
 
-            switch screen {
-            case .home:
-                homeSection
-            case .createLocal:
-                createLocalSection
+                Group {
+                    switch screen {
+                    case .home:
+                        homeSection
+                    case .createLocal:
+                        createLocalSection
+                    }
+                }
             }
-
-            Spacer()
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 32)
         }
+        .scrollIndicators(.visible)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
