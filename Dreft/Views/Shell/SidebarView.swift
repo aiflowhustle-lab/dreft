@@ -799,7 +799,7 @@ struct SidebarView: View {
             SidebarFileToolbar(
                 workspace: workspace,
                 canWrite: entitlements.canWrite,
-                onCreateBlocked: { entitlements.showPaywall = true },
+                onCreateBlocked: { entitlements.presentPaywall(.createBlocked) },
                 onNewNote: { entitlements.performWrite { workspace.createNote() } },
                 onNewFolder: { entitlements.performWrite { workspace.createFolder() } }
             )

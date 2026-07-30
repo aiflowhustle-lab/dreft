@@ -272,15 +272,26 @@ struct CanvasNoteCardImageOverlay: View {
 }
 
 enum NoteCardInlineImageMetrics {
+    static func blockAttachmentSize(for path: String, vaultURL: URL?, maxWidth: CGFloat) -> CGSize {
+        let cacheID = "note-embed|\(path)"
+        if let cgImage = CanvasImageCache.shared.cachedImage(forCardID: cacheID, content: path)
+            ?? CanvasImageCache.shared.displayImage(forCardID: cacheID, content: path, vaultURL: vaultURL) {
+            let natural = displaySize(for: cgImage, maxWidth: maxWidth)
+            if natural.width >= maxWidth * 0.92 {
+                return natural
+            }
+            return CGSize(width: maxWidth, height: natural.height * (maxWidth / max(natural.width, 1)))
+        }
+        return estimatedSize(for: path, vaultURL: vaultURL, maxWidth: maxWidth)
+    }
+
     static func estimatedSize(for path: String, vaultURL: URL?, maxWidth: CGFloat) -> CGSize {
-        let height = NoteCardEmbedLayoutMetrics.reservedHeight(for: path, maxWidth: maxWidth, vaultURL: vaultURL)
         let cacheID = "note-embed|\(path)"
         if let cgImage = CanvasImageCache.shared.cachedImage(forCardID: cacheID, content: path) {
-            let size = displaySize(for: cgImage, maxWidth: maxWidth)
-            return CGSize(width: size.width, height: height)
+            return displaySize(for: cgImage, maxWidth: maxWidth)
         }
         let width = min(maxWidth, 160)
-        return CGSize(width: width, height: height)
+        return CGSize(width: width, height: min(maxWidth * 0.6, 120))
     }
 
     static func recordDisplaySize(_ size: CGSize, path: String, maxWidth: CGFloat) {

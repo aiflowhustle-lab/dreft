@@ -5,6 +5,7 @@ struct CanvasNoteCardPreviewScrollContainer<Content: View>: View {
     @Binding var offsetY: CGFloat
     @Binding var contentHeight: CGFloat
     let viewportHeight: CGFloat
+    var onTap: (() -> Void)? = nil
     @ViewBuilder var content: () -> Content
 
     @State private var dragOriginOffset: CGFloat = 0
@@ -64,7 +65,11 @@ struct CanvasNoteCardPreviewScrollContainer<Content: View>: View {
                 let proposed = dragOriginOffset - value.translation.height
                 offsetY = min(max(0, proposed), maxOffset)
             }
-            .onEnded { _ in
+            .onEnded { value in
+                let moved = hypot(value.translation.width, value.translation.height) > 3
+                if !moved {
+                    onTap?()
+                }
                 isDragging = false
                 dragOriginOffset = offsetY
             }

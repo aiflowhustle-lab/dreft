@@ -263,7 +263,7 @@ struct WorkspaceShellView: View {
                     isGraphActive: focusedPaneActiveTab?.kind == .graph,
                     isCanvasActive: focusedPaneActiveTab?.kind == .canvas,
                     canWrite: entitlements.canWrite,
-                    onCreateBlocked: { entitlements.showPaywall = true },
+                    onCreateBlocked: { entitlements.presentPaywall(.createBlocked) },
                     onGoToFile: openGoToFileInFocusedPane,
                     onOpenGraph: openGraphInFocusedPane,
                     onCreateCanvas: createCanvasInFocusedPane,
@@ -346,7 +346,7 @@ struct WorkspaceShellView: View {
                                 isGraphActive: focusedPaneActiveTab?.kind == .graph,
                                 isCanvasActive: focusedPaneActiveTab?.kind == .canvas,
                                 canWrite: entitlements.canWrite,
-                                onCreateBlocked: { entitlements.showPaywall = true },
+                                onCreateBlocked: { entitlements.presentPaywall(.createBlocked) },
                                 onGoToFile: openGoToFileInFocusedPane,
                                 onOpenGraph: openGraphInFocusedPane,
                                 onCreateCanvas: createCanvasInFocusedPane,
@@ -677,7 +677,7 @@ struct WorkspaceShellView: View {
     }
 
     private var showsSubscribeCTA: Bool {
-        entitlements.isLocked && usesDesktopChrome
+        entitlements.isLocked && usesDesktopChrome && !entitlements.showPaywall
     }
 
     private var subscribeCTATrailingSlot: CGFloat {
@@ -1144,7 +1144,10 @@ struct WorkspaceShellView: View {
                         }
                     ),
                         canEnterEditMode: entitlements.canWrite,
-                        onEditBlocked: { entitlements.showPaywall = true }
+                        onEditBlocked: {
+                            let title = tab.map { workspace.documentTitle(for: $0) } ?? "this note"
+                            entitlements.presentPaywall(.editBlocked, context: title)
+                        }
                     ) {
                         if isRoot { noteSplitLayout = .none }
                     }
@@ -1593,7 +1596,7 @@ struct WorkspaceShellView: View {
                     entitlements: entitlements,
                     storeManager: storeManager
                 ) {
-                    entitlements.showPaywall = true
+                    entitlements.presentPaywall(.subscribeCTA)
                 }
                 .padding(.leading, 8)
             }

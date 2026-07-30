@@ -69,6 +69,7 @@ final class StoreManager {
     private(set) var isPurchasing = false
     private(set) var isRestoring = false
     private(set) var yearlyIntroOfferEligible = false
+    private(set) var activeSubscription: ActiveSubscriptionSummary?
 
     private var transactionListener: Task<Void, Never>?
     private var onTransactionUpdate: (() async -> Void)?
@@ -114,9 +115,38 @@ final class StoreManager {
             if products.isEmpty {
                 loadError = "No subscription plans are available right now."
             }
+            await refreshActiveSubscription()
         } catch {
             loadError = StorePurchaseError.friendlyMessage(for: error)
         }
+    }
+
+    func refreshActiveSubscription() async {
+        var found: ActiveSubscriptionSummary?
+
+        for await result in Transaction.currentEntitlements {
+            guard let transaction = try? checkVerified(result) else { continue }
+            guard StoreConstants.allProductIDs.contains(transaction.productID),
+                  transaction.revocationDate == nil else { continue }
+
+            let planName = transaction.productID == StoreConstants.yearlyProductID ? "Yearly" : "Monthly"
+            found = ActiveSubscriptionSummary(
+                planName: planName,
+                renewalDescription: renewalDescription(for: transaction)
+            )
+            break
+        }
+
+        activeSubscription = found
+    }
+
+    private func renewalDescription(for transaction: StoreKit.Transaction) -> String? {
+        guard let expirationDate = transaction.expirationDate else { return nil }
+        let formatted = expirationDate.formatted(date: .abbreviated, time: .omitted)
+        if expirationDate > Date() {
+            return "Renews \(formatted)"
+        }
+        return "Expired \(formatted)"
     }
 
     func isYearlyTrialEligible(_ product: Product) -> Bool {

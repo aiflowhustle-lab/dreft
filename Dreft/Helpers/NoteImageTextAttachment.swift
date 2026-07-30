@@ -20,6 +20,26 @@ final class NoteImageTextAttachment: NSTextAttachment {
         bounds = CGRect(x: 0, y: 0, width: size.width, height: size.height)
     }
 
+    override func attachmentBounds(
+        for textContainer: NSTextContainer?,
+        proposedLineFragment lineFrag: CGRect,
+        glyphPosition position: CGPoint,
+        characterIndex charIndex: Int
+    ) -> CGRect {
+        var rect = bounds
+        guard rect.width > 0, rect.height > 0 else { return rect }
+
+        if rect.width > lineFrag.width, lineFrag.width > 0 {
+            let scale = rect.height / rect.width
+            rect.size.width = lineFrag.width
+            rect.size.height = lineFrag.width * scale
+        }
+
+        let font = UIFont.systemFont(ofSize: WikilinkEditorSupport.bodyFontSize)
+        rect.origin.y = font.descender - rect.height * 0.02
+        return rect
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -375,7 +395,7 @@ enum NoteImageEmbedAttributedSupport {
         vaultURL: URL?,
         imageEmbedMaxWidth: CGFloat
     ) {
-        let size = NoteCardInlineImageMetrics.estimatedSize(
+        let blockSize = NoteCardInlineImageMetrics.blockAttachmentSize(
             for: path,
             vaultURL: vaultURL,
             maxWidth: imageEmbedMaxWidth
@@ -384,9 +404,18 @@ enum NoteImageEmbedAttributedSupport {
         let cgImage = CanvasImageCache.shared.cachedImage(forCardID: cacheID, content: path)
             ?? CanvasImageCache.shared.displayImage(forCardID: cacheID, content: path, vaultURL: vaultURL)
         if let cgImage {
-            let attachment = NoteImageTextAttachment(vaultPath: path, cgImage: cgImage, size: size)
-            result.append(NSAttributedString(attachment: attachment))
-            NoteCardInlineImageMetrics.recordDisplaySize(size, path: path, maxWidth: imageEmbedMaxWidth)
+            if result.length > 0,
+               !result.string.hasSuffix("\n") {
+                result.append(NSAttributedString(string: "\n", attributes: baseAttributes(fontSize: fontSize)))
+            }
+            let attachment = NoteImageTextAttachment(vaultPath: path, cgImage: cgImage, size: blockSize)
+            let attachmentString = NSMutableAttributedString(attachment: attachment)
+            attachmentString.addAttributes(
+                blockParagraphAttributes(fontSize: fontSize),
+                range: NSRange(location: 0, length: attachmentString.length)
+            )
+            result.append(attachmentString)
+            NoteCardInlineImageMetrics.recordDisplaySize(blockSize, path: path, maxWidth: imageEmbedMaxWidth)
         } else {
             result.append(
                 NSAttributedString(
@@ -397,6 +426,14 @@ enum NoteImageEmbedAttributedSupport {
         }
 
         result.append(NSAttributedString(string: "\n", attributes: baseAttributes(fontSize: fontSize)))
+    }
+
+    private static func blockParagraphAttributes(fontSize: CGFloat) -> [NSAttributedString.Key: Any] {
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacingBefore = 8
+        style.paragraphSpacing = 8
+        style.lineBreakMode = .byWordWrapping
+        return baseAttributes(fontSize: fontSize).merging([.paragraphStyle: style]) { _, new in new }
     }
 
     private static func embedStarting(at location: Int, in markdown: String, vaultURL: URL?) -> NSRange? {

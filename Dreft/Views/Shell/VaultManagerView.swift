@@ -20,8 +20,11 @@ struct VaultManagerView: View {
     #endif
     @FocusState private var nameFieldFocused: Bool
 
-    @State private var showPaywall = false
     @Environment(\.openURL) private var openURL
+
+    private var isPaywallVisible: Bool {
+        entitlements.showPaywall
+    }
 
     private enum Screen {
         case home
@@ -42,21 +45,25 @@ struct VaultManagerView: View {
 
             managerCard
                 .overlay(alignment: .topLeading) {
-                    closeButton
-                        .padding(12)
+                    if !isPaywallVisible {
+                        closeButton
+                            .padding(12)
+                    }
                 }
         }
+        .allowsHitTesting(!isPaywallVisible)
         .onAppear {
             screen = .home
+            Task {
+                await entitlements.refresh()
+                await storeManager.refreshActiveSubscription()
+            }
         }
         #if os(iOS)
         .vaultFolderPicker(purpose: localFolderPickerBinding) { url, purpose in
             handleFolderImport(url, for: purpose)
         }
         #endif
-        .sheet(isPresented: $showPaywall) {
-            PaywallView(storeManager: storeManager, entitlements: entitlements)
-        }
     }
 
     #if os(iOS)
@@ -331,57 +338,72 @@ struct VaultManagerView: View {
 
     @ViewBuilder
     private var subscriptionSection: some View {
-        if entitlements.canWrite {
-            Button {
-                openURL(StoreConstants.manageSubscriptionsURL)
-            } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(entitlements.isLegacyUser ? "Dreft Pro (Legacy)" : "Manage Subscription")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(AppColors.textPrimary)
-                        Text(entitlements.isLegacyUser
-                             ? "Full access on this install — thank you for being an early Dreft writer."
-                             : "View or cancel your plan in App Store Settings.")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(AppColors.textMuted)
+        let title = SubscriptionStatusCopy.settingsTitle(
+            accessState: entitlements.accessState,
+            isLegacyUser: entitlements.isLegacyUser,
+            activeSubscription: storeManager.activeSubscription
+        )
+        let subtitle = SubscriptionStatusCopy.settingsSubtitle(
+            accessState: entitlements.accessState,
+            isLegacyUser: entitlements.isLegacyUser,
+            activeSubscription: storeManager.activeSubscription
+        )
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Subscription")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppColors.textPrimary)
+
+            if entitlements.canWrite {
+                Button {
+                    if entitlements.isLegacyUser {
+                        return
                     }
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(AppColors.textMuted)
+                    openURL(StoreConstants.manageSubscriptionsURL)
+                } label: {
+                    subscriptionRow(
+                        title: title,
+                        subtitle: subtitle,
+                        trailingSymbol: entitlements.isLegacyUser ? "checkmark.seal.fill" : "arrow.up.right"
+                    )
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        } else {
-            Button {
-                showPaywall = true
-            } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Upgrade to Dreft Pro")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(AppColors.textPrimary)
-                        Text(entitlements.isReadOnly
-                             ? "Your subscription ended. Subscribe to start writing again."
-                             : "Unlock writing on Mac and iPad with a Dreft Pro subscription.")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(AppColors.textMuted)
-                    }
-                    Spacer()
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(AppColors.textSecondary)
+                .buttonStyle(.plain)
+                .disabled(entitlements.isLegacyUser)
+            } else {
+                Button {
+                    entitlements.presentPaywall(.settings)
+                } label: {
+                    subscriptionRow(
+                        title: title,
+                        subtitle: subtitle,
+                        trailingSymbol: "sparkles"
+                    )
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private func subscriptionRow(title: String, subtitle: String, trailingSymbol: String) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(AppColors.textMuted)
+            }
+            Spacer()
+            Image(systemName: trailingSymbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppColors.textSecondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
     }
 
     private var createVaultSubtitle: String {

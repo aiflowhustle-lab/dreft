@@ -4,11 +4,19 @@ import SwiftUI
 #if os(iOS)
 import UIKit
 
+struct NoteEditorAccessoryStatus: Equatable {
+    var saveLabel: String?
+    var backlinkCount: Int
+    var wordCount: Int
+    var characterCount: Int
+}
+
 @MainActor
 final class NoteFormattingToolbarBridge: ObservableObject {
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
     @Published private(set) var isTextEditingActive = false
+    @Published var accessoryStatus: NoteEditorAccessoryStatus?
 
     weak var textView: UITextView?
     var applyAction: ((MarkdownEditAction) -> Void)?

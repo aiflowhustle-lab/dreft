@@ -132,7 +132,9 @@ struct CanvasCardView: View {
                         .canvasCardCursor(isGrabbing: isPressingCard)
                 }
                 .if(isSelected && !isImage && !isEditing) { view in
-                    view.simultaneousGesture(noteEditDoubleTapGesture)
+                    view
+                        .simultaneousGesture(noteEditSingleTapGesture)
+                        .simultaneousGesture(noteEditDoubleTapGesture)
                 }
 
             if isSelected {
@@ -268,7 +270,8 @@ struct CanvasCardView: View {
             isEditing: isEditing,
             imageCacheRevision: imageCacheRevision,
             onImageLoaded: onImageLoaded,
-            onUpdateContent: onUpdateContent
+            onUpdateContent: onUpdateContent,
+            onBodyTap: isSelected && !isEditing && !isImage ? beginEditingNote : nil
         )
     }
 
@@ -518,6 +521,14 @@ struct CanvasCardView: View {
             .highPriorityGesture(cardDragGesture)
             .simultaneousGesture(noteEditDoubleTapGesture)
             .canvasCardCursor(isGrabbing: isPressingCard)
+    }
+
+    /// Single tap on a selected note card → enter edit mode (body tap is handled by preview scroll).
+    private var noteEditSingleTapGesture: some Gesture {
+        TapGesture(count: 1).onEnded {
+            guard !isImage, !isEditing else { return }
+            beginEditingNote()
+        }
     }
 
     /// Double-click / double-tap a note card → select and edit immediately (premium 2-click flow).

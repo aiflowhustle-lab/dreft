@@ -38,14 +38,7 @@ enum NoteEditingChromeSupport {
     }
 
     static func caretRect(in textView: NSTextView, fontSize: CGFloat) -> CGRect {
-        let layoutView: NSTextView = {
-            guard let window = textView.window,
-                  let fieldEditor = window.fieldEditor(false, for: textView) as? NSTextView,
-                  window.firstResponder === fieldEditor else {
-                return textView
-            }
-            return fieldEditor
-        }()
+        let layoutView = layoutTextView(for: textView)
 
         guard let layoutManager = layoutView.layoutManager ?? textView.layoutManager,
               let textContainer = layoutView.textContainer ?? textView.textContainer else { return .zero }
@@ -72,6 +65,47 @@ enum NoteEditingChromeSupport {
             rect.size.height = fontSize * 1.2
         }
         return convert(rect, in: textView, layoutView: layoutView)
+    }
+
+    /// Anchor for wikilink suggest — left edge at `[[`, vertical at line bottom.
+    static func wikilinkSuggestAnchor(in textView: NSTextView, characterIndex: Int, fontSize: CGFloat) -> CGRect {
+        let layoutView = layoutTextView(for: textView)
+
+        guard let layoutManager = layoutView.layoutManager ?? textView.layoutManager,
+              let textContainer = layoutView.textContainer ?? textView.textContainer else { return .zero }
+
+        let length = (textView.string as NSString).length
+        let index = min(max(0, characterIndex), length)
+        var glyphIndex = layoutManager.glyphIndexForCharacter(at: index)
+        if glyphIndex >= layoutManager.numberOfGlyphs {
+            glyphIndex = max(0, layoutManager.numberOfGlyphs - 1)
+        }
+
+        var lineGlyphRange = NSRange()
+        let lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: &lineGlyphRange)
+        var charRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(
+                location: glyphIndex,
+                length: min(1, max(0, layoutManager.numberOfGlyphs - glyphIndex))
+            ),
+            in: textContainer
+        )
+        if charRect.height < 1 {
+            charRect.size.height = fontSize * 1.2
+        }
+
+        let convertedLine = convert(lineRect, in: textView, layoutView: layoutView)
+        let convertedChar = convert(charRect, in: textView, layoutView: layoutView)
+        return CGRect(x: convertedChar.minX, y: convertedLine.maxY, width: 0, height: 0)
+    }
+
+    private static func layoutTextView(for textView: NSTextView) -> NSTextView {
+        guard let window = textView.window,
+              let fieldEditor = window.fieldEditor(false, for: textView) as? NSTextView,
+              window.firstResponder === fieldEditor else {
+            return textView
+        }
+        return fieldEditor
     }
 
     private static func convert(_ rect: CGRect, in textView: NSTextView, layoutView: NSTextView? = nil) -> CGRect {
@@ -120,6 +154,51 @@ enum NoteEditingChromeSupport {
     static func documentCaretRect(in textView: UITextView, fontSize: CGFloat) -> CGRect {
         caretRect(in: textView, fontSize: fontSize, contentScrollOffset: .zero)
     }
+
+    static func wikilinkSuggestAnchor(
+        in textView: UITextView,
+        characterIndex: Int,
+        fontSize: CGFloat,
+        contentScrollOffset: CGPoint? = nil
+    ) -> CGRect {
+        let layoutManager = textView.layoutManager
+        let textContainer = textView.textContainer
+
+        let scrollOffset = contentScrollOffset ?? textView.contentOffset
+        let length = (textView.text as NSString?)?.length ?? 0
+        let index = min(max(0, characterIndex), length)
+        var glyphIndex = layoutManager.glyphIndexForCharacter(at: index)
+        if glyphIndex >= layoutManager.numberOfGlyphs {
+            glyphIndex = max(0, layoutManager.numberOfGlyphs - 1)
+        }
+
+        var lineGlyphRange = NSRange()
+        let lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: &lineGlyphRange)
+        var charRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(
+                location: glyphIndex,
+                length: min(1, max(0, layoutManager.numberOfGlyphs - glyphIndex))
+            ),
+            in: textContainer
+        )
+        if charRect.height < 1 {
+            charRect.size.height = fontSize * 1.2
+        }
+
+        var lineBottom = lineRect
+        lineBottom.origin.x -= scrollOffset.x
+        lineBottom.origin.y -= scrollOffset.y
+        lineBottom.origin.x += textView.textContainerInset.left
+        lineBottom.origin.y += textView.textContainerInset.top
+
+        var charOrigin = charRect
+        charOrigin.origin.x -= scrollOffset.x
+        charOrigin.origin.y -= scrollOffset.y
+        charOrigin.origin.x += textView.textContainerInset.left
+        charOrigin.origin.y += textView.textContainerInset.top
+
+        return CGRect(x: charOrigin.minX, y: lineBottom.maxY, width: 0, height: 0)
+    }
     #endif
 }
 
@@ -145,8 +224,10 @@ struct NoteBodyTextView: View {
     var onImageAttachmentDrop: ((Data, String?) -> Bool)? = nil
     var layoutRefreshToken: Int = 0
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
+    var fillsAvailableHeight: Bool = false
 
     @State private var activeQuery: WikilinkActiveQuery?
+    @State private var suggestAnchorRect = CGRect.zero
 
     private var suggestions: [WorkspaceFileEntry] {
         guard let activeQuery else { return [] }
@@ -159,12 +240,52 @@ struct NoteBodyTextView: View {
 
     /// Image-embed editing hides the native caret; canvas cards draw it in `CanvasNoteEditOverlay`.
     private var showsInlineCaretOverlay: Bool {
-        hideResolvedImageEmbeds && !embeddedInCanvas
+        #if os(iOS)
+        return !embeddedInCanvas
+        #else
+        return hideResolvedImageEmbeds && !embeddedInCanvas
+        #endif
+    }
+
+    private var hidesNativeInsertionPoint: Bool {
+        #if os(iOS)
+        return !embeddedInCanvas || hideResolvedImageEmbeds
+        #else
+        return embeddedInCanvas && hideResolvedImageEmbeds
+        #endif
+    }
+
+    /// Anchor below the active `[[` line, left-aligned with the brackets.
+    private var wikilinkSuggestPopoverOffset: CGSize {
+        let verticalGap: CGFloat = 6
+        if suggestAnchorRect != .zero {
+            return CGSize(width: suggestAnchorRect.minX, height: suggestAnchorRect.minY + verticalGap)
+        }
+        return CGSize(width: caretRect.minX, height: caretRect.maxY + verticalGap)
+    }
+
+    private var wikilinkSuggestPassthroughRect: CGRect {
+        #if os(macOS)
+        guard activeQuery != nil, !suggestions.isEmpty else { return .zero }
+        let offset = wikilinkSuggestPopoverOffset
+        return CGRect(
+            x: offset.width,
+            y: offset.height,
+            width: WikilinkSuggestPopover.preferredWidth,
+            height: WikilinkSuggestPopover.estimatedHeight(resultCount: suggestions.count)
+        )
+        #else
+        return .zero
+        #endif
+    }
+
+    private var usesFillLayout: Bool {
+        embeddedInCanvas || fillsAvailableHeight
     }
 
     var body: some View {
         Group {
-            if embeddedInCanvas {
+            if usesFillLayout {
                 GeometryReader { geometry in
                     editorStack(containerSize: geometry.size)
                 }
@@ -178,30 +299,61 @@ struct NoteBodyTextView: View {
     @ViewBuilder
     private func editorStack(containerSize: CGSize?) -> some View {
         ZStack(alignment: .topLeading) {
-            NoteBodyTextViewRepresentable(
-                text: $text,
-                selectedRange: $selectedRange,
-                caretRect: $caretRect,
-                selectionRects: $selectionRects,
-                isFocused: isFocused,
-                fontSize: fontSize,
-                embeddedInCanvas: embeddedInCanvas,
-                containerSize: containerSize,
-                editorBackground: editorBackground,
-                vaultURL: vaultURL,
-                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                imageEmbedMaxWidth: imageEmbedMaxWidth,
-                hideTaskListMarkers: hideTaskListMarkers,
-                onSelectionChange: refreshActiveQuery,
-                onSuggestKey: handleSuggestKey,
-                onTextEdited: onTextEdited,
-                toolbarBridge: toolbarBridge,
-                onImageAttachmentDrop: onImageAttachmentDrop,
-                layoutRefreshToken: layoutRefreshToken,
-                onContentScroll: onContentScroll
-            )
-            .frame(maxWidth: embeddedInCanvas ? .infinity : nil, maxHeight: embeddedInCanvas ? .infinity : nil)
-            .frame(minHeight: embeddedInCanvas ? 0 : minBodyHeight)
+            Group {
+                #if os(macOS)
+                NoteBodyTextViewRepresentable(
+                    text: $text,
+                    selectedRange: $selectedRange,
+                    caretRect: $caretRect,
+                    selectionRects: $selectionRects,
+                    suggestAnchorRect: $suggestAnchorRect,
+                    wikilinkSuggestPassthroughRect: wikilinkSuggestPassthroughRect,
+                    isFocused: isFocused,
+                    fontSize: fontSize,
+                    embeddedInCanvas: embeddedInCanvas,
+                    containerSize: containerSize,
+                    editorBackground: editorBackground,
+                    vaultURL: vaultURL,
+                    hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                    imageEmbedMaxWidth: imageEmbedMaxWidth,
+                    hideTaskListMarkers: hideTaskListMarkers,
+                    onSelectionChange: refreshActiveQuery,
+                    onSuggestKey: handleSuggestKey,
+                    onTextEdited: onTextEdited,
+                    toolbarBridge: toolbarBridge,
+                    onImageAttachmentDrop: onImageAttachmentDrop,
+                    layoutRefreshToken: layoutRefreshToken,
+                    onContentScroll: onContentScroll
+                )
+                #else
+                NoteBodyTextViewRepresentable(
+                    text: $text,
+                    selectedRange: $selectedRange,
+                    caretRect: $caretRect,
+                    selectionRects: $selectionRects,
+                    suggestAnchorRect: $suggestAnchorRect,
+                    isFocused: isFocused,
+                    fontSize: fontSize,
+                    embeddedInCanvas: embeddedInCanvas,
+                    containerSize: containerSize,
+                    editorBackground: editorBackground,
+                    vaultURL: vaultURL,
+                    hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                    imageEmbedMaxWidth: imageEmbedMaxWidth,
+                    hideTaskListMarkers: hideTaskListMarkers,
+                    onSelectionChange: refreshActiveQuery,
+                    onSuggestKey: handleSuggestKey,
+                    onTextEdited: onTextEdited,
+                    toolbarBridge: toolbarBridge,
+                    onImageAttachmentDrop: onImageAttachmentDrop,
+                    layoutRefreshToken: layoutRefreshToken,
+                    onContentScroll: onContentScroll,
+                    fillsAvailableHeight: fillsAvailableHeight
+                )
+                #endif
+            }
+            .frame(maxWidth: embeddedInCanvas || fillsAvailableHeight ? .infinity : nil, maxHeight: embeddedInCanvas || fillsAvailableHeight ? .infinity : nil)
+            .frame(minHeight: embeddedInCanvas || fillsAvailableHeight ? 0 : minBodyHeight)
             .clipShape(RoundedRectangle(cornerRadius: embeddedInCanvas ? 4 : 0))
 
             if showsInlineCaretOverlay, isFocused.wrappedValue {
@@ -217,12 +369,15 @@ struct NoteBodyTextView: View {
             if activeQuery != nil, !suggestions.isEmpty {
                 WikilinkSuggestPopover(
                     results: suggestions,
-                    selectedIndex: suggestSelectedIndex
+                    selectedIndex: $suggestSelectedIndex,
+                    onSelect: insertSuggestion
                 )
-                .offset(x: caretRect.minX, y: caretRect.maxY + 6)
+                .offset(x: wikilinkSuggestPopoverOffset.width, y: wikilinkSuggestPopoverOffset.height)
+                .fixedSize()
                 .zIndex(20)
             }
         }
+        .frame(maxWidth: .infinity, minHeight: embeddedInCanvas || fillsAvailableHeight ? 0 : minBodyHeight, alignment: .topLeading)
     }
 
     private func refreshActiveQuery() {
@@ -233,6 +388,8 @@ struct NoteBodyTextView: View {
                 activeQuery = query
                 if query != nil {
                     suggestSelectedIndex = 0
+                } else {
+                    suggestAnchorRect = .zero
                 }
             }
         }
@@ -929,6 +1086,16 @@ final class CanvasNoteTextContainerView: NSView {
 final class NoteEditingNSTextView: NSTextView {
     weak var editingDelegate: NoteEditingTextViewDelegate?
     var imageDropHandler: ((Data, String?) -> Bool)?
+    /// When non-empty, mouse hits in this rect pass through to the SwiftUI suggest popover above.
+    var wikilinkSuggestPassthroughRect: CGRect = .zero
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if wikilinkSuggestPassthroughRect != .zero,
+           wikilinkSuggestPassthroughRect.contains(point) {
+            return nil
+        }
+        return super.hitTest(point)
+    }
 
     static var imageDragTypes: [NSPasteboard.PasteboardType] {
         [
@@ -1031,6 +1198,8 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
     @Binding var selectedRange: NSRange
     @Binding var caretRect: CGRect
     @Binding var selectionRects: [CGRect]
+    @Binding var suggestAnchorRect: CGRect
+    var wikilinkSuggestPassthroughRect: CGRect
     var isFocused: FocusState<Bool>.Binding
     var fontSize: CGFloat
     var embeddedInCanvas: Bool
@@ -1126,6 +1295,7 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         if isFocused.wrappedValue {
             context.coordinator.syncEditingChrome(in: textView)
         }
+        textView.wikilinkSuggestPassthroughRect = wikilinkSuggestPassthroughRect
     }
 
     private func configure(textView: NoteEditingNSTextView, coordinator: Coordinator) {
@@ -1632,13 +1802,29 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         }
 
         private func updateEditingChrome(for textView: NSTextView) {
-            guard parent.embeddedInCanvas else { return }
             let rect = NoteEditingChromeSupport.caretRect(in: textView, fontSize: parent.fontSize)
-            let rects = NoteEditingChromeSupport.selectionRects(in: textView)
+            let shouldTrackSelection = parent.embeddedInCanvas
+                || (parent.hideResolvedImageEmbeds && !parent.embeddedInCanvas)
             Task { @MainActor in
                 parent.caretRect = rect
-                parent.selectionRects = rects
+                if shouldTrackSelection {
+                    parent.selectionRects = NoteEditingChromeSupport.selectionRects(in: textView)
+                }
+                updateSuggestAnchor(in: textView)
             }
+        }
+
+        private func updateSuggestAnchor(in textView: NSTextView) {
+            let cursor = parent.selectedRange.location + parent.selectedRange.length
+            guard let query = WikilinkEditorSupport.activeQuery(in: parent.text, cursor: cursor) else {
+                parent.suggestAnchorRect = .zero
+                return
+            }
+            parent.suggestAnchorRect = NoteEditingChromeSupport.wikilinkSuggestAnchor(
+                in: textView,
+                characterIndex: query.replaceRange.location,
+                fontSize: parent.fontSize
+            )
         }
 
         private func updateCaretRect(for textView: NSTextView) {
@@ -1650,7 +1836,6 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
         }
 
         func scrollCaretIntoView(_ textView: NSTextView) {
-            guard parent.embeddedInCanvas else { return }
             textView.scrollRangeToVisible(textView.selectedRange())
             updateCaretRect(for: textView)
         }
@@ -1896,6 +2081,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     @Binding var selectedRange: NSRange
     @Binding var caretRect: CGRect
     @Binding var selectionRects: [CGRect]
+    @Binding var suggestAnchorRect: CGRect
     var isFocused: FocusState<Bool>.Binding
     var fontSize: CGFloat
     var embeddedInCanvas: Bool
@@ -1912,16 +2098,22 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     var onImageAttachmentDrop: ((Data, String?) -> Bool)? = nil
     var layoutRefreshToken: Int = 0
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
+    var fillsAvailableHeight: Bool = false
 
     var imageEmbedLayoutWidth: CGFloat? {
         guard hideResolvedImageEmbeds else { return nil }
         if let imageEmbedMaxWidth, imageEmbedMaxWidth > 1 { return imageEmbedMaxWidth }
+        if fillsAvailableHeight, let width = containerSize?.width, width > 1 { return max(1, width) }
         guard embeddedInCanvas, let width = containerSize?.width, width > 1 else { return nil }
         return max(1, width)
     }
 
     var showsCustomEditingChrome: Bool {
         hideResolvedImageEmbeds
+    }
+
+    var hidesNativeInsertionPoint: Bool {
+        !embeddedInCanvas || hideResolvedImageEmbeds
     }
 
     func makeCoordinator() -> Coordinator {
@@ -1942,6 +2134,9 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
 
         context.coordinator.attach(textView: textView)
         context.coordinator.applyContent(text, selectedRange: selectedRange, to: textView)
+        if fillsAvailableHeight, let containerSize, containerSize.height > 0 {
+            textView.frame = CGRect(origin: .zero, size: containerSize)
+        }
         return textView
     }
 
@@ -1976,13 +2171,19 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         if let scrollView = container?.scrollView {
             context.coordinator.emitContentScroll(from: scrollView, deferUpdate: true)
         }
-        if showsCustomEditingChrome {
+        if hidesNativeInsertionPoint {
             textView.tintColor = .clear
         } else {
             textView.tintColor = UIColor(AppColors.textPrimary)
         }
         if isFocused.wrappedValue {
-            context.coordinator.syncEditingChrome(in: textView)
+            Task { @MainActor in
+                context.coordinator.syncEditingChrome(in: textView)
+            }
+        }
+
+        if fillsAvailableHeight, let containerSize, containerSize.height > 0, container == nil {
+            textView.frame = CGRect(origin: .zero, size: containerSize)
         }
     }
 
@@ -2004,9 +2205,9 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         textView.backgroundColor = .clear
         textView.font = .systemFont(ofSize: fontSize)
         textView.textColor = UIColor(AppColors.textPrimary)
-        textView.isScrollEnabled = !embeddedInCanvas
+        textView.isScrollEnabled = embeddedInCanvas ? false : true
         textView.contentInsetAdjustmentBehavior = .never
-        textView.showsVerticalScrollIndicator = false
+        textView.showsVerticalScrollIndicator = fillsAvailableHeight || !embeddedInCanvas
         textView.showsHorizontalScrollIndicator = false
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
@@ -2015,7 +2216,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         textView.smartDashesType = .no
         textView.smartQuotesType = .no
         textView.canvasMinimalScrolling = embeddedInCanvas
-        if showsCustomEditingChrome {
+        if hidesNativeInsertionPoint {
             textView.tintColor = .clear
         } else {
             textView.tintColor = UIColor(AppColors.textPrimary)
@@ -2033,6 +2234,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         private var isApplyingProgrammaticChange = false
         private var lastLayoutRefreshToken = -1
         private var lastAppliedFontSize: CGFloat = -1
+        private let standaloneKeyboardObserver = NoteStandaloneEditorKeyboardObserver()
 
         init(parent: NoteBodyTextViewRepresentable) {
             self.parent = parent
@@ -2068,6 +2270,9 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                     guard let self, let textView = self.textView else { return }
                     self.emitContentScroll(from: textView)
                     self.updateCaretRect(for: textView)
+                }
+                if parent.fillsAvailableHeight {
+                    standaloneKeyboardObserver.attach(to: textView, fontSize: parent.fontSize)
                 }
             }
             if parent.embeddedInCanvas {
@@ -2304,19 +2509,24 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         }
 
         private func scrollEmbeddedCaretIntoViewIfNeeded(for textView: UITextView) {
-            guard parent.embeddedInCanvas else { return }
-            if let scrollView = containerView?.scrollView {
-                CanvasNoteEditorScrollSupport.scrollCaretIntoViewIfNeeded(
-                    scrollView,
-                    textView: textView,
-                    fontSize: parent.fontSize
-                )
-            } else {
-                CanvasNoteEditorScrollSupport.scrollCaretIntoViewIfNeeded(
-                    textView,
-                    fontSize: parent.fontSize
-                )
+            if parent.embeddedInCanvas {
+                if let scrollView = containerView?.scrollView {
+                    CanvasNoteEditorScrollSupport.scrollCaretIntoViewIfNeeded(
+                        scrollView,
+                        textView: textView,
+                        fontSize: parent.fontSize
+                    )
+                } else {
+                    CanvasNoteEditorScrollSupport.scrollCaretIntoViewIfNeeded(
+                        textView,
+                        fontSize: parent.fontSize
+                    )
+                }
+                return
             }
+
+            guard parent.fillsAvailableHeight else { return }
+            NoteStandaloneEditorKeyboardSupport.scrollSelectionIntoView(textView, fontSize: parent.fontSize)
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -2384,6 +2594,8 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                     relayoutEmbeddedCanvas(in: textView)
                     scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
                     updateCaretRect(for: textView)
+                } else if parent.fillsAvailableHeight {
+                    scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
                 }
                 if let scrollView = containerView?.scrollView {
                     emitContentScroll(from: scrollView)
@@ -2434,11 +2646,13 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 restyle(textView)
             }
             (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
-            parent.selectedRange = newRange
-            if parent.embeddedInCanvas {
-                scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
-            }
             Task { @MainActor in
+                parent.selectedRange = newRange
+                if parent.embeddedInCanvas {
+                    scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
+                } else if parent.fillsAvailableHeight {
+                    scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
+                }
                 updateCaretRect(for: textView)
                 parent.onSelectionChange()
             }
@@ -2501,11 +2715,33 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             let selection = parent.showsCustomEditingChrome
                 ? NoteEditingChromeSupport.selectionRects(in: textView, contentScrollOffset: scrollOffset)
                 : nil
+            let suggestAnchorRect = computedSuggestAnchor(for: textView, scrollOffset: scrollOffset)
             Task { @MainActor in
                 parent.caretRect = rect
                 if let selection {
                     parent.selectionRects = selection
                 }
+                parent.suggestAnchorRect = suggestAnchorRect
+            }
+        }
+
+        private func computedSuggestAnchor(for textView: UITextView, scrollOffset: CGPoint) -> CGRect {
+            let cursor = parent.selectedRange.location + parent.selectedRange.length
+            guard let query = WikilinkEditorSupport.activeQuery(in: parent.text, cursor: cursor) else {
+                return .zero
+            }
+            return NoteEditingChromeSupport.wikilinkSuggestAnchor(
+                in: textView,
+                characterIndex: query.replaceRange.location,
+                fontSize: parent.fontSize,
+                contentScrollOffset: scrollOffset
+            )
+        }
+
+        private func updateSuggestAnchor(in textView: UITextView, scrollOffset: CGPoint) {
+            let anchor = computedSuggestAnchor(for: textView, scrollOffset: scrollOffset)
+            Task { @MainActor in
+                parent.suggestAnchorRect = anchor
             }
         }
 
@@ -2518,7 +2754,6 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         }
 
         private func scrollCaretIntoView(_ textView: UITextView) {
-            guard parent.embeddedInCanvas else { return }
             scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
             updateCaretRect(for: textView)
         }

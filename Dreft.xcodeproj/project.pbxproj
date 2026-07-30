@@ -132,6 +132,13 @@
 		SM000136 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100136 /* PaywallView.swift */; };
 		SM000137 /* ReadOnlyBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100137 /* ReadOnlyBanner.swift */; };
 		SM000139 /* SubscribeCTAButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100139 /* SubscribeCTAButton.swift */; };
+		SM000141 /* CanvasNoteEditKeyboardAvoidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100141 /* CanvasNoteEditKeyboardAvoidance.swift */; };
+		SM000146 /* NoteStandaloneEditorKeyboardSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100146 /* NoteStandaloneEditorKeyboardSupport.swift */; };
+		SM000147 /* NoteInsertAttachmentMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100147 /* NoteInsertAttachmentMenu.swift */; };
+		SM000148 /* CameraImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100148 /* CameraImagePicker.swift */; };
+		SM000142 /* PaywallCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100142 /* PaywallCopy.swift */; };
+		SM000143 /* SubscriptionStatusCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100143 /* SubscriptionStatusCopy.swift */; };
+		SM000145 /* PaywallTrigger.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100145 /* PaywallTrigger.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -269,6 +276,13 @@
 		SM100136 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/PaywallView.swift; sourceTree = SOURCE_ROOT; };
 		SM100137 /* ReadOnlyBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/ReadOnlyBanner.swift; sourceTree = SOURCE_ROOT; };
 		SM100139 /* SubscribeCTAButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/SubscribeCTAButton.swift; sourceTree = SOURCE_ROOT; };
+		SM100141 /* CanvasNoteEditKeyboardAvoidance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteEditKeyboardAvoidance.swift; sourceTree = "<group>"; };
+		SM100146 /* NoteStandaloneEditorKeyboardSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteStandaloneEditorKeyboardSupport.swift; sourceTree = "<group>"; };
+		SM100147 /* NoteInsertAttachmentMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteInsertAttachmentMenu.swift; sourceTree = "<group>"; };
+		SM100148 /* CameraImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraImagePicker.swift; sourceTree = "<group>"; };
+		SM100142 /* PaywallCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/PaywallCopy.swift; sourceTree = SOURCE_ROOT; };
+		SM100143 /* SubscriptionStatusCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/SubscriptionStatusCopy.swift; sourceTree = SOURCE_ROOT; };
+		SM100145 /* PaywallTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/PaywallTrigger.swift; sourceTree = SOURCE_ROOT; };
 		SM100138 /* DreftStore.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = DreftStore.storekit; sourceTree = SOURCE_ROOT; };
 		SM200001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		SM200002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -374,6 +388,9 @@
 				SM100133 /* DreftAccessState.swift */,
 				SM100134 /* StoreManager.swift */,
 				SM100135 /* EntitlementManager.swift */,
+				SM100142 /* PaywallCopy.swift */,
+				SM100143 /* SubscriptionStatusCopy.swift */,
+				SM100145 /* PaywallTrigger.swift */,
 			);
 			path = Monetization;
 			sourceTree = "<group>";
@@ -438,6 +455,7 @@
 				SM100053 /* DreftHelpView.swift */,
 				SM100055 /* NoteBodyTextView.swift */,
 				SM100116 /* NoteEditingCaretOverlay.swift */,
+				SM100147 /* NoteInsertAttachmentMenu.swift */,
 				SM100056 /* WikilinkSuggestPopover.swift */,
 				SM100057 /* AddBookmarkSheet.swift */,
 				SM100058 /* CanvasDocumentOptionsMenu.swift */,
@@ -471,6 +489,9 @@
 				SM100117 /* NoteCardTaskSupport.swift */,
 				SM100115 /* CanvasNoteCardPreviewScroller.swift */,
 				SM100114 /* CanvasNoteCardScrollBridge.swift */,
+				SM100141 /* CanvasNoteEditKeyboardAvoidance.swift */,
+				SM100146 /* NoteStandaloneEditorKeyboardSupport.swift */,
+				SM100148 /* CameraImagePicker.swift */,
 				SM100113 /* CanvasNoteCardScrollIndicator.swift */,
 				SM100112 /* NoteImageDropSupport.swift */,
 				SM100111 /* NoteCardContentLayout.swift */,
@@ -688,6 +709,9 @@
 				SM000117 /* NoteCardTaskSupport.swift in Sources */,
 				SM000115 /* CanvasNoteCardPreviewScroller.swift in Sources */,
 				SM000114 /* CanvasNoteCardScrollBridge.swift in Sources */,
+				SM000141 /* CanvasNoteEditKeyboardAvoidance.swift in Sources */,
+				SM000146 /* NoteStandaloneEditorKeyboardSupport.swift in Sources */,
+				SM000148 /* CameraImagePicker.swift in Sources */,
 				SM000113 /* CanvasNoteCardScrollIndicator.swift in Sources */,
 				SM000112 /* NoteImageDropSupport.swift in Sources */,
 				SM000111 /* NoteCardContentLayout.swift in Sources */,
@@ -696,6 +720,7 @@
 				SM000119 /* CanvasNoteCardTaskTapOverlay.swift in Sources */,
 				SM000056 /* NoteBodyTextView.swift in Sources */,
 				SM000116 /* NoteEditingCaretOverlay.swift in Sources */,
+				SM000147 /* NoteInsertAttachmentMenu.swift in Sources */,
 				SM000057 /* WikilinkSuggestPopover.swift in Sources */,
 				SM000058 /* AddBookmarkSheet.swift in Sources */,
 				SM000059 /* CanvasDocumentOptionsMenu.swift in Sources */,
@@ -721,6 +746,9 @@
 				SM000133 /* DreftAccessState.swift in Sources */,
 				SM000134 /* StoreManager.swift in Sources */,
 				SM000135 /* EntitlementManager.swift in Sources */,
+				SM000142 /* PaywallCopy.swift in Sources */,
+				SM000143 /* SubscriptionStatusCopy.swift in Sources */,
+				SM000145 /* PaywallTrigger.swift in Sources */,
 				SM000136 /* PaywallView.swift in Sources */,
 				SM000137 /* ReadOnlyBanner.swift in Sources */,
 				SM000139 /* SubscribeCTAButton.swift in Sources */,
@@ -882,6 +910,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 AiFlowHustle. All rights reserved.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Dreft uses photos you select to add image cards to your canvas.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Dreft uses the camera to add photos to your notes and canvas.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -922,6 +951,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 AiFlowHustle. All rights reserved.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Dreft uses photos you select to add image cards to your canvas.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Dreft uses the camera to add photos to your notes and canvas.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

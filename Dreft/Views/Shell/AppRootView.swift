@@ -7,7 +7,6 @@ struct AppRootView: View {
     @State private var showOnboarding: Bool
     @State private var storeManager = StoreManager()
     @State private var entitlements: EntitlementManager
-    @State private var showPaywallAfterOnboarding = false
     @Environment(\.scenePhase) private var scenePhase
 
     private var appearanceMode: AppearanceMode {
@@ -41,6 +40,12 @@ struct AppRootView: View {
                 .transition(.opacity)
                 .zIndex(1)
             }
+
+            if entitlements.showPaywall {
+                PaywallView(storeManager: storeManager, entitlements: entitlements)
+                    .zIndex(15)
+                    .transition(.opacity)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.canvasBackground)
@@ -70,26 +75,13 @@ struct AppRootView: View {
                 Task { await entitlements.refresh() }
             }
         }
-        .sheet(isPresented: $showPaywallAfterOnboarding) {
-            PaywallView(storeManager: storeManager, entitlements: entitlements)
-        }
-        .sheet(isPresented: paywallBinding) {
-            PaywallView(storeManager: storeManager, entitlements: entitlements)
-        }
-    }
-
-    private var paywallBinding: Binding<Bool> {
-        Binding(
-            get: { entitlements.showPaywall && !showPaywallAfterOnboarding },
-            set: { entitlements.showPaywall = $0 }
-        )
     }
 
     private func finishOnboarding() {
         hasCompletedOnboarding = true
         showOnboarding = false
         if entitlements.isLocked {
-            showPaywallAfterOnboarding = true
+            entitlements.presentPaywall(.onboarding)
         }
     }
 

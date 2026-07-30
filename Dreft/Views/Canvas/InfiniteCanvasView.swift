@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UniformTypeIdentifiers
 #if canImport(PhotosUI)
 import PhotosUI
@@ -48,8 +49,9 @@ struct InfiniteCanvasView: View {
   @State private var edgeLabelDraft = ""
   @StateObject private var canvasNoteToolbarBridge = NoteFormattingToolbarBridge()
   #if os(iOS)
-  @State private var showNoteAttachmentDialog = false
+  @State private var showNoteAttachmentMenu = false
   @State private var showNotePhotoPicker = false
+  @State private var showNoteCamera = false
   @State private var showNoteFileImporter = false
   #endif
   #if canImport(PhotosUI)
@@ -69,6 +71,11 @@ struct InfiniteCanvasView: View {
   /// Locks note edit typography when a card enters edit mode so typing stays the same size.
   @State private var noteEditFontSize: CGFloat?
   @State private var noteEditImageInserter: NoteImageInserter?
+  #if os(iOS)
+  @StateObject private var noteEditKeyboardObserver = KeyboardHeightObserver()
+  @State private var canvasPanYOffsetForKeyboard: CGFloat = 0
+  @State private var keyboardAvoidanceTask: Task<Void, Never>?
+  #endif
 
   private var effectiveVaultURL: URL? {
     vaultURL ?? store.vaultURL
@@ -342,12 +349,39 @@ struct InfiniteCanvasView: View {
       .overlay(alignment: .top) {
         if entitlements.isReadOnly {
           ReadOnlyBanner {
-            entitlements.showPaywall = true
+            entitlements.presentPaywall(.readOnlyBanner)
           }
           .zIndex(350)
         }
       }
       .background(AppColors.canvasBackground)
+      #if os(iOS)
+      .onReceive(noteEditKeyboardObserver.$height) { _ in
+        Task { @MainActor in
+          updateCanvasKeyboardAvoidance(canvasSize: size)
+        }
+      }
+      .onReceive(noteEditKeyboardObserver.$isVisible) { visible in
+        Task { @MainActor in
+          if visible {
+            updateCanvasKeyboardAvoidance(canvasSize: size)
+          } else {
+            resetCanvasKeyboardAvoidance()
+          }
+        }
+      }
+      .onChange(of: store.focusCardID) { _, newID in
+        if newID == nil {
+          keyboardAvoidanceTask?.cancel()
+          keyboardAvoidanceTask = nil
+          Task { @MainActor in
+            resetCanvasKeyboardAvoidance()
+          }
+        } else {
+          scheduleCanvasKeyboardAvoidance(canvasSize: size)
+        }
+      }
+      #endif
   }
 
   #if os(iOS)
@@ -508,14 +542,24 @@ struct InfiniteCanvasView: View {
         guard let item else { return }
         Task { await importNoteAttachmentPhoto(item) }
       }
-      .confirmationDialog(
-        "Insert attachment",
-        isPresented: $showNoteAttachmentDialog,
-        titleVisibility: .visible
-      ) {
-        Button("Photo Library") { showNotePhotoPicker = true }
-        Button("Choose File") { showNoteFileImporter = true }
-        Button("Cancel", role: .cancel) {}
+      .fullScreenCover(isPresented: $showNoteCamera) {
+        CameraImagePicker(
+          onImage: { data in
+            insertNoteAttachment(data: data, suggestedName: "photo.jpg")
+          },
+          onCancel: {
+            showNoteCamera = false
+          }
+        )
+        .ignoresSafeArea()
+      }
+      .overlay {
+        NoteInsertAttachmentMenuOverlay(
+          isPresented: $showNoteAttachmentMenu,
+          onPhotoLibrary: { showNotePhotoPicker = true },
+          onTakePhoto: { showNoteCamera = true },
+          onChooseFile: { showNoteFileImporter = true }
+        )
       }
       .fileImporter(
         isPresented: $showNoteFileImporter,
@@ -526,7 +570,7 @@ struct InfiniteCanvasView: View {
       }
       .onAppear {
         canvasNoteToolbarBridge.onInsertAttachment = {
-          showNoteAttachmentDialog = true
+          showNoteAttachmentMenu = true
         }
       }
   }
@@ -799,7 +843,7 @@ struct InfiniteCanvasView: View {
 
   private func addNoteAndFocus(at worldPoint: CGPoint) {
     guard entitlements.canWrite else {
-      entitlements.showPaywall = true
+      entitlements.presentPaywall(.editBlocked, context: documentTitle)
       return
     }
     store.addCompactNote(at: worldPoint)
@@ -808,7 +852,7 @@ struct InfiniteCanvasView: View {
 
   private func beginCardEdit(for card: CanvasCard) {
     guard entitlements.canWrite else {
-      entitlements.showPaywall = true
+      entitlements.presentPaywall(.editBlocked, context: documentTitle)
       return
     }
     store.selectedCardID = card.id
@@ -1152,6 +1196,9 @@ struct InfiniteCanvasView: View {
       },
       onUpdateContent: { store.updateContent(for: card.id, content: $0) },
       onSelect: { store.selectCard(card.id) },
+      onRequestEdit: {
+        beginCardEdit(for: card)
+      },
       onDragBegan: { handleCardDragBegan() },
       onMove: { handleCardMove(cardID: card.id, preview: $0) },
       onMoveEnd: { handleCardMoveEnd(cardID: card.id) }
@@ -1264,7 +1311,7 @@ struct InfiniteCanvasView: View {
       onDidFocus: {},
       onBeginContentEdit: {
         guard entitlements.canWrite else {
-          entitlements.showPaywall = true
+          entitlements.presentPaywall(.editBlocked, context: documentTitle)
           return
         }
         store.beginContentEdit(for: card.id)
@@ -1325,7 +1372,7 @@ struct InfiniteCanvasView: View {
        let focusID = store.focusCardID,
        let card = cardIndex[focusID],
        card.kind != .image {
-      noteEditOverlay(for: card, focusID: focusID, vaultFiles: vaultFiles)
+      noteEditOverlay(for: card, focusID: focusID, vaultFiles: vaultFiles, canvasSize: canvasSize)
     }
   }
 
@@ -1333,7 +1380,8 @@ struct InfiniteCanvasView: View {
   private func noteEditOverlay(
     for card: CanvasCard,
     focusID: String,
-    vaultFiles: [VaultFile]
+    vaultFiles: [VaultFile],
+    canvasSize: CGSize
   ) -> some View {
     let worldFrame = cardDisplayFrame(card)
     let zoom = displayTransform.zoom
@@ -1702,11 +1750,76 @@ struct InfiniteCanvasView: View {
   private func finishCanvasInteraction() {
     // Only the designated owner persists camera into the shared document snapshot.
     if persistsCamera {
-      store.setTransform(displayTransform)
+      var transform = displayTransform
+      #if os(iOS)
+      transform.y += canvasPanYOffsetForKeyboard
+      #endif
+      store.setTransform(transform)
     }
     isCanvasInteracting = false
     settleMountedContent()
   }
+
+  #if os(iOS)
+  private func scheduleCanvasKeyboardAvoidance(canvasSize: CGSize) {
+    keyboardAvoidanceTask?.cancel()
+    keyboardAvoidanceTask = Task { @MainActor in
+      updateCanvasKeyboardAvoidance(canvasSize: canvasSize, allowEstimatedKeyboard: true)
+
+      try? await Task.sleep(nanoseconds: 100_000_000)
+      guard !Task.isCancelled else { return }
+      updateCanvasKeyboardAvoidance(canvasSize: canvasSize, allowEstimatedKeyboard: true)
+
+      try? await Task.sleep(nanoseconds: 250_000_000)
+      guard !Task.isCancelled else { return }
+      updateCanvasKeyboardAvoidance(canvasSize: canvasSize, allowEstimatedKeyboard: false)
+    }
+  }
+
+  private func updateCanvasKeyboardAvoidance(
+    canvasSize: CGSize,
+    allowEstimatedKeyboard: Bool = false
+  ) {
+    guard store.focusCardID != nil,
+          let focusID = store.focusCardID,
+          let card = cardIndex[focusID],
+          card.kind != .image else {
+      resetCanvasKeyboardAvoidance()
+      return
+    }
+
+    let keyboardOverlap: CGFloat?
+    if noteEditKeyboardObserver.isVisible, noteEditKeyboardObserver.height > 0 {
+      keyboardOverlap = noteEditKeyboardObserver.height
+    } else if allowEstimatedKeyboard {
+      keyboardOverlap = CanvasNoteEditKeyboardAvoidance.estimatedKeyboardOverlap
+    } else {
+      return
+    }
+
+    guard let keyboardOverlap else { return }
+
+    let bottomObstruction = keyboardOverlap + NoteFormattingToolbarAccessoryContainer.preferredHeight
+    let cardRect = noteCardScreenRect(for: card)
+    let requiredPan = CanvasNoteEditKeyboardAvoidance.requiredPanDeltaY(
+      cardScreenRect: cardRect,
+      canvasHeight: canvasSize.height,
+      bottomObstructionHeight: bottomObstruction
+    )
+    applyCanvasKeyboardPan(requiredPan)
+  }
+
+  private func resetCanvasKeyboardAvoidance() {
+    applyCanvasKeyboardPan(0)
+  }
+
+  private func applyCanvasKeyboardPan(_ requiredPan: CGFloat) {
+    let delta = requiredPan - canvasPanYOffsetForKeyboard
+    guard abs(delta) > 0.5 else { return }
+    displayTransform.y -= delta
+    canvasPanYOffsetForKeyboard = requiredPan
+  }
+  #endif
 
   // MARK: - Image import
 
@@ -2037,10 +2150,10 @@ struct InfiniteCanvasView: View {
       imageSystemName: "photo.on.rectangle.angled",
       safeAreaBottom: safeAreaBottom,
       isWriteEnabled: entitlements.canWrite,
-      onWriteBlocked: { entitlements.showPaywall = true },
+      onWriteBlocked: { entitlements.presentPaywall(.editBlocked, context: documentTitle) },
       onAddCard: {
         guard entitlements.canWrite else {
-          entitlements.showPaywall = true
+          entitlements.presentPaywall(.editBlocked, context: documentTitle)
           return
         }
         store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)
@@ -2068,10 +2181,10 @@ struct InfiniteCanvasView: View {
       imageSystemName: "photo.on.rectangle.angled",
       safeAreaBottom: safeAreaBottom,
       isWriteEnabled: entitlements.canWrite,
-      onWriteBlocked: { entitlements.showPaywall = true },
+      onWriteBlocked: { entitlements.presentPaywall(.editBlocked, context: documentTitle) },
       onAddCard: {
         guard entitlements.canWrite else {
-          entitlements.showPaywall = true
+          entitlements.presentPaywall(.editBlocked, context: documentTitle)
           return
         }
         store.addCompactNoteAtCenter(canvasSize: canvasSize, transform: displayTransform)

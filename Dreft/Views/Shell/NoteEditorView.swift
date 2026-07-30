@@ -36,8 +36,9 @@ struct NoteEditorView: View {
     @StateObject private var noteToolbarBridge = NoteFormattingToolbarBridge()
     @State private var usesInlineImageEditor = false
     #if os(iOS)
-    @State private var showNoteAttachmentDialog = false
+    @State private var showNoteAttachmentMenu = false
     @State private var showNotePhotoPicker = false
+    @State private var showNoteCamera = false
     @State private var showNoteFileImporter = false
     #endif
     #if canImport(PhotosUI)
@@ -83,7 +84,7 @@ struct NoteEditorView: View {
                 VStack(spacing: 0) {
                     if entitlements.isReadOnly {
                         ReadOnlyBanner {
-                            entitlements.showPaywall = true
+                            entitlements.presentPaywall(.readOnlyBanner)
                         }
                     }
                     if showFindBar {
@@ -93,12 +94,17 @@ struct NoteEditorView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                noteStatusBar
+                if showsSwiftUIStatusBar {
+                    noteStatusBar
+                }
             }
             .background(AppColors.canvasBackground)
             .onAppear {
                 loadDraftIfNeeded()
                 enforceReadOnlyModeIfNeeded()
+                #if os(iOS)
+                syncAccessoryStatusToToolbarBridge()
+                #endif
             }
             .onChange(of: fileID) { _, _ in
                 loadDraftIfNeeded()
@@ -114,10 +120,21 @@ struct NoteEditorView: View {
             .onChange(of: draftContent) { _, newValue in
                 guard !isWriteBlocked else { return }
                 workspace.updateNoteContent(for: fileID, content: newValue)
+                #if os(iOS)
+                syncAccessoryStatusToToolbarBridge()
+                #endif
+            }
+            .onChange(of: workspace.saveStatus) { _, _ in
+                #if os(iOS)
+                syncAccessoryStatusToToolbarBridge()
+                #endif
             }
             .onDisappear {
                 titleCommitTask?.cancel()
                 flushDraft()
+                #if os(iOS)
+                noteToolbarBridge.accessoryStatus = nil
+                #endif
             }
         } else {
             Color.clear
@@ -227,7 +244,91 @@ struct NoteEditorView: View {
         draftContent = draftContent.replacingOccurrences(of: findQuery, with: replaceQuery)
     }
 
+    @ViewBuilder
     private var editingSurface: some View {
+        #if os(iOS)
+        if usesStandalonePadEditor {
+            iPadStandaloneEditingSurface
+        } else {
+            scrollEditingSurface
+        }
+        #else
+        scrollEditingSurface
+        #endif
+    }
+
+    #if os(iOS)
+    private var usesStandalonePadEditor: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    private var showsSwiftUIStatusBar: Bool {
+        !usesStandalonePadEditor
+    }
+
+    private var iPadStandaloneEditingSurface: some View {
+        noteAttachmentModifiers {
+            GeometryReader { geometry in
+                VStack(alignment: .leading, spacing: 14) {
+                    TextField("", text: $draftTitle, prompt: Text("Untitled"))
+                        .font(.system(size: 34, weight: .bold))
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .focused($isTitleFocused)
+                        .onSubmit {
+                            focusNoteBody()
+                        }
+
+                    NoteBodyTextView(
+                        text: $draftContent,
+                        selectedRange: $bodySelectedRange,
+                        caretRect: $wikilinkCaretRect,
+                        selectionRects: $bodySelectionRects,
+                        isFocused: $isBodyFocused,
+                        files: workspace.files,
+                        suggestSelectedIndex: $wikilinkSuggestIndex,
+                        vaultURL: workspace.activeVaultURL,
+                        hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
+                        imageEmbedMaxWidth: AppColors.noteReadableWidth,
+                        toolbarBridge: noteToolbarBridge,
+                        onImageAttachmentDrop: insertImageAttachment,
+                        fillsAvailableHeight: true
+                    )
+                    .frame(width: geometry.size.width, height: max(240, geometry.size.height - 52))
+                }
+                .padding(.horizontal, 56)
+                .padding(.top, 12)
+                .frame(maxWidth: AppColors.noteReadableWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    private func syncAccessoryStatusToToolbarBridge() {
+        guard usesStandalonePadEditor else {
+            noteToolbarBridge.accessoryStatus = nil
+            return
+        }
+
+        let saveLabel: String? = switch workspace.saveStatus {
+        case .idle: nil
+        case .saving: "Saving…"
+        case .saved: "Saved"
+        }
+
+        noteToolbarBridge.accessoryStatus = NoteEditorAccessoryStatus(
+            saveLabel: saveLabel,
+            backlinkCount: workspace.backlinkCount(for: fileID),
+            wordCount: wordCount,
+            characterCount: characterCount
+        )
+    }
+    #else
+    private var showsSwiftUIStatusBar: Bool { true }
+    #endif
+
+    private var scrollEditingSurface: some View {
         noteAttachmentModifiers {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -276,14 +377,24 @@ struct NoteEditorView: View {
                 guard let item else { return }
                 Task { await importNoteAttachmentPhoto(item) }
             }
-            .confirmationDialog(
-                "Insert attachment",
-                isPresented: $showNoteAttachmentDialog,
-                titleVisibility: .visible
-            ) {
-                Button("Photo Library") { showNotePhotoPicker = true }
-                Button("Choose File") { showNoteFileImporter = true }
-                Button("Cancel", role: .cancel) {}
+            .fullScreenCover(isPresented: $showNoteCamera) {
+                CameraImagePicker(
+                    onImage: { data in
+                        _ = insertImageAttachment(data, "photo.jpg")
+                    },
+                    onCancel: {
+                        showNoteCamera = false
+                    }
+                )
+                .ignoresSafeArea()
+            }
+            .overlay {
+                NoteInsertAttachmentMenuOverlay(
+                    isPresented: $showNoteAttachmentMenu,
+                    onPhotoLibrary: { showNotePhotoPicker = true },
+                    onTakePhoto: { showNoteCamera = true },
+                    onChooseFile: { showNoteFileImporter = true }
+                )
             }
             .fileImporter(
                 isPresented: $showNoteFileImporter,
@@ -294,7 +405,7 @@ struct NoteEditorView: View {
             }
             .onAppear {
                 noteToolbarBridge.onInsertAttachment = {
-                    showNoteAttachmentDialog = true
+                    showNoteAttachmentMenu = true
                 }
             }
             .onDrop(of: [.image, .fileURL], isTargeted: nil) { providers in

@@ -20,6 +20,7 @@ struct CanvasCardSurface: View {
     var onImageLoaded: () -> Void = {}
     var onUpdateContent: ((String) -> Void)? = nil
     var onTaskCheckboxTap: (() -> Void)? = nil
+    var onBodyTap: (() -> Void)? = nil
 
     private var isImage: Bool { card.kind == .image }
 
@@ -208,7 +209,8 @@ struct CanvasCardSurface: View {
             CanvasNoteCardPreviewScrollContainer(
                 offsetY: $previewScrollOffset,
                 contentHeight: $previewContentHeight,
-                viewportHeight: scrollHeight
+                viewportHeight: scrollHeight,
+                onTap: onBodyTap
             ) {
                 body
             }
@@ -246,6 +248,7 @@ struct CanvasCardCompactView: View {
     var onImageLoaded: () -> Void = {}
     var onUpdateContent: ((String) -> Void)? = nil
     var onSelect: () -> Void
+    var onRequestEdit: () -> Void = {}
     var onDragBegan: () -> Void
     var onMove: (CGPoint) -> Void
     var onMoveEnd: () -> Void
@@ -332,6 +335,9 @@ struct CanvasCardCompactView: View {
                         suppressNextSelect = false
                     } else {
                         onSelect()
+                        if card.kind != .image {
+                            onRequestEdit()
+                        }
                     }
                 }
                 dragOrigin = nil

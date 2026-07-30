@@ -8,7 +8,6 @@ struct DreftHelpView: View {
     @Environment(\.openURL) private var openURL
 
     private static let documentationURL = URL(string: "https://lavish-birthday-3cc.notion.site/Dreft-Help-Support-39e2796a24538094b200c799f7ddf41d")!
-    private static let privacyPolicyURL = URL(string: "https://lavish-birthday-3cc.notion.site/Dreft-Privacy-Policy-39e2796a245380869bb7f48509695d5e")!
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
@@ -61,7 +60,21 @@ struct DreftHelpView: View {
                         buttonTitle: "View",
                         isPrimary: false
                     ) {
-                        openURL(Self.privacyPolicyURL)
+                        openURL(StoreConstants.privacyPolicyURL)
+                    }
+
+                    Divider()
+                        .background(AppColors.borderSubtle)
+                        .padding(.leading, 48)
+
+                    helpActionRow(
+                        icon: "doc.text",
+                        title: "Terms of service",
+                        subtitle: "Subscription terms, billing, and usage.",
+                        buttonTitle: "View",
+                        isPrimary: false
+                    ) {
+                        openURL(StoreConstants.termsOfUseURL)
                     }
                 }
                 .background(

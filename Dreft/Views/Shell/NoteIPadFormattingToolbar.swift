@@ -215,19 +215,56 @@ private struct NoteIPadFormattingToolbarHost: View {
     @ObservedObject var bridge: NoteFormattingToolbarBridge
 
     var body: some View {
-        NoteIPadFormattingToolbar(
-            canUndo: bridge.canUndo,
-            canRedo: bridge.canRedo,
-            onUndo: { bridge.undo() },
-            onRedo: { bridge.redo() },
-            onAction: { bridge.applyAction?($0) },
-            onDismissKeyboard: { bridge.dismissKeyboard() }
-        )
+        VStack(spacing: 6) {
+            if let status = bridge.accessoryStatus {
+                NoteIPadEditorStatusRow(status: status)
+            }
+
+            NoteIPadFormattingToolbar(
+                canUndo: bridge.canUndo,
+                canRedo: bridge.canRedo,
+                onUndo: { bridge.undo() },
+                onRedo: { bridge.redo() },
+                onAction: { bridge.applyAction?($0) },
+                onDismissKeyboard: { bridge.dismissKeyboard() }
+            )
+        }
+    }
+}
+
+private struct NoteIPadEditorStatusRow: View {
+    let status: NoteEditorAccessoryStatus
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if let saveLabel = status.saveLabel {
+                Text(saveLabel)
+                    .foregroundStyle(AppColors.textSecondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Text("\(status.backlinkCount) backlinks")
+            Text("•")
+                .foregroundStyle(AppColors.textMuted.opacity(0.55))
+            Image(systemName: "pencil")
+            Text("•")
+                .foregroundStyle(AppColors.textMuted.opacity(0.55))
+            Text("\(status.wordCount) words")
+            Text("•")
+                .foregroundStyle(AppColors.textMuted.opacity(0.55))
+            Text("\(status.characterCount) characters")
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(AppColors.textMuted)
+        .padding(.horizontal, 6)
     }
 }
 
 final class NoteFormattingToolbarAccessoryContainer: UIView {
-    static let preferredHeight: CGFloat = 64
+    static let statusRowHeight: CGFloat = 28
+    static let toolbarRowHeight: CGFloat = 64
+    static var preferredHeight: CGFloat { statusRowHeight + toolbarRowHeight + 8 }
 
     private let bridge: NoteFormattingToolbarBridge
     private var hostingController: UIHostingController<NoteIPadFormattingToolbarHost>?

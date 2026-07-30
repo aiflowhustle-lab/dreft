@@ -9,6 +9,8 @@ final class EntitlementManager {
     private(set) var isRefreshing = false
 
     var showPaywall = false
+    private(set) var paywallTrigger: PaywallTrigger = .editBlocked
+    private(set) var paywallContext: String?
 
     /// Create, edit, rename, move, delete, new vault, etc. Locked users may read/browse/export only.
     var canWrite: Bool { accessState == .fullAccess }
@@ -57,6 +59,7 @@ final class EntitlementManager {
             EntitlementCache.markEverSubscribed()
             accessState = .fullAccess
             EntitlementCache.save(.fullAccess)
+            await storeManager.refreshActiveSubscription()
             return
         }
 
@@ -71,15 +74,28 @@ final class EntitlementManager {
             accessState = .locked
         }
         EntitlementCache.save(accessState)
+        await storeManager.refreshActiveSubscription()
     }
 
     @discardableResult
-    func requireWriteAccess() -> Bool {
+    func requireWriteAccess(context: String? = nil) -> Bool {
         guard canWrite else {
-            showPaywall = true
+            presentPaywall(.editBlocked, context: context)
             return false
         }
         return true
+    }
+
+    func presentPaywall(_ trigger: PaywallTrigger, context: String? = nil) {
+        paywallTrigger = trigger
+        let trimmed = context?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        paywallContext = trimmed.isEmpty ? nil : trimmed
+        showPaywall = true
+    }
+
+    func dismissPaywallPresentation() {
+        showPaywall = false
+        paywallContext = nil
     }
 
     func performWrite(_ action: () -> Void) {
@@ -90,7 +106,7 @@ final class EntitlementManager {
     func handlePurchaseCompleted() async {
         await refresh()
         if accessState == .fullAccess {
-            showPaywall = false
+            dismissPaywallPresentation()
         }
     }
 
