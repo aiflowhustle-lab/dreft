@@ -19,12 +19,23 @@ struct CanvasSpatialIndex {
         boundsByID.reserveCapacity(cards.count)
 
         for card in cards {
-            let rect = CGRect(x: card.x, y: card.y, width: card.width, height: card.height)
-            boundsByID[card.id] = rect
-            for key in Self.cellKeys(for: rect) {
-                grid[key, default: []].append(card.id)
-            }
+            upsert(card: card)
         }
+    }
+
+    mutating func upsert(card: CanvasCard) {
+        let id = card.id
+        if let existing = boundsByID[id] {
+            removeFromGrid(id: id, rect: existing)
+        }
+        let rect = CGRect(x: card.x, y: card.y, width: card.width, height: card.height)
+        boundsByID[id] = rect
+        insertIntoGrid(id: id, rect: rect)
+    }
+
+    mutating func remove(id: String) {
+        guard let rect = boundsByID.removeValue(forKey: id) else { return }
+        removeFromGrid(id: id, rect: rect)
     }
 
     /// Candidate card IDs whose indexed bounds overlap the viewport.
@@ -38,6 +49,28 @@ struct CanvasSpatialIndex {
             }
         }
         return ids
+    }
+
+    private mutating func insertIntoGrid(id: String, rect: CGRect) {
+        for key in Self.cellKeys(for: rect) {
+            var bucket = grid[key, default: []]
+            if !bucket.contains(id) {
+                bucket.append(id)
+                grid[key] = bucket
+            }
+        }
+    }
+
+    private mutating func removeFromGrid(id: String, rect: CGRect) {
+        for key in Self.cellKeys(for: rect) {
+            guard var bucket = grid[key] else { continue }
+            bucket.removeAll { $0 == id }
+            if bucket.isEmpty {
+                grid.removeValue(forKey: key)
+            } else {
+                grid[key] = bucket
+            }
+        }
     }
 
     private static func cellKeys(for rect: CGRect) -> [CellKey] {

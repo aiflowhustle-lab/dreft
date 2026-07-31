@@ -39,7 +39,12 @@ struct NoteEditorView: View {
     @FocusState private var isFindFieldFocused: Bool
     @StateObject private var noteToolbarBridge = NoteFormattingToolbarBridge()
     @State private var usesInlineImageEditor = false
+    @State private var measuredTitleHeight: CGFloat = 52
+    @State private var bodyScrollOffset = CGPoint.zero
+    @State private var taskCheckboxPlacements: [NoteCardTaskCheckboxPlacement] = []
     #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @StateObject private var noteKeyboardObserver = KeyboardHeightObserver()
     @State private var showNoteAttachmentMenu = false
     @State private var showNotePhotoPicker = false
     @State private var showNoteCamera = false
@@ -100,6 +105,27 @@ struct NoteEditorView: View {
         workspace.activeVaultURL != nil && usesInlineImageEditor
     }
 
+    private var hasTaskLines: Bool {
+        NoteCardTaskSupport.parsedLines(from: draftContent).contains { line in
+            if case .task = line { return true }
+            return false
+        }
+    }
+
+    private var showsReadingPreview: Bool {
+        isReading || isWriteBlocked
+    }
+
+    private var findNavigationPivot: Int {
+        if showsReadingPreview {
+            if findMatchRange.location != NSNotFound {
+                return findMatchRange.location + findMatchRange.length
+            }
+            return 0
+        }
+        return bodySelectedRange.location + bodySelectedRange.length
+    }
+
     var body: some View {
         if file != nil {
             ZStack(alignment: .bottom) {
@@ -144,6 +170,7 @@ struct NoteEditorView: View {
                 workspace.updateNoteContent(for: fileID, content: newValue)
                 #if os(iOS)
                 syncAccessoryStatusToToolbarBridge()
+                scheduleTaskCheckboxPlacementRefresh()
                 #endif
             }
             .onChange(of: workspace.saveStatus) { _, _ in
@@ -153,7 +180,9 @@ struct NoteEditorView: View {
             }
             .onChange(of: showFindBar) { _, isVisible in
                 if isVisible {
-                    isReading = false
+                    if !isWriteBlocked {
+                        isReading = false
+                    }
                     isFindFieldFocused = true
                     if !findQuery.isEmpty {
                         findNextMatch()
@@ -172,6 +201,23 @@ struct NoteEditorView: View {
             .onChange(of: findCaseInsensitive) { _, _ in
                 guard showFindBar, !findQuery.isEmpty else { return }
                 findNextMatch()
+            }
+            .onChange(of: selectionRevealToken) { _, _ in
+                #if os(iOS)
+                scheduleTaskCheckboxPlacementRefresh()
+                #endif
+            }
+            .onChange(of: bodySelectedRange) { _, _ in
+                #if os(iOS)
+                scheduleTaskCheckboxPlacementRefresh()
+                #endif
+            }
+            .onChange(of: isBodyFocused) { _, isFocused in
+                #if os(iOS)
+                if isFocused {
+                    scheduleTaskCheckboxPlacementRefresh()
+                }
+                #endif
             }
             .onDisappear {
                 titleCommitTask?.cancel()
@@ -243,7 +289,7 @@ struct NoteEditorView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(AppColors.textSecondary)
-            .disabled(isReading || findQuery.isEmpty)
+            .disabled(findQuery.isEmpty)
 
             Button {
                 findNextMatch()
@@ -253,7 +299,7 @@ struct NoteEditorView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(AppColors.textSecondary)
-            .disabled(isReading || findQuery.isEmpty)
+            .disabled(findQuery.isEmpty)
 
             if !findQuery.isEmpty {
                 Text(findStatusLabel)
@@ -279,20 +325,20 @@ struct NoteEditorView: View {
                 .padding(.vertical, 5)
                 .background(AppColors.toolbarBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-                .disabled(isReading)
+                .disabled(isReading || isWriteBlocked)
                 .onSubmit { replaceCurrentMatch() }
 
             Button("Replace") { replaceCurrentMatch() }
                 .buttonStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundStyle(AppColors.textSecondary)
-                .disabled(isReading || findQuery.isEmpty)
+                .disabled(isReading || isWriteBlocked || findQuery.isEmpty)
 
             Button("Replace all") { replaceAllMatches() }
                 .buttonStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundStyle(AppColors.textSecondary)
-                .disabled(isReading || findQuery.isEmpty || findMatchCount == 0)
+                .disabled(isReading || isWriteBlocked || findQuery.isEmpty || findMatchCount == 0)
 
             Spacer()
 
@@ -305,7 +351,7 @@ struct NoteEditorView: View {
             .buttonStyle(.plain)
             .foregroundStyle(AppColors.textMuted)
         }
-        .padding(.horizontal, 56)
+        .padding(.horizontal, editorHorizontalPadding)
         .padding(.vertical, 8)
         .background(AppColors.tabBarBackground)
         #if os(macOS)
@@ -328,17 +374,17 @@ struct NoteEditorView: View {
     private func revealFindMatch(_ range: NSRange) {
         findMatchRange = range
         bodySelectedRange = range
+        guard !showsReadingPreview else { return }
         selectionRevealToken &+= 1
         isBodyFocused = true
     }
 
     private func findNextMatch() {
         guard !findQuery.isEmpty else { return }
-        let start = bodySelectedRange.location + bodySelectedRange.length
         guard let match = NoteFindReplaceSupport.findNext(
             in: draftContent,
             query: findQuery,
-            after: start,
+            after: findNavigationPivot,
             wrap: true,
             options: findOptions
         ) else {
@@ -350,11 +396,13 @@ struct NoteEditorView: View {
 
     private func findPreviousMatch() {
         guard !findQuery.isEmpty else { return }
-        let start = bodySelectedRange.location
+        let pivot = showsReadingPreview
+            ? (findMatchRange.location != NSNotFound ? findMatchRange.location : findNavigationPivot)
+            : bodySelectedRange.location
         guard let match = NoteFindReplaceSupport.findPrevious(
             in: draftContent,
             query: findQuery,
-            before: start,
+            before: pivot,
             wrap: true,
             options: findOptions
         ) else {
@@ -403,8 +451,30 @@ struct NoteEditorView: View {
     }
 
     #if os(iOS)
-    private var usesStandalonePadEditor: Bool {
+    private var showsIPadFormattingToolbar: Bool {
         UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    private var usesStandalonePadEditor: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular
+    }
+
+    private var editorHorizontalPadding: CGFloat {
+        horizontalSizeClass == .regular ? 56 : 24
+    }
+
+    private var attachmentMenuAnchor: NoteInsertAttachmentMenuAnchor {
+        let bodyTop = measuredTitleHeight + 14 + 12
+        let caretY = wikilinkCaretRect.maxY > 1
+            ? wikilinkCaretRect.maxY
+            : 24
+        let scrollAdjustedY = bodyTop + caretY - bodyScrollOffset.y + 6
+        return .noteEditor(
+            topLeading: CGPoint(
+                x: editorHorizontalPadding,
+                y: scrollAdjustedY
+            )
+        )
     }
 
     private var showsSwiftUIStatusBar: Bool {
@@ -414,96 +484,149 @@ struct NoteEditorView: View {
     private var iPadStandaloneEditingSurface: some View {
         noteAttachmentModifiers {
             GeometryReader { geometry in
-                VStack(alignment: .leading, spacing: 14) {
-                    TextField("", text: $draftTitle, prompt: Text("Untitled"))
-                        .font(.system(size: 34, weight: .bold))
-                        .textFieldStyle(.plain)
-                        .foregroundStyle(AppColors.textPrimary)
-                        .focused($isTitleFocused)
-                        .onSubmit {
-                            focusNoteBody()
-                        }
+                ZStack(alignment: .topLeading) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        TextField("", text: $draftTitle, prompt: Text("Untitled"))
+                            .font(.system(size: 34, weight: .bold))
+                            .textFieldStyle(.plain)
+                            .foregroundStyle(AppColors.textPrimary)
+                            .focused($isTitleFocused)
+                            .onSubmit {
+                                focusNoteBody()
+                            }
+                            .background {
+                                GeometryReader { titleGeometry in
+                                    Color.clear.preference(
+                                        key: NoteTitleHeightPreferenceKey.self,
+                                        value: titleGeometry.size.height
+                                    )
+                                }
+                            }
 
-                    NoteBodyTextView(
-                        text: $draftContent,
-                        selectedRange: $bodySelectedRange,
-                        caretRect: $wikilinkCaretRect,
-                        selectionRects: $bodySelectionRects,
-                        isFocused: $isBodyFocused,
-                        files: workspace.files,
-                        suggestSelectedIndex: $wikilinkSuggestIndex,
-                        vaultURL: workspace.activeVaultURL,
-                        hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
-                        imageEmbedMaxWidth: AppColors.noteReadableWidth,
-                        toolbarBridge: noteToolbarBridge,
-                        onImageAttachmentDrop: insertImageAttachment,
-                        selectionRevealToken: selectionRevealToken,
-                        fillsAvailableHeight: true
-                    )
-                    .frame(width: geometry.size.width, height: max(240, geometry.size.height - 52))
+                        NoteBodyTextView(
+                            text: $draftContent,
+                            selectedRange: $bodySelectedRange,
+                            caretRect: $wikilinkCaretRect,
+                            selectionRects: $bodySelectionRects,
+                            isFocused: $isBodyFocused,
+                            files: workspace.files,
+                            suggestSelectedIndex: $wikilinkSuggestIndex,
+                            vaultURL: workspace.activeVaultURL,
+                            hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
+                            imageEmbedMaxWidth: AppColors.noteReadableWidth,
+                            hideTaskListMarkers: hasTaskLines,
+                            toolbarBridge: noteToolbarBridge,
+                            onImageAttachmentDrop: insertImageAttachment,
+                            selectionRevealToken: selectionRevealToken,
+                            onContentScroll: handleBodyContentScroll,
+                            fillsAvailableHeight: true
+                        )
+                        .frame(
+                            width: geometry.size.width,
+                            height: max(240, geometry.size.height - measuredTitleHeight - 14)
+                        )
+                        .overlay(alignment: .topLeading) {
+                            if hasTaskLines {
+                                noteTaskCheckboxOverlay(maxWidth: geometry.size.width)
+                            }
+                        }
+                    }
                 }
-                .padding(.horizontal, 56)
+                .padding(.horizontal, editorHorizontalPadding)
                 .padding(.top, 12)
                 .frame(maxWidth: AppColors.noteReadableWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .onPreferenceChange(NoteTitleHeightPreferenceKey.self) { measuredTitleHeight = $0 }
             }
             .scrollDismissesKeyboard(.interactively)
         }
     }
 
     private func syncAccessoryStatusToToolbarBridge() {
-        guard usesStandalonePadEditor else {
+        // Match canvas note cards: no status row above the formatting toolbar.
+        Task { @MainActor in
             noteToolbarBridge.accessoryStatus = nil
+        }
+    }
+
+    private func handleBodyContentScroll(_ metrics: CanvasNoteScrollMetrics) {
+        Task { @MainActor in
+            bodyScrollOffset = metrics.offset
+            refreshTaskCheckboxPlacements()
+        }
+    }
+
+    private func scheduleTaskCheckboxPlacementRefresh() {
+        Task { @MainActor in
+            refreshTaskCheckboxPlacements()
+        }
+    }
+
+    private func refreshTaskCheckboxPlacements() {
+        guard hasTaskLines, let textView = noteToolbarBridge.textView else {
+            if !taskCheckboxPlacements.isEmpty {
+                taskCheckboxPlacements = []
+            }
             return
         }
 
-        let saveLabel: String? = switch workspace.saveStatus {
-        case .idle: nil
-        case .saving: "Saving…"
-        case .saved: "Saved"
-        }
-
-        noteToolbarBridge.accessoryStatus = NoteEditorAccessoryStatus(
-            saveLabel: saveLabel,
-            backlinkCount: workspace.backlinkCount(for: fileID),
-            wordCount: wordCount,
-            characterCount: characterCount
+        let usesWysiwyg = NoteTextEditingCoordinatorSupport.usesWysiwygEditing(
+            embeddedInCanvas: false,
+            hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
+            vaultURL: workspace.activeVaultURL,
+            imageEmbedMaxWidth: AppColors.noteReadableWidth
         )
+        let next = NoteCardTaskSupport.checkboxPlacements(
+            in: draftContent,
+            textView: textView,
+            contentScrollOffset: bodyScrollOffset,
+            fontSize: WikilinkEditorSupport.bodyFontSize,
+            editorBackground: AppColors.canvasBackground,
+            hideTaskListMarkers: hasTaskLines,
+            usesWysiwygDisplay: usesWysiwyg
+        )
+        if next != taskCheckboxPlacements {
+            taskCheckboxPlacements = next
+        }
+    }
+
+    @ViewBuilder
+    private func noteTaskCheckboxOverlay(maxWidth: CGFloat) -> some View {
+        CanvasNoteCardTaskTapOverlay(
+            content: draftContent,
+            maxWidth: maxWidth,
+            fontSize: WikilinkEditorSupport.bodyFontSize,
+            scrollOffset: bodyScrollOffset,
+            layoutPlacements: taskCheckboxPlacements,
+            checkboxFillColor: AppColors.canvasBackground,
+            onToggleTaskAtLine: toggleTaskAtLine
+        )
+        .allowsHitTesting(!isWriteBlocked)
     }
     #else
     private var showsSwiftUIStatusBar: Bool { true }
+
+    private var editorHorizontalPadding: CGFloat { 56 }
     #endif
 
     private var scrollEditingSurface: some View {
         noteAttachmentModifiers {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    TextField("", text: $draftTitle, prompt: Text("Untitled"))
-                        .font(.system(size: 40, weight: .bold))
-                        .textFieldStyle(.plain)
-                        .foregroundStyle(AppColors.textPrimary)
-                        .focused($isTitleFocused)
-                        .onSubmit {
-                            focusNoteBody()
-                        }
+                ZStack(alignment: .topLeading) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        TextField("", text: $draftTitle, prompt: Text("Untitled"))
+                            .font(.system(size: 40, weight: .bold))
+                            .textFieldStyle(.plain)
+                            .foregroundStyle(AppColors.textPrimary)
+                            .focused($isTitleFocused)
+                            .onSubmit {
+                                focusNoteBody()
+                            }
 
-                    NoteBodyTextView(
-                        text: $draftContent,
-                        selectedRange: $bodySelectedRange,
-                        caretRect: $wikilinkCaretRect,
-                        selectionRects: $bodySelectionRects,
-                        isFocused: $isBodyFocused,
-                        files: workspace.files,
-                        suggestSelectedIndex: $wikilinkSuggestIndex,
-                        vaultURL: workspace.activeVaultURL,
-                        hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
-                        imageEmbedMaxWidth: AppColors.noteReadableWidth,
-                        toolbarBridge: noteToolbarBridge,
-                        onImageAttachmentDrop: insertImageAttachment,
-                        selectionRevealToken: selectionRevealToken
-                    )
+                        scrollEditingNoteBody
+                    }
                 }
-                .padding(.horizontal, 56)
+                .padding(.horizontal, editorHorizontalPadding)
                 .padding(.top, 28)
                 .padding(.bottom, 56)
                 .frame(maxWidth: AppColors.noteReadableWidth, alignment: .leading)
@@ -516,45 +639,71 @@ struct NoteEditorView: View {
     }
 
     @ViewBuilder
+    private var scrollEditingNoteBody: some View {
+        #if os(iOS)
+        NoteBodyTextView(
+            text: $draftContent,
+            selectedRange: $bodySelectedRange,
+            caretRect: $wikilinkCaretRect,
+            selectionRects: $bodySelectionRects,
+            isFocused: $isBodyFocused,
+            files: workspace.files,
+            suggestSelectedIndex: $wikilinkSuggestIndex,
+            vaultURL: workspace.activeVaultURL,
+            hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
+            imageEmbedMaxWidth: AppColors.noteReadableWidth,
+            hideTaskListMarkers: hasTaskLines,
+            toolbarBridge: noteToolbarBridge,
+            onImageAttachmentDrop: insertImageAttachment,
+            selectionRevealToken: selectionRevealToken,
+            onContentScroll: handleBodyContentScroll
+        )
+        .overlay(alignment: .topLeading) {
+            if hasTaskLines {
+                noteTaskCheckboxOverlay(maxWidth: AppColors.noteReadableWidth)
+            }
+        }
+        #else
+        NoteBodyTextView(
+            text: $draftContent,
+            selectedRange: $bodySelectedRange,
+            caretRect: $wikilinkCaretRect,
+            selectionRects: $bodySelectionRects,
+            isFocused: $isBodyFocused,
+            files: workspace.files,
+            suggestSelectedIndex: $wikilinkSuggestIndex,
+            vaultURL: workspace.activeVaultURL,
+            hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
+            imageEmbedMaxWidth: AppColors.noteReadableWidth,
+            hideTaskListMarkers: hasTaskLines,
+            toolbarBridge: noteToolbarBridge,
+            onImageAttachmentDrop: insertImageAttachment,
+            selectionRevealToken: selectionRevealToken
+        )
+        #endif
+    }
+
+    @ViewBuilder
     private func noteAttachmentModifiers<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         #if os(iOS)
         content()
-            .photosPicker(isPresented: $showNotePhotoPicker, selection: $noteAttachmentPhotoItem, matching: .images)
-            .onChange(of: noteAttachmentPhotoItem) { _, item in
-                guard let item else { return }
-                Task { await importNoteAttachmentPhoto(item) }
-            }
-            .fullScreenCover(isPresented: $showNoteCamera) {
-                CameraImagePicker(
-                    onImage: { data in
-                        _ = insertImageAttachment(data, "photo.jpg")
-                    },
-                    onCancel: {
-                        showNoteCamera = false
+            .noteAttachmentImportModifiers(
+                showAttachmentMenu: $showNoteAttachmentMenu,
+                showPhotoPicker: $showNotePhotoPicker,
+                showCamera: $showNoteCamera,
+                showFileImporter: $showNoteFileImporter,
+                photoItem: $noteAttachmentPhotoItem,
+                menuAnchor: { attachmentMenuAnchor },
+                onInsertImage: { data, name in
+                    _ = insertImageAttachment(data, name)
+                },
+                onImportFile: importNoteAttachmentFile,
+                onRegisterInsertAttachment: {
+                    noteToolbarBridge.onInsertAttachment = {
+                        showNoteAttachmentMenu = true
                     }
-                )
-                .ignoresSafeArea()
-            }
-            .overlay {
-                NoteInsertAttachmentMenuOverlay(
-                    isPresented: $showNoteAttachmentMenu,
-                    onPhotoLibrary: { showNotePhotoPicker = true },
-                    onTakePhoto: { showNoteCamera = true },
-                    onChooseFile: { showNoteFileImporter = true }
-                )
-            }
-            .fileImporter(
-                isPresented: $showNoteFileImporter,
-                allowedContentTypes: [.image],
-                allowsMultipleSelection: false
-            ) { result in
-                importNoteAttachmentFile(from: result)
-            }
-            .onAppear {
-                noteToolbarBridge.onInsertAttachment = {
-                    showNoteAttachmentMenu = true
                 }
-            }
+            )
             .onDrop(of: [.image, .fileURL], isTargeted: nil) { providers in
                 handleNoteImageDrop(providers)
             }
@@ -574,32 +723,51 @@ struct NoteEditorView: View {
     }
 
     private var readingSurface: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text(displayTitle)
-                    .font(.system(size: 40, weight: .bold))
-                    .foregroundStyle(AppColors.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if draftContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(" ")
-                        .font(.system(size: 16))
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(displayTitle)
+                        .font(.system(size: 40, weight: .bold))
                         .foregroundStyle(AppColors.textPrimary)
-                } else {
-                    Text(NoteMarkdownRenderer.linkedPreviewAttributedString(from: draftContent))
-                        .font(.system(size: 16))
-                        .foregroundStyle(AppColors.textPrimary)
-                        .lineSpacing(4)
-                        .tint(AppColors.noteLink)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                        .id("reading-title")
+
+                    if draftContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(" ")
+                            .font(.system(size: 16))
+                            .foregroundStyle(AppColors.textPrimary)
+                    } else if showFindBar, findMatchRange.location != NSNotFound {
+                        readingLineStack
+                    } else {
+                        CanvasNoteCardBodyView(
+                            content: draftContent,
+                            vaultURL: workspace.activeVaultURL,
+                            maxImageWidth: AppColors.noteReadableWidth,
+                            fontSize: WikilinkEditorSupport.bodyFontSize,
+                            checkboxFillColor: AppColors.canvasBackground,
+                            onToggleTaskRawLine: isWriteBlocked
+                                ? nil
+                                : { rawLine in
+                                    guard let updated = NoteCardTaskSupport.toggleTask(
+                                        matchingRawLine: rawLine,
+                                        in: draftContent
+                                    ) else { return }
+                                    draftContent = updated
+                                }
+                        )
+                        .id("reading-body")
+                    }
                 }
+                .padding(.horizontal, editorHorizontalPadding)
+                .padding(.top, 28)
+                .padding(.bottom, 56)
+                .frame(maxWidth: AppColors.noteReadableWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 56)
-            .padding(.top, 28)
-            .padding(.bottom, 56)
-            .frame(maxWidth: AppColors.noteReadableWidth, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .onChange(of: findMatchRange) { _, range in
+                guard showsReadingPreview, showFindBar, range.location != NSNotFound else { return }
+                scrollReadingPreview(to: range, using: proxy)
+            }
         }
         .environment(\.openURL, OpenURLAction { url in
             if let target = NoteMarkdownRenderer.wikilinkTarget(from: url) {
@@ -608,6 +776,88 @@ struct NoteEditorView: View {
             }
             return .systemAction
         })
+    }
+
+    private var readingLineStack: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(NoteFindReplaceSupport.lineRanges(in: draftContent).enumerated()), id: \.offset) { _, lineRange in
+                let ns = draftContent as NSString
+                let lineText = ns.substring(with: lineRange)
+                let trimmedLine = lineText.trimmingCharacters(in: .newlines)
+                let highlight = NoteFindReplaceSupport.highlightRange(findMatchRange, in: lineRange)
+
+                if let task = NoteCardTaskSupport.parseTaskLine(trimmedLine),
+                   case .task(let checked, let text, let rawLine) = task {
+                    HStack(alignment: .firstTextBaseline, spacing: NoteCardTaskSupport.checkboxSpacing) {
+                        Group {
+                            if !isWriteBlocked {
+                                Button {
+                                    guard let updated = NoteCardTaskSupport.toggleTask(
+                                        matchingRawLine: rawLine,
+                                        in: draftContent
+                                    ) else { return }
+                                    draftContent = updated
+                                } label: {
+                                    NoteCardTaskCheckbox(
+                                        checked: checked,
+                                        fontSize: WikilinkEditorSupport.bodyFontSize,
+                                        fillColor: AppColors.canvasBackground
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                NoteCardTaskCheckbox(
+                                    checked: checked,
+                                    fontSize: WikilinkEditorSupport.bodyFontSize,
+                                    fillColor: AppColors.canvasBackground
+                                )
+                            }
+                        }
+                        .alignmentGuide(.firstTextBaseline) { dimensions in
+                            dimensions[.bottom] - NoteCardTaskSupport.checkboxBaselineAlignmentOffset(
+                                fontSize: WikilinkEditorSupport.bodyFontSize
+                            )
+                        }
+
+                        Text(
+                            NoteMarkdownRenderer.linkedPreviewAttributedString(
+                                from: text,
+                                highlight: highlight
+                            )
+                        )
+                        .font(.system(size: WikilinkEditorSupport.bodyFontSize))
+                        .foregroundStyle(checked ? AppColors.textSecondary : AppColors.textPrimary)
+                        .strikethrough(checked, color: AppColors.textSecondary)
+                        .tint(AppColors.noteLink)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .id("reading-line-\(lineRange.location)")
+                } else {
+                    Text(
+                        NoteMarkdownRenderer.linkedPreviewAttributedString(
+                            from: trimmedLine,
+                            highlight: highlight
+                        )
+                    )
+                    .font(.system(size: WikilinkEditorSupport.bodyFontSize))
+                    .foregroundStyle(AppColors.textPrimary)
+                    .lineSpacing(4)
+                    .tint(AppColors.noteLink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .id("reading-line-\(lineRange.location)")
+                }
+            }
+        }
+    }
+
+    private func scrollReadingPreview(to range: NSRange, using proxy: ScrollViewProxy) {
+        guard let lineStart = NoteFindReplaceSupport.lineStart(containing: range, in: draftContent) else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            proxy.scrollTo("reading-line-\(lineStart)", anchor: .center)
+        }
     }
 
     private var noteStatusBar: some View {
@@ -668,27 +918,44 @@ struct NoteEditorView: View {
 
     @discardableResult
     private func insertImageAttachment(_ data: Data, _ suggestedName: String?) -> Bool {
-        guard let vaultURL = workspace.activeVaultURL else { return false }
-        guard let path = try? VaultFilesystem.saveCanvasImage(
-            data: data,
-            vaultURL: vaultURL,
-            suggestedName: suggestedName
-        ) else { return false }
-
+        guard let vaultURL = workspace.activeVaultURL else {
+            workspace.reportVaultError(
+                title: "No vault open",
+                message: "Choose or create a vault before inserting attachments."
+            )
+            return false
+        }
         let maxWidth = AppColors.noteReadableWidth
-        CanvasImageCache.shared.cacheDisplayImageSync(
+        guard let path = NoteAttachmentInsertSupport.saveImage(
             data: data,
-            cardID: "note-embed|\(path)",
-            contentKey: path
-        )
-        if let cgImage = CanvasImageCache.shared.cachedImage(forCardID: "note-embed|\(path)", content: path) {
-            let size = NoteCardInlineImageMetrics.displaySize(for: cgImage, maxWidth: maxWidth)
-            NoteCardEmbedLayoutMetrics.store(height: size.height, path: path, maxWidth: maxWidth)
+            suggestedName: suggestedName,
+            vaultURL: vaultURL,
+            maxWidth: maxWidth
+        ) else {
+            workspace.reportVaultError(
+                title: "Couldn't save image",
+                message: "The image could not be saved to this vault."
+            )
+            return false
         }
 
         usesInlineImageEditor = true
-        noteToolbarBridge.insertSnippet("![[\(path)]]")
+        let prepared = NoteAttachmentInsertSupport.prepareEmbedInsert(
+            path: path,
+            in: draftContent,
+            selectedRange: bodySelectedRange,
+            vaultURL: vaultURL
+        )
+        draftContent = prepared.text
+        bodySelectedRange = prepared.selectedRange
+        selectionRevealToken += 1
         return true
+    }
+
+    private func toggleTaskAtLine(_ lineIndex: Int) {
+        guard !isWriteBlocked else { return }
+        guard let updated = NoteCardTaskSupport.toggleTask(atLineIndex: lineIndex, in: draftContent) else { return }
+        draftContent = updated
     }
 
     private func handleNoteImageDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -706,18 +973,6 @@ struct NoteEditorView: View {
     }
 
     #if os(iOS)
-    private func importNoteAttachmentPhoto(_ item: PhotosPickerItem) async {
-        defer {
-            Task { @MainActor in
-                noteAttachmentPhotoItem = nil
-            }
-        }
-        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-        await MainActor.run {
-            _ = insertImageAttachment(data, item.itemIdentifier)
-        }
-    }
-
     private func importNoteAttachmentFile(from result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
         let accessed = url.startAccessingSecurityScopedResource()
@@ -743,7 +998,6 @@ struct NoteEditorView: View {
         isReading = true
         isTitleFocused = false
         isBodyFocused = false
-        showFindBar = false
     }
 
     private func scheduleTitleCommit() {
@@ -835,6 +1089,14 @@ struct NoteMarkdownPreview: View {
             }
             return .systemAction
         })
+    }
+}
+
+private struct NoteTitleHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 52
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

@@ -401,6 +401,18 @@ enum WikilinkEditorSupport {
                     fontSize: fontSize,
                     hiddenDelimiterOn: hiddenDelimiterOn
                 )
+                tightenHiddenDelimiterKern(in: storage, range: prefixRange, fontSize: fontSize)
+
+                let bodyStart = lineRange.location + prefixEnd
+                let bodyEnd = lineRange.location + nsLine.length
+                if bodyStart < bodyEnd {
+                    let leadingBodyRange = NSRange(location: bodyStart, length: bodyEnd - bodyStart)
+                    tightenLeadingHiddenDelimiters(
+                        in: storage,
+                        bodyRange: leadingBodyRange,
+                        fontSize: fontSize
+                    )
+                }
 
                 let leadingInset = NoteCardTaskSupport.lineLeadingInset(fontSize: fontSize)
                 let style = NSMutableParagraphStyle()
@@ -411,6 +423,53 @@ enum WikilinkEditorSupport {
 
             location = NSMaxRange(lineRange)
         }
+    }
+
+    /// Ensures zero-width markdown delimiters at the start of a task body do not push visible text right.
+    private static func tightenLeadingHiddenDelimiters(
+        in storage: NSMutableAttributedString,
+        bodyRange: NSRange,
+        fontSize: CGFloat
+    ) {
+        let content = storage.string as NSString
+        guard bodyRange.length > 0 else { return }
+
+        var index = bodyRange.location
+        let end = NSMaxRange(bodyRange)
+        while index < end {
+            let char = content.substring(with: NSRange(location: index, length: 1))
+            guard char.count == 1,
+                  let scalar = char.unicodeScalars.first,
+                  inlineMarkdownDelimiterScalars.contains(scalar) else { break }
+
+            let charRange = NSRange(location: index, length: 1)
+            if isHiddenDelimiter(in: storage, range: charRange) {
+                tightenHiddenDelimiterKern(in: storage, range: charRange, fontSize: fontSize)
+                index += 1
+                continue
+            }
+            break
+        }
+    }
+
+    private static func isHiddenDelimiter(in storage: NSMutableAttributedString, range: NSRange) -> Bool {
+        guard let font = storage.attribute(.font, at: range.location, effectiveRange: nil) else { return false }
+        #if canImport(AppKit)
+        let size = (font as? NSFont)?.pointSize ?? 16
+        #else
+        let size = (font as? UIFont)?.pointSize ?? 16
+        #endif
+        return size <= 0.02
+    }
+
+    private static func tightenHiddenDelimiterKern(
+        in storage: NSMutableAttributedString,
+        range: NSRange,
+        fontSize: CGFloat
+    ) {
+        guard range.length > 0 else { return }
+        let charWidth = approximateCharacterWidth(for: fontSize)
+        storage.addAttribute(.kern, value: -charWidth * CGFloat(range.length) * 1.05, range: range)
     }
 
     private static func applyHighlight(_ color: Any, to storage: NSMutableAttributedString, range: NSRange) {
@@ -477,7 +536,7 @@ enum WikilinkEditorSupport {
         let charWidth = approximateCharacterWidth(for: fontSize)
         storage.addAttributes([
             .font: hiddenFont,
-            .foregroundColor: platformColor(hiddenDelimiterOn),
+            .foregroundColor: platformColor(.clear),
             .kern: -charWidth * CGFloat(range.length),
         ], range: range)
     }
@@ -489,6 +548,24 @@ enum WikilinkEditorSupport {
         let font = UIFont.systemFont(ofSize: fontSize)
         #endif
         return ("*" as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    private static func delimiterIsBeingEdited(
+        openRange: NSRange,
+        closeRange: NSRange,
+        selectedRange: NSRange
+    ) -> Bool {
+        guard selectedRange.location != NSNotFound else { return false }
+        let caretIndices = [
+            selectedRange.location,
+            selectedRange.location + max(selectedRange.length, 0),
+        ]
+        for index in caretIndices {
+            if NSLocationInRange(index, openRange) || NSLocationInRange(index, closeRange) {
+                return true
+            }
+        }
+        return false
     }
 
     private static func applyWrappedMarkdown(
@@ -549,8 +626,11 @@ enum WikilinkEditorSupport {
             }
 
             let inner = NSRange(location: openRange.location + open.count, length: closeRange.location - openRange.location - open.count)
-            let full = NSRange(location: openRange.location, length: closeRange.location + close.count - openRange.location)
-            let isEditing = selectedRange.location != NSNotFound && NSIntersectionRange(full, selectedRange).length > 0
+            let isEditing = delimiterIsBeingEdited(
+                openRange: openRange,
+                closeRange: closeRange,
+                selectedRange: selectedRange
+            )
 
             applyDelimiterAppearance(
                 to: storage,

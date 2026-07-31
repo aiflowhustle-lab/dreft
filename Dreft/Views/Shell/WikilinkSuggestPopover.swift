@@ -88,23 +88,30 @@ private struct WikilinkSuggestRow: View {
     }
 
     var body: some View {
+        #if os(iOS)
+        rowContent
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onSelect)
+        #else
         Button(action: onSelect) {
-            Text(label)
-                .font(.system(size: 13))
-                .foregroundStyle(AppColors.textPrimary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .frame(height: 28)
-                .background(isHighlighted ? Color.primary.opacity(0.07) : Color.clear)
-                .contentShape(Rectangle())
+            rowContent
         }
         .buttonStyle(.plain)
-        #if os(macOS)
         .onHover { hovering in
             isHovered = hovering
             onHover(hovering)
         }
         #endif
+    }
+
+    private var rowContent: some View {
+        Text(label)
+            .font(.system(size: 13))
+            .foregroundStyle(AppColors.textPrimary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(isHighlighted ? Color.primary.opacity(0.07) : Color.clear)
     }
 }

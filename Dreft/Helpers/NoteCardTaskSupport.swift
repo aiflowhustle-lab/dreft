@@ -1,4 +1,16 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
+import SwiftUI
+
+struct NoteCardTaskCheckboxPlacement: Identifiable, Equatable {
+    let lineIndex: Int
+    let rawLine: String
+    let origin: CGPoint
+
+    var id: String { "\(lineIndex)-\(rawLine.hashValue)" }
+}
 
 enum NoteCardTextLine: Identifiable, Equatable {
     case plain(String)
@@ -17,8 +29,40 @@ enum NoteCardTextLine: Identifiable, Equatable {
 enum NoteCardTaskSupport {
     private static let taskLinePattern = #"^\s*[-*+]\s+\[([ xX])\]\s+(.*)$"#
 
+    private struct TaskLineMatch {
+        let mark: String
+        let prefixEnd: Int
+        let body: String
+    }
+
+    private static func parseTaskLineMatch(in line: String) -> TaskLineMatch? {
+        guard let regex = try? NSRegularExpression(pattern: taskLinePattern) else { return nil }
+        let nsLine = line as NSString
+        guard let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)),
+              match.numberOfRanges >= 3 else { return nil }
+
+        let markRange = match.range(at: 1)
+        let bodyRange = match.range(at: 2)
+        guard markRange.location != NSNotFound, bodyRange.location != NSNotFound else { return nil }
+
+        return TaskLineMatch(
+            mark: nsLine.substring(with: markRange),
+            prefixEnd: bodyRange.location,
+            body: nsLine.substring(with: bodyRange)
+        )
+    }
+
     static let checkboxWidth: CGFloat = 14
     static let checkboxSpacing: CGFloat = 8
+
+    static func scaledCheckboxWidth(fontSize: CGFloat) -> CGFloat {
+        checkboxWidth * (fontSize / CanvasConstants.noteCardFontSize)
+    }
+
+    /// Matches `CanvasNoteCardBodyView` firstTextBaseline alignment for the checkbox column.
+    static func checkboxBaselineAlignmentOffset(fontSize: CGFloat) -> CGFloat {
+        max(2, fontSize * 0.12) + 1
+    }
 
     /// Leading inset for task body text when the markdown prefix is hidden (checkbox column + gap).
     static func lineLeadingInset(fontSize: CGFloat = CanvasConstants.noteCardFontSize) -> CGFloat {
@@ -47,14 +91,12 @@ enum NoteCardTaskSupport {
     }
 
     static func parseTaskLine(_ line: String) -> NoteCardTextLine? {
-        guard let regex = try? NSRegularExpression(pattern: taskLinePattern) else { return nil }
-        let nsLine = line as NSString
-        guard let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)),
-              match.numberOfRanges >= 3 else { return nil }
-
-        let mark = nsLine.substring(with: match.range(at: 1))
-        let body = nsLine.substring(with: match.range(at: 2))
-        return .task(checked: mark.lowercased() == "x", text: taskPreviewText(from: body), rawLine: line)
+        guard let match = parseTaskLineMatch(in: line) else { return nil }
+        return .task(
+            checked: match.mark.lowercased() == "x",
+            text: taskPreviewText(from: match.body),
+            rawLine: line
+        )
     }
 
     /// Strips redundant checkbox syntax when task body still contains `[ ]` / `[x]`.
@@ -122,4 +164,75 @@ enum NoteCardTaskSupport {
         }
         return y
     }
+
+    /// Raw markdown task body (`- [ ] **note**` → `**note**`).
+    static func taskBodyMarkdown(in line: String) -> String? {
+        parseTaskLineMatch(in: line)?.body
+    }
+
+    /// Character index where the visible task body begins (`- [ ] body` → start of `body`).
+    static func taskBodyCharacterIndex(in line: String, lineStart: Int) -> Int? {
+        guard let match = parseTaskLineMatch(in: line) else { return nil }
+        return lineStart + match.prefixEnd
+    }
+
+    /// Positions checkboxes from the live text layout — required while editing formatted task lines.
+    #if canImport(UIKit)
+    static func checkboxPlacements(
+        in content: String,
+        textView: UITextView,
+        contentScrollOffset: CGPoint,
+        fontSize: CGFloat,
+        editorBackground: Color = AppColors.canvasBackground,
+        hideTaskListMarkers: Bool = false,
+        usesWysiwygDisplay: Bool = false
+    ) -> [NoteCardTaskCheckboxPlacement] {
+        let ns = content as NSString
+        guard ns.length > 0 else { return [] }
+
+        var placements: [NoteCardTaskCheckboxPlacement] = []
+        var lineStart = 0
+        var lineIndex = 0
+        let parts = content.split(separator: "\n", omittingEmptySubsequences: false)
+
+        for part in parts {
+            let line = String(part)
+            if let task = parseTaskLine(line),
+               case .task(_, _, let rawLine) = task {
+                let anchorIndex: Int
+                if usesWysiwygDisplay, hideTaskListMarkers {
+                    let displaySource = MarkdownWysiwygEditingSupport.displaySourceString(
+                        from: content,
+                        hideTaskListMarkers: true
+                    )
+                    anchorIndex = MarkdownWysiwygEditingSupport.displayLineStartIndex(
+                        forMarkdownLineStart: lineStart,
+                        markdown: content,
+                        displaySource: displaySource
+                    )
+                } else {
+                    anchorIndex = taskBodyCharacterIndex(in: line, lineStart: lineStart) ?? lineStart
+                }
+
+                let origin = NoteEditingChromeSupport.checkboxOrigin(
+                    forCharacterIndex: anchorIndex,
+                    in: textView,
+                    contentScrollOffset: contentScrollOffset,
+                    fontSize: fontSize
+                )
+                placements.append(
+                    NoteCardTaskCheckboxPlacement(
+                        lineIndex: lineIndex,
+                        rawLine: rawLine,
+                        origin: origin
+                    )
+                )
+            }
+            lineStart += (line as NSString).length + 1
+            lineIndex += 1
+        }
+
+        return placements
+    }
+    #endif
 }

@@ -52,6 +52,10 @@ struct VaultDirtyTracker {
         dirtyNotePaths.remove(relativePath)
     }
 
+    mutating func clearCanvas(_ relativePath: String) {
+        dirtyCanvasPaths.remove(relativePath)
+    }
+
     mutating func consumeNotes() -> Set<String> {
         let pending = dirtyNotePaths
         dirtyNotePaths.removeAll()

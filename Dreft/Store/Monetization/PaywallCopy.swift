@@ -11,32 +11,146 @@ enum PaywallCopy {
         "\(shortTrialPhrase(introOffer)) on Yearly. Cancel anytime before you're charged."
     }
 
-    /// Short trial phrase for fine print and plan notes, e.g. "3 days free trial".
+    /// Short trial phrase for fine print and plan notes, e.g. "3-day free trial".
     static func shortTrialPhrase(_ offer: Product.SubscriptionOffer) -> String {
-        "\(trialDurationPhrase(offer)) free trial"
+        "\(hyphenatedTrialDuration(offer)) free trial"
     }
 
-    private static func trialDurationPhrase(_ offer: Product.SubscriptionOffer) -> String {
+    static func startTrialCTATitle(_ offer: Product.SubscriptionOffer) -> String {
+        "Start \(hyphenatedTrialDuration(offer, titleCase: true)) Free Trial"
+    }
+
+    static func discountBadgeTitle(percent: Int) -> String {
+        "SAVE \(percent)%"
+    }
+
+    struct PlanFootnoteLines: Equatable {
+        let primary: String
+    }
+
+    static func planFootnoteLines(
+        selectedPlanID: String,
+        yearlyProduct: Product?,
+        monthlyProduct: Product?,
+        isYearlyTrialEligible: Bool,
+        isReadOnly: Bool
+    ) -> PlanFootnoteLines {
+        if isReadOnly {
+            return PlanFootnoteLines(primary: subscriptionRenewalDisclaimer)
+        }
+
+        let renewalNote = " Auto-renews until canceled."
+
+        if selectedPlanID == StoreConstants.yearlyProductID, let yearly = yearlyProduct {
+            let primary: String
+            if isYearlyTrialEligible, let intro = yearly.subscription?.introductoryOffer {
+                primary = "Free for \(hyphenatedTrialDuration(intro)), then \(yearly.displayPrice)/year."
+            } else {
+                primary = "\(yearly.displayPrice) per year."
+            }
+            return PlanFootnoteLines(primary: primary + renewalNote)
+        }
+
+        if selectedPlanID == StoreConstants.monthlyProductID, let monthly = monthlyProduct {
+            return PlanFootnoteLines(primary: "\(monthly.displayPrice) per month." + renewalNote)
+        }
+
+        return PlanFootnoteLines(primary: subscriptionRenewalDisclaimer)
+    }
+
+    private static func hyphenatedTrialDuration(
+        _ offer: Product.SubscriptionOffer,
+        titleCase: Bool = false
+    ) -> String {
         let count = offer.period.value
         switch offer.period.unit {
-        case .day where count == 1: return "1 day"
-        case .day: return "\(count) days"
-        case .week where count == 1: return "1 week"
-        case .week: return "\(count) weeks"
-        case .month where count == 1: return "1 month"
-        case .month: return "\(count) months"
-        case .year where count == 1: return "1 year"
-        case .year: return "\(count) years"
-        @unknown default: return "the trial period"
+        case .day where count == 1:
+            return titleCase ? "1-Day" : "1-day"
+        case .day:
+            return titleCase ? "\(count)-Day" : "\(count)-day"
+        case .week where count == 1:
+            return titleCase ? "1-Week" : "1-week"
+        case .week:
+            return titleCase ? "\(count)-Week" : "\(count)-week"
+        case .month where count == 1:
+            return titleCase ? "1-Month" : "1-month"
+        case .month:
+            return titleCase ? "\(count)-Month" : "\(count)-month"
+        case .year where count == 1:
+            return titleCase ? "1-Year" : "1-year"
+        case .year:
+            return titleCase ? "\(count)-Year" : "\(count)-year"
+        @unknown default:
+            return titleCase ? "Free-Trial" : "free-trial"
         }
     }
 
-
-    static let perks: [(symbol: String, text: String)] = [
+    private static let perks: [(symbol: String, text: String)] = [
         ("checkmark.seal", "Never contradict your canon."),
         ("square.stack.3d.up", "Your whole world on one canvas."),
         ("infinity", "Unlimited notes, canvases, and vaults."),
     ]
+
+    static func orderedPerks(
+        selectedGoals: [OnboardingGoalID],
+        coreDesire: CoreDesire?
+    ) -> [(symbol: String, text: String)] {
+        let desire = coreDesire ?? OnboardingState.coreDesire(matching: selectedGoals)
+        let leadingIndex: Int
+
+        switch selectedGoals.first {
+        case .lore, .webtoon:
+            leadingIndex = 0
+        case .wiki, .campaign:
+            leadingIndex = 1
+        case .novel, .fanfic:
+            leadingIndex = 2
+        case .none:
+            switch desire {
+            case .canon:
+                leadingIndex = 0
+            case .map:
+                leadingIndex = 1
+            case .finish, .own, .none:
+                leadingIndex = 2
+            }
+        }
+
+        let trailing = [0, 1, 2].filter { $0 != leadingIndex }
+        return ([leadingIndex] + trailing).map { perks[$0] }
+    }
+
+    static func primaryCTATitle(
+        isPurchasing: Bool,
+        isReadOnly: Bool,
+        selectedPlanID: String,
+        yearlyProduct: Product?,
+        monthlyProduct: Product?,
+        isYearlyTrialEligible: Bool
+    ) -> String {
+        if isPurchasing {
+            return "Processing…"
+        }
+        if isReadOnly {
+            return "Subscribe"
+        }
+
+        if selectedPlanID == StoreConstants.yearlyProductID,
+           isYearlyTrialEligible,
+           let intro = yearlyProduct?.subscription?.introductoryOffer {
+            return startTrialCTATitle(intro)
+        }
+
+        if selectedPlanID == StoreConstants.monthlyProductID, let monthly = monthlyProduct {
+            return "Subscribe — \(monthly.displayPrice)/mo"
+        }
+
+        if selectedPlanID == StoreConstants.yearlyProductID, let yearly = yearlyProduct {
+            return "Subscribe — \(yearly.displayPrice)/yr"
+        }
+
+        return "Subscribe"
+    }
 
     static func eyebrow(worldName: String, isFreshOnboarding: Bool) -> String {
         if isFreshOnboarding {
@@ -98,11 +212,19 @@ enum PaywallCopy {
         }
     }
 
-    static func subtitle(isReadOnly: Bool) -> String {
+    static func subtitle(isReadOnly: Bool, rawWorldName: String?) -> String {
         if isReadOnly {
             return "Subscribe to start writing again on Mac and iPad. Your vault stays on your device — read and export anytime."
         }
+        if hasPersonalizedWorldName(rawWorldName) {
+            return "Keep building \(displayWorldName(from: rawWorldName))."
+        }
         return proSubtitle
+    }
+
+    private static func hasPersonalizedWorldName(_ raw: String?) -> Bool {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !trimmed.isEmpty
     }
 
     static func readingFooter(worldName: String) -> String {

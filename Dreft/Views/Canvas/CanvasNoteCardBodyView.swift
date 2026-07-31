@@ -18,6 +18,9 @@ struct CanvasNoteCardBodyView: View {
     var fontSize: CGFloat = CanvasConstants.noteCardFontSize
     var contentMode: ContentMode = .full
     var cacheRevision: Int = 0
+    /// When false, task rows omit the checkbox column (a parent overlay draws them).
+    var showsInlineTaskCheckboxes: Bool = true
+    var checkboxFillColor: Color = AppColors.noteCardBackground
     var onContentSizeChange: () -> Void = {}
     var onToggleTaskRawLine: ((String) -> Void)? = nil
 
@@ -109,7 +112,7 @@ struct CanvasNoteCardBodyView: View {
             let lines = NoteCardTaskSupport.parsedLines(from: text)
             if lines.contains(where: { if case .task = $0 { return true }; return false }) {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(lines.enumerated()), id: \.element.id) { _, line in
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                         noteTextLine(line)
                     }
                 }
@@ -142,35 +145,55 @@ struct CanvasNoteCardBodyView: View {
                     .frame(maxWidth: maxImageWidth, alignment: .leading)
             }
         case .task(let checked, let value, let rawLine):
-            HStack(alignment: .top, spacing: NoteCardTaskSupport.checkboxSpacing) {
-                Group {
-                    if onToggleTaskRawLine != nil {
-                        Button {
-                            onToggleTaskRawLine?(rawLine)
-                        } label: {
-                            NoteCardTaskCheckbox(checked: checked)
+            if showsInlineTaskCheckboxes {
+                HStack(alignment: .firstTextBaseline, spacing: NoteCardTaskSupport.checkboxSpacing) {
+                    Group {
+                        if onToggleTaskRawLine != nil {
+                            Button {
+                                onToggleTaskRawLine?(rawLine)
+                            }                             label: {
+                                NoteCardTaskCheckbox(
+                                    checked: checked,
+                                    fontSize: fontSize,
+                                    fillColor: checkboxFillColor
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            NoteCardTaskCheckbox(
+                                checked: checked,
+                                fontSize: fontSize,
+                                fillColor: checkboxFillColor
+                            )
                         }
-                        .buttonStyle(.plain)
-                    } else {
-                        NoteCardTaskCheckbox(checked: checked)
                     }
-                }
-                .padding(.top, max(2, fontSize * 0.12))
+                    .alignmentGuide(.firstTextBaseline) { dimensions in
+                        dimensions[.bottom] - NoteCardTaskSupport.checkboxBaselineAlignmentOffset(fontSize: fontSize)
+                    }
 
-                Text(NotePreviewCache.canvasCardPreview(for: value))
-                    .font(.system(size: fontSize))
-                    .foregroundStyle(checked ? AppColors.textSecondary : themeState.theme.textPrimary)
-                    .strikethrough(checked, color: AppColors.textSecondary)
-                    .tint(AppColors.noteLink)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(
-                        maxWidth: max(1, maxImageWidth - NoteCardTaskSupport.lineLeadingInset(fontSize: fontSize)),
-                        alignment: .leading
-                    )
+                    taskBodyText(value, checked: checked)
+                }
+                .frame(maxWidth: maxImageWidth, alignment: .leading)
+            } else {
+                taskBodyText(value, checked: checked)
+                    .padding(.leading, NoteCardTaskSupport.lineLeadingInset(fontSize: fontSize))
+                    .frame(maxWidth: maxImageWidth, alignment: .leading)
             }
-            .frame(maxWidth: maxImageWidth, alignment: .leading)
         }
+    }
+
+    private func taskBodyText(_ value: String, checked: Bool) -> some View {
+        Text(NotePreviewCache.canvasCardPreview(for: value))
+            .font(.system(size: fontSize))
+            .foregroundStyle(checked ? AppColors.textSecondary : themeState.theme.textPrimary)
+            .strikethrough(checked, color: AppColors.textSecondary)
+            .tint(AppColors.noteLink)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(
+                maxWidth: max(1, maxImageWidth - NoteCardTaskSupport.lineLeadingInset(fontSize: fontSize)),
+                alignment: .leading
+            )
     }
 
     private func estimatedImageWidth(for path: String) -> CGFloat {
@@ -305,6 +328,17 @@ enum NoteCardInlineImageMetrics {
         }
         let width = min(maxWidth, naturalSize.width)
         let height = naturalSize.height * (width / naturalSize.width)
+        return CGSize(width: width, height: height)
+    }
+
+    static func displaySize(forPixelSize pixelSize: CGSize, maxWidth: CGFloat) -> CGSize {
+        guard pixelSize.width > 0, pixelSize.height > 0 else {
+            return CGSize(width: min(maxWidth, 160), height: min(maxWidth * 0.6, 120))
+        }
+        let pointWidth = pixelSize.width / screenScale
+        let pointHeight = pixelSize.height / screenScale
+        let width = min(maxWidth, pointWidth)
+        let height = pointHeight * (width / max(pointWidth, 1))
         return CGSize(width: width, height: height)
     }
 

@@ -50,17 +50,28 @@ final class NoteFormattingToolbarBridge: ObservableObject {
             return
         }
 
+        if let noteTextView = textView as? NoteEditingUITextView {
+            self.textView = noteTextView
+        } else {
+            self.textView = textView
+        }
+
         let container = accessoryContainer ?? {
             let created = NoteFormattingToolbarAccessoryContainer(bridge: self)
             accessoryContainer = created
             return created
         }()
 
-        guard textView.inputAccessoryView !== container else { return }
+        guard textView.inputAccessoryView !== container else {
+            scheduleRefresh()
+            return
+        }
+
         textView.inputAccessoryView = container
         if textView.isFirstResponder {
             textView.reloadInputViews()
         }
+        scheduleRefresh()
     }
 
     func clearInputAccessory(on textView: UITextView) {
@@ -87,12 +98,34 @@ final class NoteFormattingToolbarBridge: ObservableObject {
         scheduleRefresh()
     }
 
+    func detachFromEditor() {
+        textView = nil
+        applyAction = nil
+        insertSnippetHandler = nil
+        scheduleRefresh()
+    }
+
     func requestAttachment() {
         onInsertAttachment?()
     }
 
+    func applyFormatting(_ action: MarkdownEditAction) {
+        if action == .attachment {
+            requestAttachment()
+            return
+        }
+        applyAction?(action)
+        scheduleRefresh()
+    }
+
+    func insertFormattingSnippet(_ snippet: String) {
+        insertSnippetHandler?(snippet)
+        scheduleRefresh()
+    }
+
     func insertSnippet(_ snippet: String) {
         insertSnippetHandler?(snippet)
+        scheduleRefresh()
     }
 }
 

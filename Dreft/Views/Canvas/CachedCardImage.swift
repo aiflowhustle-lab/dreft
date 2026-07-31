@@ -33,6 +33,7 @@ struct CanvasLazyCardImage: View {
     var onLoaded: () -> Void
 
     @State private var didScheduleLoad = false
+    @State private var loadFailed = false
 
     var body: some View {
         Group {
@@ -45,10 +46,17 @@ struct CanvasLazyCardImage: View {
         .onAppear { scheduleLoadIfNeeded() }
         .onChange(of: cacheRevision) { _, _ in
             didScheduleLoad = false
+            loadFailed = false
             scheduleLoadIfNeeded()
         }
         .onChange(of: allowLoad) { _, _ in
             didScheduleLoad = false
+            loadFailed = false
+            scheduleLoadIfNeeded()
+        }
+        .onChange(of: content) { _, _ in
+            didScheduleLoad = false
+            loadFailed = false
             scheduleLoadIfNeeded()
         }
     }
@@ -56,7 +64,7 @@ struct CanvasLazyCardImage: View {
     private var imagePlaceholder: some View {
         ZStack {
             Color.white.opacity(0.04)
-            if allowLoad {
+            if allowLoad, !loadFailed {
                 ProgressView().controlSize(.small)
             }
         }
@@ -64,9 +72,10 @@ struct CanvasLazyCardImage: View {
     }
 
     private func scheduleLoadIfNeeded() {
-        guard allowLoad else { return }
+        guard allowLoad, !loadFailed else { return }
         if CanvasImageCache.shared.cachedImage(forCardID: cardID, content: content) != nil {
             didScheduleLoad = false
+            loadFailed = false
             return
         }
         guard !didScheduleLoad else { return }
@@ -77,6 +86,7 @@ struct CanvasLazyCardImage: View {
             vaultURL: vaultURL,
             onComplete: {
                 didScheduleLoad = false
+                loadFailed = CanvasImageCache.shared.cachedImage(forCardID: cardID, content: content) == nil
                 onLoaded()
             }
         )

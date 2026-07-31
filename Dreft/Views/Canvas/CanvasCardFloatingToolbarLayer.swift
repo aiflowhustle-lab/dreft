@@ -18,36 +18,12 @@ struct CanvasCardFloatingToolbarLayer: View {
 
     private var isImage: Bool { card.kind == .image }
 
-    private var toolbarLayoutHeight: CGFloat { 38 }
-    private var toolbarGapAboveCard: CGFloat { 12 }
+    private var gapAboveCard: CGFloat {
+        CanvasFloatingToolbarChrome.gapAboveCard
+    }
+
     private var colorRowLayoutHeight: CGFloat { 28 }
-    /// Visible gap between the icon toolbar and the color palette row.
     private var colorRowGap: CGFloat { 5 }
-
-    private var toolbarWorldScale: CGFloat {
-        CanvasFloatingToolbarChrome.counterScale(for: zoom)
-    }
-
-    /// World-space spacer so the visible gap stays `colorRowGap` screen points at any zoom.
-    private var colorRowGapWorld: CGFloat {
-        colorRowGap / max(toolbarWorldScale * zoom, 0.001)
-    }
-
-    /// Toolbar top edge — constant so opening the color row doesn't shift the icon bar.
-    private var pinnedToolbarTopY: CGFloat {
-        -(toolbarGapAboveCard + toolbarLayoutHeight) * toolbarWorldScale
-    }
-
-    /// Hit-test band above the card — grows upward when the color row is open.
-    private var floatingToolbarSlotHeight: CGFloat {
-        let base = (toolbarGapAboveCard + toolbarLayoutHeight) * toolbarWorldScale
-        let colorExtra = showColorRow ? (colorRowLayoutHeight + colorRowGap) * toolbarWorldScale : 0
-        return base + colorExtra
-    }
-
-    private var floatingToolbarOffsetY: CGFloat {
-        -floatingToolbarSlotHeight
-    }
 
     /// Screen-space rect for hit-testing — keeps toolbar clicks from starting edge drags / dismiss taps.
     static func screenHitRect(
@@ -56,48 +32,40 @@ struct CanvasCardFloatingToolbarLayer: View {
         showColorRow: Bool,
         worldToScreen: (CGPoint) -> CGPoint
     ) -> CGRect {
-        let toolbarWorldScale = CanvasFloatingToolbarChrome.counterScale(for: zoom)
-        let colorExtra: CGFloat = showColorRow ? 45 : 0
-        let slotHeight = (CGFloat(38 + 12) + colorExtra) * toolbarWorldScale
-        let screenOrigin = worldToScreen(worldFrame.origin)
+        let origin = worldToScreen(worldFrame.origin)
         let screenWidth = worldFrame.width * zoom
-        let top = screenOrigin.y + (-slotHeight) * zoom
-        let height = slotHeight * zoom
-        return CGRect(x: screenOrigin.x, y: top, width: screenWidth, height: height)
+        let slotHeight = CanvasFloatingToolbarChrome.toolbarSlotHeight(showColorRow: showColorRow)
+        return CGRect(
+            x: origin.x,
+            y: origin.y - slotHeight,
+            width: screenWidth,
+            height: slotHeight
+        )
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color.clear
-                .frame(width: frameWidth, height: floatingToolbarSlotHeight)
-                .overlay(alignment: .top) {
-                    VStack(spacing: 0) {
-                        floatingToolbar
+        VStack(spacing: 0) {
+            floatingToolbar
 
-                        if showColorRow {
-                            Color.clear
-                                .frame(height: colorRowGapWorld)
+            if showColorRow {
+                Color.clear.frame(height: colorRowGap)
 
-                            CanvasCardColorSwatchRow(
-                                activeColorHex: card.colorHex,
-                                frameWidth: frameWidth,
-                                zoom: zoom,
-                                cardColors: cardColors,
-                                showCustomColorPicker: $showCustomColorPicker,
-                                onSetColor: onSetColor
-                            )
-                            .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
-                        }
-                    }
-                    .scaleEffect(toolbarWorldScale, anchor: .top)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(width: frameWidth, alignment: .center)
-                    .offset(y: pinnedToolbarTopY - floatingToolbarOffsetY)
-                }
-                .offset(y: floatingToolbarOffsetY)
-                .animation(nil, value: showColorRow)
+                CanvasCardColorSwatchRow(
+                    activeColorHex: card.colorHex,
+                    frameWidth: frameWidth,
+                    zoom: zoom,
+                    cardColors: cardColors,
+                    showCustomColorPicker: $showCustomColorPicker,
+                    onSetColor: onSetColor
+                )
+                .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
+            }
+
+            Color.clear.frame(height: gapAboveCard)
         }
-        .frame(width: frameWidth, height: frameHeight, alignment: .topLeading)
+        .frame(width: frameWidth, alignment: .top)
+        .fixedSize(horizontal: false, vertical: true)
+        .animation(nil, value: showColorRow)
         .allowsHitTesting(true)
     }
 
@@ -162,6 +130,7 @@ struct CanvasCardFloatingToolbarLayer: View {
             .onHover { hovered = $0 }
             #endif
             .help(tip)
+            .accessibilityLabel(tip)
         }
     }
 }

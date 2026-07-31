@@ -55,15 +55,22 @@ struct CanvasNoteCardPreviewScrollContainer<Content: View>: View {
             .onChanged { value in
                 let dx = abs(value.translation.width)
                 let dy = abs(value.translation.height)
-                guard maxOffset > 0.5 else { return }
-                guard isDragging || dy >= dx else { return }
+                if maxOffset > 0.5 {
+                    guard isDragging || dy >= dx else { return }
 
-                if !isDragging {
-                    isDragging = true
-                    dragOriginOffset = offsetY
+                    if !isDragging {
+                        isDragging = true
+                        dragOriginOffset = offsetY
+                    }
+                    let proposed = dragOriginOffset - value.translation.height
+                    offsetY = min(max(0, proposed), maxOffset)
+                    return
                 }
-                let proposed = dragOriginOffset - value.translation.height
-                offsetY = min(max(0, proposed), maxOffset)
+
+                // Short / non-scrollable body: still track movement so a clean tap can enter edit.
+                if !isDragging, hypot(dx, dy) > 3 {
+                    isDragging = true
+                }
             }
             .onEnded { value in
                 let moved = hypot(value.translation.width, value.translation.height) > 3

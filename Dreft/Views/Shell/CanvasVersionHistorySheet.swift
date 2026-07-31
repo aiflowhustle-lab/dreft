@@ -8,6 +8,7 @@ struct CanvasVersionHistorySheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var versions: [CanvasFileVersion] = []
+    @State private var missingAssetRestore: MissingAssetRestorePrompt?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,7 +41,7 @@ struct CanvasVersionHistorySheet: View {
                         }
                         Spacer()
                         Button("Restore") {
-                            restore(record)
+                            beginRestore(record)
                         }
                     }
                     .padding(.vertical, 4)
@@ -49,6 +50,16 @@ struct CanvasVersionHistorySheet: View {
         }
         .frame(minWidth: 520, minHeight: 360)
         .onAppear(perform: loadVersions)
+        .alert(item: $missingAssetRestore) { prompt in
+            Alert(
+                title: Text("Missing images"),
+                message: Text(prompt.message),
+                primaryButton: .destructive(Text("Restore anyway")) {
+                    applyRestore(prompt.snapshot)
+                },
+                secondaryButton: .cancel()
+            )
+        }
     }
 
     private func loadVersions() {
@@ -71,7 +82,7 @@ struct CanvasVersionHistorySheet: View {
             .sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
-    private func restore(_ record: CanvasFileVersion) {
+    private func beginRestore(_ record: CanvasFileVersion) {
         guard entitlements.requireWriteAccess() else { return }
         do {
             let data = try Data(contentsOf: record.url)
@@ -82,11 +93,37 @@ struct CanvasVersionHistorySheet: View {
                 )
                 return
             }
-            canvasStore.restoreDocumentSnapshot(snapshot)
-            dismiss()
+
+            if let vaultURL = workspace.activeVaultURL {
+                let missing = VaultFilesystem.missingCanvasAssetPaths(in: snapshot, vaultURL: vaultURL)
+                if !missing.isEmpty {
+                    missingAssetRestore = MissingAssetRestorePrompt(snapshot: snapshot, missingCount: missing.count)
+                    return
+                }
+            }
+
+            applyRestore(snapshot)
         } catch {
             workspace.reportVaultError(title: "Restore failed", message: error.localizedDescription)
         }
+    }
+
+    private func applyRestore(_ snapshot: CanvasDocumentSnapshot) {
+        canvasStore.restoreDocumentSnapshot(snapshot)
+        dismiss()
+    }
+}
+
+private struct MissingAssetRestorePrompt: Identifiable {
+    let id = UUID()
+    let snapshot: CanvasDocumentSnapshot
+    let missingCount: Int
+
+    var message: String {
+        if missingCount == 1 {
+            return "This version references 1 image that is no longer in the vault. Restoring will leave that image broken."
+        }
+        return "This version references \(missingCount) images that are no longer in the vault. Restoring will leave those images broken."
     }
 }
 

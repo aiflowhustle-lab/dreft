@@ -36,8 +36,7 @@ final class KeyboardHeightObserver: ObservableObject {
 
         if visible,
            let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-            let screenHeight = UIScreen.main.bounds.height
-            let overlap = max(0, screenHeight - frame.origin.y)
+            let overlap = UIKeyboardOverlap.overlapInKeyWindow(keyboardFrameEnd: frame)
             nextHeight = overlap
             nextVisible = overlap > 0
         } else {
@@ -225,9 +224,37 @@ private struct NoteIPadFormattingToolbarHost: View {
                 canRedo: bridge.canRedo,
                 onUndo: { bridge.undo() },
                 onRedo: { bridge.redo() },
-                onAction: { bridge.applyAction?($0) },
+                onAction: { bridge.applyFormatting($0) },
                 onDismissKeyboard: { bridge.dismissKeyboard() }
             )
+        }
+    }
+}
+
+struct NoteIPadFormattingToolbarOverlay: View {
+    @ObservedObject var bridge: NoteFormattingToolbarBridge
+    var bottomInset: CGFloat = 0
+    var isVisible: Bool = true
+
+    var body: some View {
+        if isVisible {
+            VStack(spacing: 6) {
+                if let status = bridge.accessoryStatus {
+                    NoteIPadEditorStatusRow(status: status)
+                }
+
+                NoteIPadFormattingToolbar(
+                    canUndo: bridge.canUndo,
+                    canRedo: bridge.canRedo,
+                    onUndo: { bridge.undo() },
+                    onRedo: { bridge.redo() },
+                    onAction: { bridge.applyFormatting($0) },
+                    onDismissKeyboard: { bridge.dismissKeyboard() }
+                )
+            }
+            .padding(.bottom, max(0, bottomInset))
+            .padding(.horizontal, 12)
+            .padding(.bottom, bottomInset > 0 ? 0 : 8)
         }
     }
 }
@@ -261,6 +288,7 @@ private struct NoteIPadEditorStatusRow: View {
     }
 }
 
+/// Keyboard accessory toolbar — SwiftUI view is added as a subview only (no child VC).
 final class NoteFormattingToolbarAccessoryContainer: UIView {
     static let statusRowHeight: CGFloat = 28
     static let toolbarRowHeight: CGFloat = 64

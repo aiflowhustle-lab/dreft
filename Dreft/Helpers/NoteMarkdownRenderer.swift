@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 enum NoteMarkdownRenderer {
     private static let wikilinkPattern = #"\[\[([^\]|]+)(?:\|([^\]]*))?\]\]"#
@@ -93,6 +96,28 @@ enum NoteMarkdownRenderer {
     }
 
     static func linkedPreviewAttributedString(from content: String) -> AttributedString {
+        linkedPreviewAttributedString(from: content, highlight: nil)
+    }
+
+    static func linkedPreviewAttributedString(from content: String, highlight: NSRange?) -> AttributedString {
+        var attributed = baseLinkedPreviewAttributedString(from: content)
+        guard let highlight,
+              highlight.location != NSNotFound,
+              highlight.length > 0,
+              let swiftRange = Range(highlight, in: content),
+              let start = AttributedString.Index(swiftRange.lowerBound, within: attributed),
+              let end = AttributedString.Index(swiftRange.upperBound, within: attributed) else {
+            return attributed
+        }
+        #if canImport(AppKit)
+        attributed[start..<end].backgroundColor = NSColor.selectedTextBackgroundColor.withAlphaComponent(0.35)
+        #else
+        attributed[start..<end].backgroundColor = .yellow.opacity(0.35)
+        #endif
+        return attributed
+    }
+
+    private static func baseLinkedPreviewAttributedString(from content: String) -> AttributedString {
         let ns = linkedAttributedString(for: content)
         return AttributedString(ns)
     }

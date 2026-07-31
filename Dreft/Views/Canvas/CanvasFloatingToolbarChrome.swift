@@ -9,8 +9,23 @@ enum CanvasFloatingToolbarChrome {
     static let buttonSize: CGFloat = 36
     static let iconSize: CGFloat = 15
     static let pillSpacing: CGFloat = 10
+    /// Fixed screen-space chrome above selected cards.
+    static let toolbarHeight: CGFloat = 32
+    static var gapAboveCard: CGFloat {
+        #if os(macOS)
+        10
+        #else
+        14
+        #endif
+    }
+    static let imageTitleGap: CGFloat = 6
     /// Cap toolbar growth when zoomed in — matches Obsidian-style floating chrome.
     static let counterScaleMaxZoom: CGFloat = 1.35
+
+    static func toolbarSlotHeight(showColorRow: Bool = false) -> CGFloat {
+        let colorExtra: CGFloat = showColorRow ? 33 : 0
+        return toolbarHeight + gapAboveCard + colorExtra
+    }
 
     /// Counter-scale applied inside the card toolbar layer (the parent also applies `zoom`).
     /// Keeps delete/color/zoom controls the same screen size at any canvas zoom, including max zoom-out.

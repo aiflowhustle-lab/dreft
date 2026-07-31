@@ -9,6 +9,11 @@ enum OnboardingMotion {
     static let desireConfirmDuration: UInt64 = 700_000_000
     static let mirrorTextLead: Double = 0.15
     static let buildingStepDelay: UInt64 = 400_000_000
+    /// Minimum time on the building screen before advancing to world-ready.
+    static let buildingMinimumDurationNs: UInt64 = 8_000_000_000
+    /// Stagger between Canvas → Lore → Graph checklist steps during building.
+    static let buildingStepIntervalNs: UInt64 = 2_400_000_000
+    static let buildingProgressDuration: Double = 8.0
     static let typewriterCharacterDelayMs: Int = 34
     static let typewriterSubtitleDelayMs: Int = 180
     static let typewriterContentDelayMs: Int = 220

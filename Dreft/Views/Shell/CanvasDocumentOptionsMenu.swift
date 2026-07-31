@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 #if os(macOS)
 import AppKit
 #else
@@ -12,6 +13,7 @@ struct CanvasDocumentOptionsMenu: View {
     let fileID: String
     var onSplitRight: () -> Void = {}
     var onSplitDown: () -> Void = {}
+    var onImportCanvasBundle: ((URL) -> Void)? = nil
     @Binding var sidebarVisible: Bool
     @Binding var sidebarPanel: SidebarPanel
 
@@ -20,6 +22,10 @@ struct CanvasDocumentOptionsMenu: View {
     @State private var showOutgoingSheet = false
     @State private var showVersionHistory = false
     @State private var showImageExport = false
+    @State private var showBundleImport = false
+    #if os(iOS)
+    @State private var pendingBundleExport: IOSPendingFileExport?
+    #endif
 
     private var file: WorkspaceFileEntry? {
         workspace.files.first { $0.id == fileID }
@@ -60,6 +66,14 @@ struct CanvasDocumentOptionsMenu: View {
 
             Button("Export as image") {
                 showImageExport = true
+            }
+
+            Button("Export canvas bundle") {
+                entitlements.performWrite { exportCanvasBundle() }
+            }
+
+            Button("Import canvas bundle") {
+                entitlements.performWrite { showBundleImport = true }
             }
 
             Divider()
@@ -154,12 +168,99 @@ struct CanvasDocumentOptionsMenu: View {
                 fileID: fileID
             )
         }
+        .fileImporter(
+            isPresented: $showBundleImport,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                onImportCanvasBundle?(url)
+            case .failure(let error):
+                workspace.reportVaultError(
+                    title: "Import failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
+        #if os(iOS)
+        .fullScreenCover(item: $pendingBundleExport) { pending in
+            IOSFileExportPicker(fileURL: pending.url) { _ in
+                try? FileManager.default.removeItem(at: pending.url)
+                pendingBundleExport = nil
+            }
+            .ignoresSafeArea()
+            .background(Color.clear)
+        }
+        #endif
     }
 
     private func revealAndRename() {
         sidebarPanel = .files
         sidebarVisible = true
         workspace.beginInlineRename(for: fileID)
+    }
+
+    private func exportCanvasBundle() {
+        guard let vaultURL = workspace.activeVaultURL else {
+            workspace.reportVaultError(
+                title: "No vault available",
+                message: VaultErrorMessages.noActiveVault
+            )
+            return
+        }
+
+        let canvasName = file?.name ?? "Canvas"
+        let snapshot = canvasStore.documentSnapshot
+
+        #if os(macOS)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = "Export"
+        panel.message = "Choose where to save the canvas bundle folder."
+        panel.nameFieldStringValue = "\(canvasName).\(CanvasBundleTransfer.bundleExtension)"
+        guard panel.runModal() == .OK, let parentURL = panel.url else { return }
+
+        let bundleURL = parentURL.appendingPathComponent(
+            "\(canvasName).\(CanvasBundleTransfer.bundleExtension)",
+            isDirectory: true
+        )
+        do {
+            try CanvasBundleTransfer.exportBundle(
+                snapshot: snapshot,
+                canvasName: canvasName,
+                vaultURL: vaultURL,
+                to: bundleURL
+            )
+            NSWorkspace.shared.activateFileViewerSelecting([bundleURL])
+        } catch {
+            workspace.reportVaultError(title: "Export failed", message: error.localizedDescription)
+        }
+        #else
+        let exportName = "\(sanitizedBundleName(canvasName)).\(CanvasBundleTransfer.bundleExtension)"
+        let bundleURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(exportName, isDirectory: true)
+        do {
+            try CanvasBundleTransfer.exportBundle(
+                snapshot: snapshot,
+                canvasName: canvasName,
+                vaultURL: vaultURL,
+                to: bundleURL
+            )
+            pendingBundleExport = IOSPendingFileExport(url: bundleURL)
+        } catch {
+            workspace.reportVaultError(title: "Export failed", message: error.localizedDescription)
+        }
+        #endif
+    }
+
+    private func sanitizedBundleName(_ name: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/\\:?%*|\"<>")
+        let cleaned = name.components(separatedBy: invalid).joined(separator: "-")
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Canvas" : cleaned
     }
 
     private func copyToPasteboard(_ value: String?) {

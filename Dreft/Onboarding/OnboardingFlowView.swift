@@ -372,7 +372,9 @@ struct OnboardingFlowView: View {
             "genre": coordinator.state.worldGenre?.rawValue ?? "unknown",
         ])
 
-        workspace.bootstrapDefaultVaultIfNeeded()
+        let displayName = coordinator.state.worldName ?? OnboardingCopy.defaultWorldName
+        let welcome = OnboardingCopy.welcomeNoteContent(for: coordinator.state, worldName: displayName)
+        workspace.bootstrapOnboardingVaultIfNeeded(worldName: displayName, welcomeContent: welcome)
         guard workspace.activeVault != nil else { return }
 
         applyOnboardingWorldCustomizations(fastLane: false)
@@ -434,7 +436,6 @@ struct OnboardingFlowView: View {
 
     private func applyOnboardingWorldCustomizations(fastLane: Bool) {
         let displayName = coordinator.state.worldName ?? OnboardingCopy.defaultWorldName
-        workspace.renameActiveVault(to: displayName)
 
         if let vaultURL = workspace.activeVaultURL {
             _ = try? VaultFilesystem.seedOnboardingSampleContent(

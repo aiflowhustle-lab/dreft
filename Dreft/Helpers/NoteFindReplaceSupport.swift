@@ -160,4 +160,38 @@ enum NoteFindReplaceSupport {
         let end = min(max(range.location + range.length, location), length)
         return NSRange(location: location, length: end - location)
     }
+
+    /// Line ranges for scroll-to-match in reading preview.
+    static func lineRanges(in text: String) -> [NSRange] {
+        let ns = text as NSString
+        guard ns.length > 0 else { return [] }
+
+        var ranges: [NSRange] = []
+        var location = 0
+        while location < ns.length {
+            let lineRange = ns.lineRange(for: NSRange(location: location, length: 0))
+            ranges.append(lineRange)
+            let next = NSMaxRange(lineRange)
+            guard next > location else { break }
+            location = next
+        }
+        return ranges
+    }
+
+    static func lineStart(containing range: NSRange, in text: String) -> Int? {
+        guard range.location != NSNotFound else { return nil }
+        let ns = text as NSString
+        guard ns.length > 0 else { return nil }
+        let clampedLocation = min(max(range.location, 0), max(ns.length - 1, 0))
+        return ns.lineRange(for: NSRange(location: clampedLocation, length: 0)).location
+    }
+
+    static func highlightRange(_ match: NSRange, in lineRange: NSRange) -> NSRange? {
+        let intersection = NSIntersectionRange(match, lineRange)
+        guard intersection.length > 0 else { return nil }
+        return NSRange(
+            location: intersection.location - lineRange.location,
+            length: intersection.length
+        )
+    }
 }

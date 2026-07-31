@@ -44,6 +44,45 @@ enum VaultFilesystem {
         return try createVault(at: url, name: url.lastPathComponent)
     }
 
+    /// Creates a first-run vault folder named after the user's world with a personalized welcome note.
+    static func bootstrapOnboardingVault(
+        worldName: String,
+        welcomeContent: String
+    ) throws -> WorkspaceVault {
+        let displayName = worldName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let folderName = uniqueVaultFolderName(for: displayName)
+        let vaultURL = appContainerVaultsDirectory().appendingPathComponent(folderName, isDirectory: true)
+        try FileManager.default.createDirectory(at: vaultURL, withIntermediateDirectories: true)
+        try welcomeContent.write(
+            to: vaultURL.appendingPathComponent("Welcome.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let vaultLabel = displayName.isEmpty ? folderName : displayName
+        return WorkspaceVault(name: vaultLabel, path: vaultURL.path)
+    }
+
+    static func uniqueVaultFolderName(for worldName: String) -> String {
+        let trimmed = worldName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sanitized = sanitizeVaultFolderName(trimmed.isEmpty ? "Dreft" : trimmed)
+        let root = appContainerVaultsDirectory()
+        var candidate = sanitized
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: root.appendingPathComponent(candidate, isDirectory: true).path) {
+            candidate = "\(sanitized) \(suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private static func sanitizeVaultFolderName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let collapsed = trimmed
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        return collapsed.isEmpty ? "Dreft" : String(collapsed.prefix(64))
+    }
+
     // MARK: - Scan
 
     struct ScanResult {
@@ -428,7 +467,9 @@ enum VaultFilesystem {
 
     static func writeCanvases(
         _ snapshots: [String: CanvasDocumentSnapshot],
-        vaultURL: URL
+        vaultURL: URL,
+        additionalReferencedPaths: Set<String> = [],
+        referenceSnapshots: [String: CanvasDocumentSnapshot]? = nil
     ) -> VaultBatchWriteResult {
         var result = VaultBatchWriteResult()
         for (relativePath, var snapshot) in snapshots {
@@ -440,17 +481,36 @@ enum VaultFilesystem {
             }
         }
         if !result.hasFailures {
-            pruneOrphanedCanvasAssets(vaultURL: vaultURL, pendingSnapshots: snapshots)
+            pruneOrphanedCanvasAssets(
+                vaultURL: vaultURL,
+                pendingSnapshots: referenceSnapshots ?? snapshots,
+                additionalReferencedPaths: additionalReferencedPaths
+            )
         }
         return result
+    }
+
+    /// Asset paths referenced by a snapshot that are missing on disk.
+    static func missingCanvasAssetPaths(
+        in snapshot: CanvasDocumentSnapshot,
+        vaultURL: URL
+    ) -> [String] {
+        canvasAssetPaths(in: snapshot, vaultURL: vaultURL)
+            .filter { relativePath in
+                !FileManager.default.fileExists(
+                    atPath: vaultURL.appendingPathComponent(relativePath).path
+                )
+            }
+            .sorted()
     }
 
     /// Asset paths referenced by image cards across on-disk and pending canvas documents.
     static func referencedCanvasAssetPaths(
         vaultURL: URL,
-        pendingSnapshots: [String: CanvasDocumentSnapshot] = [:]
+        pendingSnapshots: [String: CanvasDocumentSnapshot] = [:],
+        additionalReferencedPaths: Set<String> = []
     ) -> Set<String> {
-        var referenced = Set<String>()
+        var referenced = additionalReferencedPaths
         enumerateCanvasFiles(vaultURL: vaultURL) { url in
             guard let snapshot = readCanvas(at: url) else { return }
             referenced.formUnion(canvasAssetPaths(in: snapshot, vaultURL: vaultURL))
@@ -471,23 +531,49 @@ enum VaultFilesystem {
                     paths.insert(content)
                 }
             case .note, .text:
-                for path in NoteCardEmbedSupport.imagePaths(from: card.content, vaultURL: vaultURL) {
-                    paths.insert(path)
+                let markdown: String
+                if let path = CanvasCardContent.linkedNotePath(for: card),
+                   let vaultURL,
+                   let body = readNoteContent(relativePath: path, vaultURL: vaultURL) {
+                    markdown = body
+                } else {
+                    markdown = card.content
+                }
+                for path in NoteCardEmbedSupport.imagePaths(from: markdown, vaultURL: vaultURL) {
+                    insertResolvedAssetPath(path, vaultURL: vaultURL, into: &paths)
                 }
             }
         }
         return paths
     }
 
+    private static func insertResolvedAssetPath(
+        _ path: String,
+        vaultURL: URL?,
+        into paths: inout Set<String>
+    ) {
+        paths.insert(path)
+        guard let vaultURL else { return }
+        let target = (path as NSString).lastPathComponent
+        if let resolved = resolveCanvasAssetPath(for: target, vaultURL: vaultURL) {
+            paths.insert(resolved)
+        }
+    }
+
     /// Deletes files in `.dreft/assets/` that no canvas document references.
     static func pruneOrphanedCanvasAssets(
         vaultURL: URL,
-        pendingSnapshots: [String: CanvasDocumentSnapshot] = [:]
+        pendingSnapshots: [String: CanvasDocumentSnapshot] = [:],
+        additionalReferencedPaths: Set<String> = []
     ) {
         if hasUnreadableCanvasFiles(vaultURL: vaultURL) {
             return
         }
-        let referenced = referencedCanvasAssetPaths(vaultURL: vaultURL, pendingSnapshots: pendingSnapshots)
+        let referenced = referencedCanvasAssetPaths(
+            vaultURL: vaultURL,
+            pendingSnapshots: pendingSnapshots,
+            additionalReferencedPaths: additionalReferencedPaths
+        )
         let assetsDirectory = vaultURL.appendingPathComponent(canvasAssetsFolder, isDirectory: true)
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: assetsDirectory,

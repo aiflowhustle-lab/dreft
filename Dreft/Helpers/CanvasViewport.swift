@@ -28,12 +28,14 @@ enum CanvasViewport {
     resizeOverrides: [String: CGRect] = [:],
     selectedID: String?,
     hoverID: String?,
+    focusID: String? = nil,
     spatialIndex: CanvasSpatialIndex? = nil
   ) -> Set<String> {
     var ids = Set(positionOverrides.keys)
     ids.formUnion(resizeOverrides.keys)
     if let selectedID { ids.insert(selectedID) }
     if let hoverID { ids.insert(hoverID) }
+    if let focusID { ids.insert(focusID) }
 
     let cardsToTest: [CanvasCard]
     if let spatialIndex, positionOverrides.isEmpty, resizeOverrides.isEmpty {

@@ -309,21 +309,35 @@ struct SeamlessPrimaryButton: View {
     let title: String
     var enabled: Bool = true
     var fullWidth: Bool = true
+    var fillColor: Color? = nil
+    var textColor: Color? = nil
     let action: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+
+    private var resolvedFill: Color {
+        guard enabled else { return AppColors.borderSubtle }
+        return fillColor ?? OnboardingColors.buttonFill(for: colorScheme)
+    }
+
+    private var resolvedText: Color {
+        guard enabled else { return AppColors.textMuted }
+        if let textColor { return textColor }
+        if fillColor != nil { return .white }
+        return OnboardingColors.buttonText(for: colorScheme)
+    }
 
     var body: some View {
         Button(action: action) {
             Text(title)
                 .font(OnboardingTypography.body(size: 15, weight: .medium))
-                .foregroundStyle(enabled ? OnboardingColors.buttonText(for: colorScheme) : AppColors.textMuted)
+                .foregroundStyle(resolvedText)
                 .frame(maxWidth: fullWidth ? .infinity : nil)
                 .padding(.horizontal, fullWidth ? 0 : 28)
                 .frame(height: 48)
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(enabled ? OnboardingColors.buttonFill(for: colorScheme) : AppColors.borderSubtle)
+                        .fill(resolvedFill)
                 )
         }
         .buttonStyle(.plain)
@@ -680,12 +694,21 @@ struct SeamlessBuildingMoment: View {
     let onFinished: () -> Void
 
     @State private var visibleChecks = 0
+    @State private var progress: Double = 0
+    @State private var statusText = OnboardingCopy.buildingStatusCanvas
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let checks = [
-        OnboardingCopy.buildingCheckCanvas,
-        OnboardingCopy.buildingCheckLore,
-        OnboardingCopy.buildingCheckGraph,
+    private let checks: [(symbol: String, label: String)] = [
+        ("rectangle.on.rectangle.angled", OnboardingCopy.buildingCheckCanvas),
+        ("doc.text", OnboardingCopy.buildingCheckLore),
+        ("point.3.connected.trianglepath.dotted", OnboardingCopy.buildingCheckGraph),
+    ]
+
+    private let statusMessages = [
+        OnboardingCopy.buildingStatusCanvas,
+        OnboardingCopy.buildingStatusLore,
+        OnboardingCopy.buildingStatusGraph,
+        OnboardingCopy.buildingStatusFinishing,
     ]
 
     var body: some View {
@@ -695,55 +718,99 @@ struct SeamlessBuildingMoment: View {
                 .foregroundStyle(AppColors.textPrimary)
                 .multilineTextAlignment(.center)
 
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(checks.enumerated()), id: \.offset) { index, label in
-                    HStack(spacing: 10) {
-                        Text("✓")
-                            .font(OnboardingTypography.body(size: checkSize, weight: .semibold))
-                            .foregroundStyle(
-                                index < visibleChecks ? AppColors.textPrimary : AppColors.textMuted.opacity(0.35)
-                            )
-                        Text(label)
-                            .font(OnboardingTypography.body(size: checkSize, weight: .medium))
-                            .foregroundStyle(
-                                index < visibleChecks ? AppColors.textPrimary : AppColors.textMuted
-                            )
+            VStack(spacing: 14) {
+                Text(statusText)
+                    .font(OnboardingTypography.body(size: statusSize, weight: .medium))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .contentTransition(.opacity)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: statusText)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(AppColors.textPrimary.opacity(0.08))
+                        Capsule()
+                            .fill(AppColors.textPrimary.opacity(0.55))
+                            .frame(width: max(8, geo.size.width * progress))
                     }
-                    .opacity(index < visibleChecks ? 1 : 0.45)
                 }
+                .frame(height: 3)
+                .frame(maxWidth: 240)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(checks.enumerated()), id: \.offset) { index, check in
+                        HStack(spacing: 10) {
+                            Image(systemName: index < visibleChecks ? "checkmark.circle.fill" : check.symbol)
+                                .font(.system(size: checkIconSize, weight: .medium))
+                                .foregroundStyle(
+                                    index < visibleChecks
+                                        ? AppColors.textPrimary
+                                        : AppColors.textMuted.opacity(0.45)
+                                )
+                                .contentTransition(.symbolEffect(.replace))
+                            Text(check.label)
+                                .font(OnboardingTypography.body(size: checkSize, weight: .medium))
+                                .foregroundStyle(
+                                    index < visibleChecks ? AppColors.textPrimary : AppColors.textMuted
+                                )
+                        }
+                        .opacity(index <= visibleChecks ? 1 : 0.5)
+                        .offset(y: index < visibleChecks ? 0 : 2)
+                        .animation(
+                            reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82),
+                            value: visibleChecks
+                        )
+                    }
+                }
+                .frame(maxWidth: 220, alignment: .leading)
             }
-            .frame(maxWidth: 220, alignment: .leading)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 24)
         .task {
-            if reduceMotion {
-                visibleChecks = checks.count
-                try? await Task.sleep(for: .seconds(1))
-                guard !Task.isCancelled else { return }
-                onFinished()
-                return
-            }
+            await runBuildingSequence()
+        }
+    }
 
-            let staggerNs: UInt64 = 300_000_000
-            let totalNs: UInt64 = 2_200_000_000
-            let start = DispatchTime.now().uptimeNanoseconds
-
-            for index in 1...checks.count {
-                try? await Task.sleep(nanoseconds: staggerNs)
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.2)) {
-                    visibleChecks = index
-                }
-            }
-
-            let elapsed = DispatchTime.now().uptimeNanoseconds - start
-            if elapsed < totalNs {
-                try? await Task.sleep(nanoseconds: totalNs - elapsed)
-            }
+    @MainActor
+    private func runBuildingSequence() async {
+        if reduceMotion {
+            visibleChecks = checks.count
+            progress = 1
+            statusText = OnboardingCopy.buildingStatusFinishing
+            try? await Task.sleep(for: .seconds(1.5))
             guard !Task.isCancelled else { return }
             onFinished()
+            return
         }
+
+        let start = DispatchTime.now().uptimeNanoseconds
+        let minimumDuration = OnboardingMotion.buildingMinimumDurationNs
+        let stepInterval = OnboardingMotion.buildingStepIntervalNs
+
+        withAnimation(.linear(duration: OnboardingMotion.buildingProgressDuration)) {
+            progress = 1
+        }
+
+        for index in 1...checks.count {
+            try? await Task.sleep(nanoseconds: stepInterval)
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                visibleChecks = index
+                statusText = statusMessages[min(index, statusMessages.count - 2)]
+            }
+            OnboardingMotion.playSelectionHaptic()
+        }
+
+        statusText = OnboardingCopy.buildingStatusFinishing
+
+        let elapsed = DispatchTime.now().uptimeNanoseconds - start
+        if elapsed < minimumDuration {
+            try? await Task.sleep(nanoseconds: minimumDuration - elapsed)
+        }
+        guard !Task.isCancelled else { return }
+        onFinished()
     }
 
     private var titleSize: CGFloat {
@@ -759,6 +826,22 @@ struct SeamlessBuildingMoment: View {
         16
         #else
         17
+        #endif
+    }
+
+    private var checkIconSize: CGFloat {
+        #if os(iOS)
+        15
+        #else
+        16
+        #endif
+    }
+
+    private var statusSize: CGFloat {
+        #if os(iOS)
+        15
+        #else
+        16
         #endif
     }
 }

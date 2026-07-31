@@ -75,7 +75,7 @@ struct PaywallView: View {
             .padding(.top, 8)
             .fixedSize(horizontal: false, vertical: true)
 
-            Text(PaywallCopy.subtitle(isReadOnly: entitlements.isReadOnly))
+            Text(PaywallCopy.subtitle(isReadOnly: entitlements.isReadOnly, rawWorldName: onboardingDraft.worldName))
                 .font(OnboardingTypography.body(size: 15.5))
                 .foregroundStyle(AppColors.textSecondary)
                 .padding(.top, 10)
@@ -84,27 +84,11 @@ struct PaywallView: View {
             perksList
                 .padding(.top, 28)
 
-            if showsTrialReminder, let intro = storeManager.yearlyProduct?.subscription?.introductoryOffer {
-                Text(PaywallCopy.trialReminder(introOffer: intro))
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 28)
-            }
-
             planPicker
-                .padding(.top, showsTrialReminder ? 12 : 28)
+                .padding(.top, 28)
 
             primaryCTA
                 .padding(.top, 24)
-
-            Text(finePrint)
-                .font(.system(size: 11.5))
-                .foregroundStyle(AppColors.textMuted.opacity(0.85))
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 12)
 
             footerLinks
                 .padding(.top, 20)
@@ -151,9 +135,16 @@ struct PaywallView: View {
         #endif
     }
 
+    private var personalizedPerks: [(symbol: String, text: String)] {
+        PaywallCopy.orderedPerks(
+            selectedGoals: onboardingDraft.selectedGoals,
+            coreDesire: onboardingDraft.inferredCoreDesire()
+        )
+    }
+
     private var perksList: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(PaywallCopy.perks, id: \.text) { perk in
+            ForEach(personalizedPerks, id: \.text) { perk in
                 HStack(spacing: 12) {
                     Image(systemName: perk.symbol)
                         .font(.system(size: 13, weight: .medium))
@@ -205,6 +196,7 @@ struct PaywallView: View {
                             monthlyProduct: storeManager.monthlyProduct
                         )
                     )
+                    .padding(.top, 6)
                 }
                 if let monthly = storeManager.monthlyProduct {
                     planCard(
@@ -228,75 +220,72 @@ struct PaywallView: View {
     ) -> some View {
         let isSelected = selectedPlanID == product.id
         let cardCornerRadius: CGFloat = 16
+        let accent = paywallAccent
 
         return Button {
             selectedPlanID = product.id
         } label: {
-            VStack(spacing: 0) {
-                if let discountPercent {
-                    Text("\(discountPercent)% OFF")
-                        .font(.system(size: 11, weight: .bold))
-                        .tracking(1.2)
-                        .foregroundStyle(OnboardingColors.buttonText(for: colorScheme))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
-                        .background(AppColors.textPrimary)
-                }
-
-                HStack(spacing: 16) {
-                    ZStack {
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .stroke(isSelected ? accent : AppColors.border, lineWidth: 1.5)
+                        .frame(width: 18, height: 18)
+                    if isSelected {
                         Circle()
-                            .stroke(isSelected ? AppColors.textPrimary : AppColors.border, lineWidth: 1.5)
+                            .fill(accent)
                             .frame(width: 18, height: 18)
-                        if isSelected {
-                            Circle()
-                                .fill(AppColors.textPrimary)
-                                .frame(width: 18, height: 18)
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(OnboardingColors.buttonText(for: colorScheme))
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(label)
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(AppColors.textPrimary)
-                        Text(note)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(AppColors.textSecondary)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(product.displayPrice)
-                            .font(OnboardingTypography.display(size: 17, weight: .semibold))
-                            .foregroundStyle(AppColors.textPrimary)
-                        Text(unit)
-                            .font(.system(size: 11))
-                            .foregroundStyle(AppColors.textSecondary)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(paywallAccentForeground)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(AppColors.textPrimary)
+                    Text(note)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(product.displayPrice)
+                        .font(OnboardingTypography.display(size: 17, weight: .semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                    Text(unit)
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppColors.textSecondary)
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                    .fill(isSelected ? AppColors.textPrimary.opacity(0.05) : AppColors.textPrimary.opacity(0.025))
+                    .fill(AppColors.textPrimary.opacity(0.025))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                    .stroke(
-                        isSelected ? AppColors.textPrimary.opacity(0.55) : AppColors.border,
-                        lineWidth: 1
-                    )
+                    .stroke(isSelected ? accent : AppColors.border, lineWidth: 1.5)
             )
-            .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
-            .shadow(color: isSelected ? Color.black.opacity(0.08) : .clear, radius: 12, x: 0, y: 6)
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .topTrailing) {
+            if let discountPercent {
+                Text(PaywallCopy.discountBadgeTitle(percent: discountPercent))
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(0.5)
+                    .foregroundStyle(paywallAccentForeground)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(accent)
+                    .clipShape(Capsule())
+                    .offset(x: -12, y: -9)
+            }
+        }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -304,16 +293,20 @@ struct PaywallView: View {
         VStack(spacing: 10) {
             SeamlessPrimaryButton(
                 title: primaryCTATitle,
-                enabled: selectedProduct != nil && !storeManager.isPurchasing
+                enabled: selectedProduct != nil && !storeManager.isPurchasing,
+                fillColor: paywallCTAFill,
+                textColor: paywallCTAText
             ) {
                 Task { await purchaseSelectedPlan() }
             }
             .overlay {
                 if storeManager.isPurchasing {
                     ProgressView()
-                        .tint(OnboardingColors.buttonText(for: colorScheme))
+                        .tint(paywallCTAText)
                 }
             }
+
+            subscriptionDisclosure
 
             if let errorMessage {
                 Text(errorMessage)
@@ -322,6 +315,26 @@ struct PaywallView: View {
                     .multilineTextAlignment(.center)
             }
         }
+    }
+
+    private var subscriptionDisclosure: some View {
+        Text(planFootnoteText)
+            .font(.caption2)
+            .foregroundStyle(AppColors.textMuted.opacity(0.75))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(planFootnoteText)
+    }
+
+    private var planFootnoteText: String {
+        PaywallCopy.planFootnoteLines(
+            selectedPlanID: selectedPlanID,
+            yearlyProduct: storeManager.yearlyProduct,
+            monthlyProduct: storeManager.monthlyProduct,
+            isYearlyTrialEligible: isYearlyTrialEligible,
+            isReadOnly: entitlements.isReadOnly
+        ).primary
     }
 
     private var footerLinks: some View {
@@ -352,8 +365,9 @@ struct PaywallView: View {
             .disabled(storeManager.isRestoring || storeManager.isPurchasing)
         }
         .buttonStyle(.plain)
-        .font(.system(size: 12))
-        .foregroundStyle(AppColors.textMuted.opacity(0.9))
+        .font(.caption2)
+        .tracking(0.4)
+        .foregroundStyle(AppColors.textMuted.opacity(0.62))
         .frame(maxWidth: .infinity)
     }
 
@@ -426,35 +440,33 @@ struct PaywallView: View {
     }
 
     private var primaryCTATitle: String {
-        if storeManager.isPurchasing {
-            return "Processing…"
-        }
-        if entitlements.isReadOnly {
-            return "Subscribe"
-        }
-        if showsTrialReminder {
-            return "Try Now"
-        }
-        return "Subscribe"
-    }
-
-    private var finePrint: String {
-        guard let product = selectedProduct else {
-            return PaywallCopy.subscriptionRenewalDisclaimer
-        }
-
-        if product.id == StoreConstants.yearlyProductID,
-           storeManager.isYearlyTrialEligible(product),
-           let intro = product.subscription?.introductoryOffer {
-            let trial = PaywallCopy.shortTrialPhrase(intro)
-            return "\(trial), then \(product.displayPrice)/year. \(PaywallCopy.subscriptionRenewalDisclaimer)"
-        }
-
-        let unit = product.id == StoreConstants.yearlyProductID ? "year" : "month"
-        return "\(product.displayPrice)/\(unit). \(PaywallCopy.subscriptionRenewalDisclaimer)"
+        PaywallCopy.primaryCTATitle(
+            isPurchasing: storeManager.isPurchasing,
+            isReadOnly: entitlements.isReadOnly,
+            selectedPlanID: selectedPlanID,
+            yearlyProduct: storeManager.yearlyProduct,
+            monthlyProduct: storeManager.monthlyProduct,
+            isYearlyTrialEligible: showsTrialReminder
+        )
     }
 
     // MARK: - Store actions
+
+    private var paywallAccent: Color {
+        colorScheme == .dark ? .white : .black
+    }
+
+    private var paywallAccentForeground: Color {
+        colorScheme == .dark ? .black : .white
+    }
+
+    private var paywallCTAFill: Color {
+        colorScheme == .dark ? .white : .black
+    }
+
+    private var paywallCTAText: Color {
+        colorScheme == .dark ? .black : .white
+    }
 
     private func dismissPaywall() {
         guard !storeManager.isPurchasing else { return }

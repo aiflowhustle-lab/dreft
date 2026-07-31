@@ -44,7 +44,6 @@ struct WorkspaceShellView: View {
     @State private var vaultFolderPickerPurpose: VaultFolderPickerPurpose?
     @State private var vaultFolderPickerHandler: ((URL, VaultFolderPickerPurpose) -> Void)?
     #endif
-    @State private var showOnboardingPreview = false
     @State private var didLoadPersistence = false
     @State private var isShellReady = false
     @Environment(\.scenePhase) private var scenePhase
@@ -151,10 +150,6 @@ struct WorkspaceShellView: View {
             #endif
             }
             .onboardingGuidedFirstAction(workspace: workspace)
-            .onReceive(NotificationCenter.default.publisher(for: .dreftShowOnboardingPreview)) { _ in
-                workspace.isVaultManagerOpen = false
-                showOnboardingPreview = true
-            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     persistenceCoordinator?.refreshVaultFromDiskIfNeeded()
@@ -169,18 +164,7 @@ struct WorkspaceShellView: View {
             .onChange(of: entitlements.accessState) { _, _ in
                 configureWriteAccessGating()
             }
-
-            if showOnboardingPreview {
-                OnboardingPresentationContainer {
-                    OnboardingFlowView(isPreview: true) {
-                        showOnboardingPreview = false
-                    }
-                }
-                .transition(.opacity)
-                .zIndex(1)
-            }
         }
-        .animation(.easeInOut(duration: 0.2), value: showOnboardingPreview)
         .task {
             bootstrapShellIfNeeded()
             isShellReady = true
@@ -744,7 +728,9 @@ struct WorkspaceShellView: View {
         guard focusedPaneActiveTab?.kind == .note else { return }
         var state = paneUI(for: focusedPaneID)
         state.showFindBar.toggle()
-        if state.showFindBar { state.isReading = false }
+        if state.showFindBar, entitlements.canWrite {
+            state.isReading = false
+        }
         setPaneUI(focusedPaneID, state)
     }
 
@@ -1151,7 +1137,6 @@ struct WorkspaceShellView: View {
                         set: { newValue in
                             var state = paneUI(for: paneID)
                             state.isReading = newValue
-                            if newValue { state.showFindBar = false }
                             setPaneUI(paneID, state)
                         }
                     ),
@@ -1199,6 +1184,9 @@ struct WorkspaceShellView: View {
                         fileID: fileID,
                         onSplitRight: splitActions.0,
                         onSplitDown: splitActions.1,
+                        onImportCanvasBundle: { url in
+                            importCanvasBundle(from: url)
+                        },
                         sidebarVisible: $sidebarVisible,
                         sidebarPanel: $sidebarPanel
                     )
@@ -1219,6 +1207,37 @@ struct WorkspaceShellView: View {
         .padding(.horizontal, 14)
         .frame(height: 34)
         .background(AppColors.canvasBackground)
+    }
+
+    private func importCanvasBundle(from url: URL) {
+        guard let vaultURL = workspace.activeVaultURL else {
+            workspace.reportVaultError(
+                title: "No vault available",
+                message: VaultErrorMessages.noActiveVault
+            )
+            return
+        }
+
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { url.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let result = try CanvasBundleTransfer.importBundle(from: url, vaultURL: vaultURL)
+            guard let entry = workspace.createCanvas(autoNavigate: true) else { return }
+
+            let store = canvasDocuments.store(for: entry.id)
+            store.applyDocumentSnapshot(result.snapshot)
+            try VaultFilesystem.writeCanvas(result.snapshot, relativePath: entry.relativePath, vaultURL: vaultURL)
+
+            let importedName = result.canvasName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !importedName.isEmpty, importedName != entry.name {
+                workspace.renameFile(entry.id, to: importedName)
+            }
+        } catch {
+            workspace.reportVaultError(title: "Import failed", message: error.localizedDescription)
+        }
     }
 
     @ViewBuilder
@@ -1530,6 +1549,23 @@ struct WorkspaceShellView: View {
         #endif
     }
 
+    /// Inline tab close — compact so it stays centered in the tab row (35pt on iPad).
+    private var tabCloseHitSize: CGFloat {
+        #if os(iOS)
+        28
+        #else
+        22
+        #endif
+    }
+
+    private var tabCloseIconSize: CGFloat {
+        #if os(iOS)
+        9
+        #else
+        8
+        #endif
+    }
+
     private var tabPlusSlotWidth: CGFloat {
         #if os(iOS)
         AppColors.minimumTouchTarget
@@ -1674,8 +1710,8 @@ struct WorkspaceShellView: View {
             if isActive {
                 Button(action: onClose) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: tabChromeControlSize, height: tabChromeControlSize)
+                        .font(.system(size: tabCloseIconSize, weight: .semibold))
+                        .frame(width: tabCloseHitSize, height: tabCloseHitSize)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

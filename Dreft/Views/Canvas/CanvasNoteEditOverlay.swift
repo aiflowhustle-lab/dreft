@@ -29,6 +29,7 @@ struct CanvasNoteEditOverlay: View {
     @State private var contentScrollOffset = CGPoint.zero
     @State private var scrollMetrics = CanvasNoteScrollMetrics()
     @State private var embedLayoutRevision = 0
+    @State private var taskCheckboxPlacements: [NoteCardTaskCheckboxPlacement] = []
     /// Stays enabled for the whole edit session so typing never flips the editor out of attachment mode.
     @State private var usesInlineImageEditor = false
 
@@ -108,6 +109,9 @@ struct CanvasNoteEditOverlay: View {
                     Task { @MainActor in
                         scrollMetrics = metrics
                         contentScrollOffset = metrics.offset
+                        #if os(iOS)
+                        refreshTaskCheckboxPlacements()
+                        #endif
                     }
                 }
             )
@@ -145,6 +149,12 @@ struct CanvasNoteEditOverlay: View {
                 }
             }
             return handled
+        }
+        .onChange(of: draftText) { _, _ in
+            scheduleTaskCheckboxPlacementRefresh()
+        }
+        .onChange(of: selectedRange) { _, _ in
+            scheduleTaskCheckboxPlacementRefresh()
         }
         .onChange(of: initialText) { _, newValue in
             if draftText != newValue {
@@ -189,10 +199,50 @@ struct CanvasNoteEditOverlay: View {
                 maxWidth: contentWidth,
                 fontSize: fontSize,
                 scrollOffset: contentScrollOffset,
-                onToggleTaskRawLine: toggleTaskRawLine
+                layoutPlacements: taskCheckboxPlacements,
+                checkboxFillColor: editorSurface,
+                onToggleTaskAtLine: toggleTaskAtLine
             )
             .zIndex(10)
         }
+    }
+
+    private func scheduleTaskCheckboxPlacementRefresh() {
+        #if os(iOS)
+        Task { @MainActor in
+            refreshTaskCheckboxPlacements()
+        }
+        #endif
+    }
+
+    private func refreshTaskCheckboxPlacements() {
+        #if os(iOS)
+        guard hasTaskLines, let textView = toolbarBridge?.textView else {
+            if !taskCheckboxPlacements.isEmpty {
+                taskCheckboxPlacements = []
+            }
+            return
+        }
+
+        let usesWysiwyg = NoteTextEditingCoordinatorSupport.usesWysiwygEditing(
+            embeddedInCanvas: true,
+            hideResolvedImageEmbeds: editorHideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: contentWidth
+        )
+        let next = NoteCardTaskSupport.checkboxPlacements(
+            in: draftText,
+            textView: textView,
+            contentScrollOffset: contentScrollOffset,
+            fontSize: fontSize,
+            editorBackground: editorSurface,
+            hideTaskListMarkers: editorHideTaskListMarkers,
+            usesWysiwygDisplay: usesWysiwyg
+        )
+        if next != taskCheckboxPlacements {
+            taskCheckboxPlacements = next
+        }
+        #endif
     }
 
     private func handleAppear() {
@@ -204,6 +254,9 @@ struct CanvasNoteEditOverlay: View {
         usesInlineImageEditor = vaultURL != nil
             && !NoteCardEmbedSupport.imageEmbedRanges(in: prepared, vaultURL: vaultURL).isEmpty
         onRegisterImageInserter?(insertImageAttachment)
+        #if os(iOS)
+        scheduleTaskCheckboxPlacementRefresh()
+        #endif
         #if os(macOS)
         DispatchQueue.main.async {
             isFocused = true
@@ -218,25 +271,27 @@ struct CanvasNoteEditOverlay: View {
     @discardableResult
     private func insertImageAttachment(_ data: Data, _ suggestedName: String?) -> Bool {
         guard let vaultURL else { return false }
-        guard let path = try? VaultFilesystem.saveCanvasImage(
+        guard let path = NoteAttachmentInsertSupport.saveImage(
             data: data,
+            suggestedName: suggestedName,
             vaultURL: vaultURL,
-            suggestedName: suggestedName
+            maxWidth: contentWidth
         ) else { return false }
 
-        CanvasImageCache.shared.cacheDisplayImageSync(
-            data: data,
-            cardID: "note-embed|\(path)",
-            contentKey: path
-        )
-        if let cgImage = CanvasImageCache.shared.cachedImage(forCardID: "note-embed|\(path)", content: path) {
-            let size = NoteCardInlineImageMetrics.displaySize(for: cgImage, maxWidth: contentWidth)
-            NoteCardEmbedLayoutMetrics.store(height: size.height, path: path, maxWidth: contentWidth)
-        }
-
         usesInlineImageEditor = true
-        insertEmbedSnippet("![[\(path)]]")
-        onImageEmbedSaved?(path)
+        let prepared = NoteAttachmentInsertSupport.prepareEmbedInsert(
+            path: path,
+            in: draftText,
+            selectedRange: selectedRange,
+            vaultURL: vaultURL
+        )
+        draftText = prepared.text
+        embedLayoutRevision += 1
+        onTextEdited(prepared.text, false)
+        Task { @MainActor in
+            selectedRange = prepared.selectedRange
+            onImageEmbedSaved?(path)
+        }
         return true
     }
 
@@ -261,8 +316,8 @@ struct CanvasNoteEditOverlay: View {
         onTextEdited(sanitized.text, false)
     }
 
-    private func toggleTaskRawLine(_ rawLine: String) {
-        guard let updated = NoteCardTaskSupport.toggleTask(matchingRawLine: rawLine, in: draftText) else { return }
+    private func toggleTaskAtLine(_ lineIndex: Int) {
+        guard let updated = NoteCardTaskSupport.toggleTask(atLineIndex: lineIndex, in: draftText) else { return }
         draftText = updated
         onTextEdited(updated, false)
     }

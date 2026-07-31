@@ -99,10 +99,7 @@ struct NoteDocumentOptionsMenu: View {
             Divider()
 
             Button("Find...") {
-                entitlements.performWrite {
-                    showFindBar = true
-                    isReading = false
-                }
+                showFindBar = true
             }
             Button("Replace...") {
                 entitlements.performWrite {

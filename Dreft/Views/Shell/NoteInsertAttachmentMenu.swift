@@ -1,40 +1,87 @@
 import SwiftUI
 
 #if os(iOS)
-/// Floating insert-attachment menu matching the iPad note reference design.
+/// Where the insert-attachment popover should appear (Obsidian-style placement).
+enum NoteInsertAttachmentMenuAnchor: Equatable {
+    /// Canvas note card — menu below the card's left edge while editing.
+    case canvasCard(screenRect: CGRect)
+    /// Sidebar note — menu floats near the caret in the editor body.
+    case noteEditor(topLeading: CGPoint)
+
+    func menuTopLeading(menuSize: CGSize, containerSize: CGSize) -> CGPoint {
+        let margin: CGFloat = 12
+        let rawTopLeading: CGPoint
+        switch self {
+        case .canvasCard(let screenRect):
+            rawTopLeading = CGPoint(
+                x: screenRect.minX,
+                y: screenRect.maxY + 8
+            )
+        case .noteEditor(let topLeading):
+            rawTopLeading = topLeading
+        }
+
+        let maxX = max(margin, containerSize.width - menuSize.width - margin)
+        let maxY = max(margin, containerSize.height - menuSize.height - margin)
+        return CGPoint(
+            x: min(max(margin, rawTopLeading.x), maxX),
+            y: min(max(margin, rawTopLeading.y), maxY)
+        )
+    }
+
+    func menuCenter(menuSize: CGSize, containerSize: CGSize) -> CGPoint {
+        let origin = menuTopLeading(menuSize: menuSize, containerSize: containerSize)
+        return CGPoint(
+            x: origin.x + menuSize.width / 2,
+            y: origin.y + menuSize.height / 2
+        )
+    }
+}
+
+/// Floating insert-attachment menu matching Obsidian iPad placement.
 struct NoteInsertAttachmentMenuOverlay: View {
     @Binding var isPresented: Bool
+    var anchor: NoteInsertAttachmentMenuAnchor?
     var onPhotoLibrary: () -> Void
     var onTakePhoto: () -> Void
     var onChooseFile: () -> Void
 
-    var body: some View {
-        if isPresented {
-            ZStack {
-                Color.black.opacity(0.08)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        isPresented = false
-                    }
+    private let menuSize = CGSize(width: 280, height: 152)
 
-                NoteInsertAttachmentMenu(
-                    onPhotoLibrary: {
-                        isPresented = false
-                        onPhotoLibrary()
-                    },
-                    onTakePhoto: {
-                        isPresented = false
-                        onTakePhoto()
-                    },
-                    onChooseFile: {
-                        isPresented = false
-                        onChooseFile()
-                    }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .padding(.horizontal, 40)
+    var body: some View {
+        if isPresented, let anchor {
+            GeometryReader { geometry in
+                ZStack {
+                    Color.black.opacity(0.08)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            isPresented = false
+                        }
+
+                    NoteInsertAttachmentMenu(
+                        onPhotoLibrary: {
+                            isPresented = false
+                            onPhotoLibrary()
+                        },
+                        onTakePhoto: {
+                            isPresented = false
+                            onTakePhoto()
+                        },
+                        onChooseFile: {
+                            isPresented = false
+                            onChooseFile()
+                        }
+                    )
+                    .frame(width: menuSize.width, height: menuSize.height, alignment: .topLeading)
+                    .position(
+                        anchor.menuCenter(
+                            menuSize: menuSize,
+                            containerSize: geometry.size
+                        )
+                    )
+                }
             }
-            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
             .zIndex(500)
         }
     }

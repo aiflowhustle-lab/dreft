@@ -44,12 +44,6 @@ struct VaultManagerView: View {
                 }
 
             managerCard
-                .overlay(alignment: .topLeading) {
-                    if !isPaywallVisible {
-                        closeButton
-                            .padding(12)
-                    }
-                }
         }
         .allowsHitTesting(!isPaywallVisible)
         .onAppear {
@@ -104,6 +98,22 @@ struct VaultManagerView: View {
                 .stroke(AppColors.floatingChromeBorder, lineWidth: 1)
         )
         .shadow(color: AppColors.floatingChromeShadow, radius: 40, y: 18)
+        .overlay(alignment: .topLeading) {
+            #if os(macOS)
+            if !isPaywallVisible {
+                closeButton
+                    .padding(12)
+            }
+            #endif
+        }
+        .overlay(alignment: .topTrailing) {
+            #if os(iOS)
+            if !isPaywallVisible {
+                closeButton
+                    .padding(12)
+            }
+            #endif
+        }
         .onTapGesture { }
         #if os(iOS)
         .padding(.horizontal, 20)
@@ -123,7 +133,12 @@ struct VaultManagerView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(AppColors.textSecondary)
                 .frame(width: 28, height: 28)
-                .background(Circle().fill(AppColors.sidebarSelection))
+                .background(AppColors.textPrimary.opacity(0.06))
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(AppColors.borderSubtle, lineWidth: 1)
+                )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close vault manager")
@@ -312,32 +327,6 @@ struct VaultManagerView: View {
             hairline
 
             subscriptionSection
-
-            hairline
-
-            Button {
-                closeManager()
-                NotificationCenter.default.post(name: .dreftShowOnboardingPreview, object: nil)
-            } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Preview onboarding")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(AppColors.textPrimary)
-                        Text("Walk through the first-run flow again.")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(AppColors.textMuted)
-                    }
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(AppColors.textMuted)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
         }
         .background(
             RoundedRectangle(cornerRadius: 10)

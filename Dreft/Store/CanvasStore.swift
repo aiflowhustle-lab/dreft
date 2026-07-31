@@ -60,9 +60,11 @@ final class CanvasStore {
         writeAccessChecker()
     }
     /// Fired after any document mutation (cards, edges, transform).
-    var onDidMutate: (() -> Void)?
+    var onDidMutate: ((CanvasSaveUrgency) -> Void)?
     /// When a linked note card (Obsidian `file` node) is edited, write body to the vault `.md` file.
     var onLinkedNoteBodyChanged: ((String, String) -> Void)?
+    /// Surface vault/image persistence failures to the workspace UI.
+    var onPersistError: ((String, String) -> Void)?
     /// Relative path of the open `.canvas` file — used for per-file saves.
     var documentRelativePath: String?
     /// Vault folder used to store canvas image assets on disk.
@@ -74,6 +76,8 @@ final class CanvasStore {
         var transform: CanvasViewTransform
         var selectedCardID: String?
         var selectedEdgeID: String?
+        /// Vault note bodies for linked note cards at checkpoint time (path → markdown).
+        var linkedNoteBodies: [String: String] = [:]
     }
 
     @ObservationIgnored private var undoStack: [CanvasDocumentState] = []
@@ -90,21 +94,50 @@ final class CanvasStore {
     var canRedo: Bool { !redoStack.isEmpty }
 
     @ObservationIgnored private var cachedSpatialIndex: CanvasSpatialIndex?
-    @ObservationIgnored private var cachedSpatialIndexRevision: Int = -1
 
     /// Spatial index for viewport culling on large canvases; nil when card count is small.
     func spatialIndexForCulling() -> CanvasSpatialIndex? {
         guard cards.count >= CanvasSpatialIndex.minimumCardCount else { return nil }
-        if cachedSpatialIndexRevision != historyRevision {
+        if cachedSpatialIndex == nil {
             cachedSpatialIndex = CanvasSpatialIndex(cards: cards)
-            cachedSpatialIndexRevision = historyRevision
         }
         return cachedSpatialIndex
     }
 
-    private func notifyMutated(persistToDisk: Bool = true) {
+    private func rebuildSpatialIndex() {
+        if cards.count >= CanvasSpatialIndex.minimumCardCount {
+            cachedSpatialIndex = CanvasSpatialIndex(cards: cards)
+        } else {
+            cachedSpatialIndex = nil
+        }
+    }
+
+    private func spatialIndexUpsert(_ card: CanvasCard) {
+        guard cards.count >= CanvasSpatialIndex.minimumCardCount else {
+            cachedSpatialIndex = nil
+            return
+        }
+        if cachedSpatialIndex == nil {
+            cachedSpatialIndex = CanvasSpatialIndex(cards: cards)
+        } else {
+            cachedSpatialIndex?.upsert(card: card)
+        }
+    }
+
+    private func spatialIndexRemove(_ id: String) {
+        cachedSpatialIndex?.remove(id: id)
+        if cards.count < CanvasSpatialIndex.minimumCardCount {
+            cachedSpatialIndex = nil
+        }
+    }
+
+    private func notifyMutated(persistToDisk: Bool = true, urgency: CanvasSaveUrgency = .debounced) {
         guard persistToDisk else { return }
-        onDidMutate?()
+        onDidMutate?(urgency)
+    }
+
+    private func notifyStructurallyMutated() {
+        notifyMutated(urgency: .structural)
     }
 
     private func captureState() -> CanvasDocumentState {
@@ -113,7 +146,8 @@ final class CanvasStore {
             edges: edges,
             transform: transform,
             selectedCardID: selectedCardID,
-            selectedEdgeID: selectedEdgeID
+            selectedEdgeID: selectedEdgeID,
+            linkedNoteBodies: linkedNoteBodiesSnapshot(for: cards)
         )
     }
 
@@ -123,6 +157,33 @@ final class CanvasStore {
         transform = state.transform
         selectedCardID = state.selectedCardID
         selectedEdgeID = state.selectedEdgeID
+        restoreLinkedNoteBodies(state.linkedNoteBodies)
+        rebuildSpatialIndex()
+    }
+
+    private func linkedNoteBodiesSnapshot(for cards: [CanvasCard]) -> [String: String] {
+        var bodies: [String: String] = [:]
+        for card in cards {
+            guard let path = CanvasCardContent.linkedNotePath(for: card) else { continue }
+            guard bodies[path] == nil else { continue }
+            if let file = vaultFiles.first(where: { $0.relativePath == path }),
+               let content = file.noteContent {
+                bodies[path] = content
+            } else if let vaultURL,
+                      let content = VaultFilesystem.readNoteContent(relativePath: path, vaultURL: vaultURL) {
+                bodies[path] = content
+            } else {
+                bodies[path] = ""
+            }
+        }
+        return bodies
+    }
+
+    private func restoreLinkedNoteBodies(_ bodies: [String: String]) {
+        guard !bodies.isEmpty else { return }
+        for (path, body) in bodies {
+            onLinkedNoteBodyChanged?(path, body)
+        }
     }
 
     private func recordUndoCheckpoint() {
@@ -147,6 +208,7 @@ final class CanvasStore {
         redoStack.removeAll()
         endContentEdit()
         historyRevision += 1
+        rebuildSpatialIndex()
     }
 
     func beginContentEdit(for id: String) {
@@ -193,11 +255,12 @@ final class CanvasStore {
             edges = snapshot.edges
             transform = snapshot.transform
         }
+        rebuildSpatialIndex()
         selectedCardID = nil
         selectedEdgeID = nil
         focusCardID = nil
         endContentEdit()
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func undo() {
@@ -212,6 +275,7 @@ final class CanvasStore {
         isRestoringHistory = false
         historyRevision += 1
         NotePreviewCache.invalidateAll()
+        warmImageCacheAfterHistoryRestore()
         schedulePersistenceAfterHistoryStep()
         Task { @MainActor [weak self] in
             await Task.yield()
@@ -231,6 +295,7 @@ final class CanvasStore {
         isRestoringHistory = false
         historyRevision += 1
         NotePreviewCache.invalidateAll()
+        warmImageCacheAfterHistoryRestore()
         schedulePersistenceAfterHistoryStep()
         Task { @MainActor [weak self] in
             await Task.yield()
@@ -238,11 +303,45 @@ final class CanvasStore {
         }
     }
 
+    /// Asset paths referenced by undo/redo stacks — keeps vault files alive until history is cleared.
+    var historyReferencedAssetPaths: Set<String> {
+        var paths = Set<String>()
+        for state in undoStack + redoStack {
+            let snapshot = CanvasDocumentSnapshot(
+                cards: state.cards,
+                edges: state.edges,
+                transform: state.transform
+            )
+            paths.formUnion(VaultFilesystem.canvasAssetPaths(in: snapshot, vaultURL: vaultURL))
+        }
+        return paths
+    }
+
+    private func warmImageCacheAfterHistoryRestore() {
+        let imageCards = cards.filter { $0.kind == .image }
+        guard !imageCards.isEmpty else { return }
+        let vaultURL = vaultURL
+        Task {
+            var changed = false
+            for card in imageCards {
+                let loaded = await CanvasImageCache.shared.prepareDisplayImageIfNeeded(
+                    forCardID: card.id,
+                    content: card.content,
+                    vaultURL: vaultURL
+                )
+                if loaded { changed = true }
+            }
+            if changed {
+                await MainActor.run { imageCacheRevision += 1 }
+            }
+        }
+    }
+
     /// Updates the canvas immediately, then saves on the next run loop so undo/redo feels instant.
     private func schedulePersistenceAfterHistoryStep() {
         Task { @MainActor [weak self] in
             await Task.yield()
-            self?.onDidMutate?()
+            self?.onDidMutate?(.structural)
         }
     }
 
@@ -462,8 +561,9 @@ final class CanvasStore {
             let card = CanvasCard.make(kind: kind, at: center)
             cards.append(card)
             selectedCardID = card.id
+            spatialIndexUpsert(card)
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func addCompactNote(at center: CGPoint) {
@@ -472,8 +572,9 @@ final class CanvasStore {
             let card = CanvasCard.makeCompactNote(at: center)
             cards.append(card)
             selectedCardID = card.id
+            spatialIndexUpsert(card)
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func addCompactNoteAtCenter(canvasSize: CGSize, transform: CanvasViewTransform? = nil) {
@@ -495,21 +596,27 @@ final class CanvasStore {
 
     func addImageCard(data: Data, title: String?, topLeft: CGPoint) {
         guard requireWriteAccess() else { return }
+        guard let vaultURL else {
+            onPersistError?("Couldn't save image", VaultErrorMessages.noActiveVault)
+            return
+        }
+
+        let content: String
+        do {
+            content = try VaultFilesystem.saveCanvasImage(
+                data: data,
+                vaultURL: vaultURL,
+                suggestedName: title
+            )
+        } catch {
+            onPersistError?("Couldn't save image", error.localizedDescription)
+            return
+        }
+
         withUndo {
             let id = UUID().uuidString
             let pixelSize = ImagePixelSize.from(data: data) ?? CGSize(width: 320, height: 220)
             let displaySize = CanvasLayout.displaySize(for: pixelSize)
-
-            let content: String
-            if let vaultURL {
-                content = (try? VaultFilesystem.saveCanvasImage(
-                    data: data,
-                    vaultURL: vaultURL,
-                    suggestedName: title
-                )) ?? data.base64EncodedString()
-            } else {
-                content = data.base64EncodedString()
-            }
 
             cards.append(CanvasCard(
                 id: id,
@@ -523,13 +630,16 @@ final class CanvasStore {
                 createdAt: Date()
             ))
             selectedCardID = id
+            if let card = cards.first(where: { $0.id == id }) {
+                spatialIndexUpsert(card)
+            }
 
             Task {
                 await CanvasImageCache.shared.prepareDisplayImage(data: data, cardID: id, contentKey: content)
                 await MainActor.run { imageCacheRevision += 1 }
             }
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     #if canImport(UIKit)
@@ -551,13 +661,17 @@ final class CanvasStore {
     func deleteCard(_ id: String) {
         guard requireWriteAccess() else { return }
         withUndo {
-            if contentEditSessionCardID == id { endContentEdit() }
+            if contentEditSessionCardID == id { endContentEdit(skipPersist: true) }
             CanvasImageCache.shared.remove(cardID: id)
+            let removedEdgeIDs = edges.filter { $0.fromID == id || $0.toID == id }.map(\.id)
             cards.removeAll { $0.id == id }
             edges.removeAll { $0.fromID == id || $0.toID == id }
+            spatialIndexRemove(id)
             if selectedCardID == id { selectedCardID = nil }
+            if focusCardID == id { focusCardID = nil }
+            clearInteractionState(referencingCardID: id, removedEdgeIDs: removedEdgeIDs)
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func swapImageCard(_ id: String, data: Data, suggestedTitle: String?) {
@@ -566,20 +680,21 @@ final class CanvasStore {
               cards[index].kind == .image,
               let vaultURL else { return }
 
+        let suggestedName = suggestedTitle ?? cards[index].title
+        let newPath: String
+        do {
+            newPath = try VaultFilesystem.saveCanvasImage(
+                data: data,
+                vaultURL: vaultURL,
+                suggestedName: suggestedName
+            )
+        } catch {
+            onPersistError?("Couldn't replace image", error.localizedDescription)
+            return
+        }
+
         withUndo {
-            let content = cards[index].content
-            if VaultFilesystem.isEmbeddedImageContent(content) {
-                if let path = try? VaultFilesystem.saveCanvasImage(
-                    data: data,
-                    vaultURL: vaultURL,
-                    suggestedName: suggestedTitle ?? cards[index].title
-                ) {
-                    cards[index].content = path
-                }
-            } else {
-                let url = vaultURL.appendingPathComponent(content)
-                try? data.write(to: url, options: .atomic)
-            }
+            cards[index].content = newPath
 
             if let suggestedTitle, !suggestedTitle.isEmpty {
                 cards[index].title = (suggestedTitle as NSString).deletingPathExtension
@@ -589,14 +704,14 @@ final class CanvasStore {
             let displaySize = CanvasLayout.displaySize(for: pixelSize)
             cards[index].width = displaySize.width
             cards[index].height = displaySize.height
+            spatialIndexUpsert(cards[index])
 
-            let contentKey = cards[index].content
             Task {
-                await CanvasImageCache.shared.prepareDisplayImage(data: data, cardID: id, contentKey: contentKey)
+                await CanvasImageCache.shared.prepareDisplayImage(data: data, cardID: id, contentKey: newPath)
                 await MainActor.run { imageCacheRevision += 1 }
             }
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func imageRelativePath(for card: CanvasCard) -> String? {
@@ -630,7 +745,7 @@ final class CanvasStore {
                 await MainActor.run { imageCacheRevision += 1 }
             }
         }
-        if changed { notifyMutated() }
+        if changed { notifyStructurallyMutated() }
     }
 
     func updateContent(for id: String, content: String, fromTextUndo: Bool = false) {
@@ -649,6 +764,9 @@ final class CanvasStore {
             onLinkedNoteBodyChanged?(linkedPath, content)
         } else {
             cards[index].content = content
+            if cards[index].usesManualHeight != true {
+                fitNoteCardToContent(for: id)
+            }
             notifyMutated(persistToDisk: false)
             scheduleDebouncedContentPersist()
         }
@@ -712,6 +830,7 @@ final class CanvasStore {
             return
         }
         cards[index].height = targetHeight
+        spatialIndexUpsert(cards[index])
     }
 
     /// Ensures note cards on disk match their text + embed layout (e.g. after opening older canvases).
@@ -726,7 +845,8 @@ final class CanvasStore {
             }
         }
         if changed {
-            notifyMutated(persistToDisk: persist)
+            rebuildSpatialIndex()
+            notifyMutated(persistToDisk: persist, urgency: persist ? .structural : .debounced)
         }
     }
 
@@ -739,7 +859,7 @@ final class CanvasStore {
         withUndo {
             cards[index].title = resolved
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     /// Display name for an image card, never the bare placeholder "Image".
@@ -771,8 +891,9 @@ final class CanvasStore {
         withUndo {
             cards[index].x = origin.x
             cards[index].y = origin.y
+            spatialIndexUpsert(cards[index])
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func resizeCard(_ id: String, frame: CGRect) {
@@ -797,8 +918,9 @@ final class CanvasStore {
             if cards[index].kind == .note || cards[index].kind == .text {
                 cards[index].usesManualHeight = true
             }
+            spatialIndexUpsert(cards[index])
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func setCardColor(_ id: String, hex: String) {
@@ -1023,7 +1145,7 @@ final class CanvasStore {
             edges[index].direction = direction
         }
         selectedEdgeID = edgeID
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     /// Apply direction to every edge touching this card (including dangling lines).
@@ -1042,7 +1164,7 @@ final class CanvasStore {
         if let first = indexes.first {
             selectedEdgeID = edges[first].id
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func deleteEdge(_ id: String) {
@@ -1065,7 +1187,7 @@ final class CanvasStore {
                 pendingEndpointMenuCenter = nil
             }
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     /// Detach a linked endpoint and begin dragging it to reconnect elsewhere.
@@ -1148,13 +1270,39 @@ final class CanvasStore {
         editingEdgeRestoreLink = nil
     }
 
+    private func clearInteractionState(referencingCardID cardID: String, removedEdgeIDs: [String] = []) {
+        if connectOrigin?.cardID == cardID {
+            clearConnecting()
+        }
+        if case .handle(let handleCardID, _) = contextMenu?.kind, handleCardID == cardID {
+            contextMenu = nil
+        }
+        for edgeID in removedEdgeIDs {
+            if selectedEdgeID == edgeID { selectedEdgeID = nil }
+            if editingEdgeID == edgeID {
+                editingEdgeID = nil
+                clearConnecting()
+            }
+            if case .endpoint(let menuEdgeID, _, _) = contextMenu?.kind, menuEdgeID == edgeID {
+                contextMenu = nil
+            }
+            if case .edge(let menuEdgeID) = contextMenu?.kind, menuEdgeID == edgeID {
+                contextMenu = nil
+            }
+            if pendingEndpointEdgeID == edgeID {
+                pendingEndpointEdgeID = nil
+                pendingEndpointMenuCenter = nil
+            }
+        }
+    }
+
     func connect(fromID: String, fromSide: CanvasSide, toID: String, toSide: CanvasSide) {
         guard requireWriteAccess() else { return }
         withUndo {
             edges.append(CanvasEdge(fromID: fromID, fromSide: fromSide, toID: toID, toSide: toSide))
             clearConnecting()
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     @discardableResult
@@ -1167,7 +1315,7 @@ final class CanvasStore {
             clearConnecting()
             edgeID = edge.id
         }
-        notifyMutated()
+        notifyStructurallyMutated()
         return edgeID
     }
 
@@ -1189,11 +1337,12 @@ final class CanvasStore {
 
             let card = CanvasCard(id: UUID().uuidString, kind: .note, x: origin.x, y: origin.y, width: width, height: height, content: "", createdAt: Date())
             cards.append(card)
+            spatialIndexUpsert(card)
             edges.append(CanvasEdge(fromID: fromID, fromSide: fromSide, toID: card.id, toSide: fromSide.opposite))
             selectedCardID = card.id
             contextMenu = nil
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func attachCardToEndpoint(edgeID: String, cardID: String, toSide: CanvasSide? = nil) {
@@ -1225,12 +1374,13 @@ final class CanvasStore {
                 createdAt: Date()
             )
             cards.append(card)
+            spatialIndexUpsert(card)
             attachCardToEndpoint(edgeID: edgeID, cardID: card.id, toSide: placement.toSide)
             selectedCardID = card.id
             pendingEndpointMenuCenter = nil
             contextMenu = nil
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     func setVaultFiles(_ entries: [WorkspaceFileEntry]) {
@@ -1281,13 +1431,14 @@ final class CanvasStore {
             withUndo {
                 let card = makeVaultNoteCard(file, origin: placement.origin, size: placement.size)
                 cards.append(card)
+                spatialIndexUpsert(card)
                 attachCardToEndpoint(edgeID: edgeID, cardID: card.id, toSide: placement.toSide)
                 selectedCardID = card.id
                 pendingEndpointMenuCenter = nil
                 isVaultOpen = false
                 contextMenu = nil
             }
-            notifyMutated()
+            notifyStructurallyMutated()
         case .image:
             insertVaultImageCard(
                 file,
@@ -1318,10 +1469,11 @@ final class CanvasStore {
                 size: CGSize(width: 260, height: 180)
             )
             cards.append(card)
+            spatialIndexUpsert(card)
             selectedCardID = card.id
             isVaultOpen = false
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     private func insertVaultImageCard(
@@ -1350,6 +1502,9 @@ final class CanvasStore {
                 createdAt: Date()
             ))
             selectedCardID = id
+            if let card = cards.first(where: { $0.id == id }) {
+                spatialIndexUpsert(card)
+            }
 
             if let edgeID, let toSide {
                 attachCardToEndpoint(edgeID: edgeID, cardID: id, toSide: toSide)
@@ -1368,7 +1523,7 @@ final class CanvasStore {
             pendingEndpointMenuCenter = nil
             contextMenu = nil
         }
-        notifyMutated()
+        notifyStructurallyMutated()
     }
 
     private func makeVaultNoteCard(_ file: VaultFile, origin: CGPoint, size: CGSize) -> CanvasCard {
@@ -1432,7 +1587,8 @@ final class CanvasStore {
         pendingEndpointMenuCenter = nil
         pendingVaultInsertCenter = nil
         var removedEdge = false
-        if case .endpoint(let edgeID, _, _) = contextMenu?.kind {
+        if case .endpoint(let edgeID, _, _) = contextMenu?.kind,
+           edges.contains(where: { $0.id == edgeID && $0.toID == nil }) {
             withUndo {
                 let before = edges.count
                 edges.removeAll { $0.id == edgeID && $0.toID == nil }
@@ -1440,7 +1596,7 @@ final class CanvasStore {
             }
         }
         contextMenu = nil
-        if removedEdge { notifyMutated() }
+        if removedEdge { notifyStructurallyMutated() }
     }
 
     var filteredVaultFiles: [VaultFile] {

@@ -171,7 +171,3 @@ extension OnboardingState {
         return .own
     }
 }
-
-extension Notification.Name {
-    static let dreftShowOnboardingPreview = Notification.Name("DreftShowOnboardingPreview")
-}

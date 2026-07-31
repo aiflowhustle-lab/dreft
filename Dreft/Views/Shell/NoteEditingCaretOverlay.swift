@@ -33,7 +33,11 @@ struct NoteEditingCaretOverlay: View {
         ZStack(alignment: .topLeading) {
             ForEach(Array(selectionRects.enumerated()), id: \.offset) { _, rect in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(AppColors.selectionStroke.opacity(0.24))
+                    #if os(iOS)
+                    .fill(Color(uiColor: .systemBlue).opacity(0.28))
+                    #else
+                    .fill(Color(nsColor: .systemBlue).opacity(0.28))
+                    #endif
                     .frame(width: max(2, rect.width), height: max(4, rect.height))
                     .position(x: rect.midX, y: rect.midY)
             }

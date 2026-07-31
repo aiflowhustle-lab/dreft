@@ -155,6 +155,36 @@ enum NoteEditingChromeSupport {
         caretRect(in: textView, fontSize: fontSize, contentScrollOffset: .zero)
     }
 
+    /// Aligns a task checkbox overlay with the first visible character on a task row.
+    static func checkboxOrigin(
+        forCharacterIndex index: Int,
+        in textView: UITextView,
+        contentScrollOffset: CGPoint,
+        fontSize: CGFloat
+    ) -> CGPoint {
+        let layoutManager = textView.layoutManager
+        let textContainer = textView.textContainer
+        let length = (textView.text as NSString?)?.length ?? 0
+        let clampedIndex = min(max(0, index), length)
+
+        layoutManager.ensureLayout(for: textContainer)
+
+        var glyphIndex = layoutManager.glyphIndexForCharacter(at: clampedIndex)
+        if glyphIndex >= layoutManager.numberOfGlyphs {
+            glyphIndex = max(0, layoutManager.numberOfGlyphs - 1)
+        }
+
+        let baselineY = layoutManager.location(forGlyphAt: glyphIndex).y
+        let checkboxSize = NoteCardTaskSupport.scaledCheckboxWidth(fontSize: fontSize)
+        let alignmentOffset = NoteCardTaskSupport.checkboxBaselineAlignmentOffset(fontSize: fontSize)
+        let checkboxTop = baselineY - checkboxSize + alignmentOffset
+
+        return CGPoint(
+            x: 0,
+            y: checkboxTop + textView.textContainerInset.top - contentScrollOffset.y
+        )
+    }
+
     static func wikilinkSuggestAnchor(
         in textView: UITextView,
         characterIndex: Int,
@@ -230,6 +260,9 @@ struct NoteBodyTextView: View {
     @State private var activeQuery: WikilinkActiveQuery?
     @State private var suggestAnchorRect = CGRect.zero
     @State private var wikilinkInsertRevision = 0
+    #if os(iOS)
+    @State private var keyboardBottomOverlap: CGFloat = 0
+    #endif
 
     private var suggestions: [WorkspaceFileEntry] {
         guard let activeQuery else { return [] }
@@ -240,18 +273,15 @@ struct NoteBodyTextView: View {
         hideResolvedImageEmbeds
     }
 
-    /// Image-embed editing hides the native caret; canvas cards draw it in `CanvasNoteEditOverlay`.
+    /// Custom caret overlay — only when native insertion point is hidden (image-embed editing).
     private var showsInlineCaretOverlay: Bool {
-        #if os(iOS)
-        return !embeddedInCanvas
-        #else
-        return hideResolvedImageEmbeds && !embeddedInCanvas
-        #endif
+        hideResolvedImageEmbeds && !embeddedInCanvas
     }
 
     private var hidesNativeInsertionPoint: Bool {
         #if os(iOS)
-        return !embeddedInCanvas || hideResolvedImageEmbeds
+        // Standalone notes use the native blinking caret; hide it only for inline image embeds.
+        return hideResolvedImageEmbeds
         #else
         return embeddedInCanvas && hideResolvedImageEmbeds
         #endif
@@ -264,6 +294,20 @@ struct NoteBodyTextView: View {
             return CGSize(width: suggestAnchorRect.minX, height: suggestAnchorRect.minY + verticalGap)
         }
         return CGSize(width: caretRect.minX, height: caretRect.maxY + verticalGap)
+    }
+
+    private func clampedWikilinkSuggestOffset(containerSize: CGSize?) -> CGSize {
+        let natural = wikilinkSuggestPopoverOffset
+        #if os(iOS)
+        guard let containerSize, containerSize.height > 0 else { return natural }
+        let popoverHeight = WikilinkSuggestPopover.estimatedHeight(resultCount: min(suggestions.count, 8))
+        let accessory = NoteFormattingToolbarAccessoryContainer.preferredHeight
+        let bottomLimit = containerSize.height - keyboardBottomOverlap - accessory - popoverHeight - 8
+        let clampedY = min(natural.height, max(0, bottomLimit))
+        return CGSize(width: natural.width, height: clampedY)
+        #else
+        return natural
+        #endif
     }
 
     private var wikilinkSuggestPassthroughRect: CGRect {
@@ -341,6 +385,7 @@ struct NoteBodyTextView: View {
                     caretRect: $caretRect,
                     selectionRects: $selectionRects,
                     suggestAnchorRect: $suggestAnchorRect,
+                    wikilinkInsertRevision: wikilinkInsertRevision,
                     isFocused: isFocused,
                     fontSize: fontSize,
                     embeddedInCanvas: embeddedInCanvas,
@@ -358,7 +403,8 @@ struct NoteBodyTextView: View {
                     layoutRefreshToken: layoutRefreshToken,
                     selectionRevealToken: selectionRevealToken,
                     onContentScroll: onContentScroll,
-                    fillsAvailableHeight: fillsAvailableHeight
+                    fillsAvailableHeight: fillsAvailableHeight,
+                    keyboardBottomOverlap: $keyboardBottomOverlap
                 )
                 #endif
             }
@@ -366,7 +412,7 @@ struct NoteBodyTextView: View {
             .frame(minHeight: embeddedInCanvas || fillsAvailableHeight ? 0 : minBodyHeight)
             .clipShape(RoundedRectangle(cornerRadius: embeddedInCanvas ? 4 : 0))
 
-            if showsInlineCaretOverlay, isFocused.wrappedValue {
+            if showsInlineCaretOverlay {
                 NoteEditingCaretOverlay(
                     caretRect: caretRect,
                     selectionRects: selectionRects,
@@ -377,14 +423,16 @@ struct NoteBodyTextView: View {
             }
 
             if activeQuery != nil, !suggestions.isEmpty {
+                let suggestOffset = clampedWikilinkSuggestOffset(containerSize: containerSize)
                 WikilinkSuggestPopover(
                     results: suggestions,
                     selectedIndex: $suggestSelectedIndex,
                     onSelect: insertSuggestion
                 )
-                .offset(x: wikilinkSuggestPopoverOffset.width, y: wikilinkSuggestPopoverOffset.height)
+                .offset(x: suggestOffset.width, y: suggestOffset.height)
                 .fixedSize()
-                .zIndex(20)
+                .zIndex(100)
+                .allowsHitTesting(true)
             }
         }
         .frame(maxWidth: .infinity, minHeight: embeddedInCanvas || fillsAvailableHeight ? 0 : minBodyHeight, alignment: .topLeading)
@@ -430,7 +478,9 @@ struct NoteBodyTextView: View {
         text = result.text
         selectedRange = NSRange(location: result.cursor, length: 0)
         activeQuery = nil
+        suggestAnchorRect = .zero
         wikilinkInsertRevision += 1
+        onTextEdited?(result.text, false)
     }
 }
 
@@ -491,11 +541,29 @@ private enum NoteUndoRegistration {
 }
 
 enum NoteTextEditingCoordinatorSupport {
-    static func editingSourceAndRange(
-        from textView: AnyObject,
+    static func usesWysiwygEditing(
+        embeddedInCanvas: Bool,
         hideResolvedImageEmbeds: Bool,
         vaultURL: URL?,
         imageEmbedMaxWidth: CGFloat?
+    ) -> Bool {
+        return !NoteImageEmbedAttributedSupport.usesInlineAttachments(
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        )
+    }
+
+    static func editingSourceAndRange(
+        from textView: AnyObject,
+        markdownBinding: String,
+        embeddedInCanvas: Bool,
+        fontSize: CGFloat,
+        editorBackground: Color,
+        hideResolvedImageEmbeds: Bool,
+        vaultURL: URL?,
+        imageEmbedMaxWidth: CGFloat?,
+        hideTaskListMarkers: Bool = false
     ) -> (source: String, range: NSRange, usesAttachments: Bool) {
         let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
             hideResolvedImageEmbeds: hideResolvedImageEmbeds,
@@ -518,6 +586,21 @@ enum NoteTextEditingCoordinatorSupport {
             )
             return (source, range, true)
         }
+        if usesWysiwygEditing(
+            embeddedInCanvas: embeddedInCanvas,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        ) {
+            let range = MarkdownWysiwygEditingSupport.markdownRange(
+                fromDisplay: textView.selectedRange(),
+                in: markdownBinding,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+            return (markdownBinding, range, false)
+        }
         return (textView.string, textView.selectedRange(), false)
         #else
         guard let textView = textView as? UITextView else {
@@ -535,30 +618,63 @@ enum NoteTextEditingCoordinatorSupport {
             )
             return (source, range, true)
         }
+        if usesWysiwygEditing(
+            embeddedInCanvas: embeddedInCanvas,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        ) {
+            let range = MarkdownWysiwygEditingSupport.markdownRange(
+                fromDisplay: textView.selectedRange,
+                in: markdownBinding,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+            return (markdownBinding, range, false)
+        }
         return (textView.text ?? "", textView.selectedRange, false)
         #endif
     }
 
-    /// Maps a text-view selection into markdown indices for SwiftUI bindings when inline image attachments are active.
+    /// Maps a text-view selection into markdown indices for SwiftUI bindings.
     static func markdownBindingRange(
         fromAttributedRange attributedRange: NSRange,
         markdown: String,
+        embeddedInCanvas: Bool,
+        fontSize: CGFloat,
+        editorBackground: Color,
         hideResolvedImageEmbeds: Bool,
         vaultURL: URL?,
-        imageEmbedMaxWidth: CGFloat?
+        imageEmbedMaxWidth: CGFloat?,
+        hideTaskListMarkers: Bool = false
     ) -> NSRange {
-        guard NoteImageEmbedAttributedSupport.usesInlineAttachments(
+        if NoteImageEmbedAttributedSupport.usesInlineAttachments(
             hideResolvedImageEmbeds: hideResolvedImageEmbeds,
             vaultURL: vaultURL,
             imageEmbedMaxWidth: imageEmbedMaxWidth
-        ) else {
-            return attributedRange
+        ) {
+            return NoteImageEmbedAttributedSupport.markdownRange(
+                fromAttributedRange: attributedRange,
+                in: markdown,
+                vaultURL: vaultURL
+            )
         }
-        return NoteImageEmbedAttributedSupport.markdownRange(
-            fromAttributedRange: attributedRange,
-            in: markdown,
-            vaultURL: vaultURL
-        )
+        if usesWysiwygEditing(
+            embeddedInCanvas: embeddedInCanvas,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        ) {
+            return MarkdownWysiwygEditingSupport.markdownRange(
+                fromDisplay: attributedRange,
+                in: markdown,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+        }
+        return attributedRange
     }
 
     static func applySelectedRange(
@@ -566,6 +682,12 @@ enum NoteTextEditingCoordinatorSupport {
         markdown: String,
         to textView: AnyObject,
         usesAttachments: Bool,
+        embeddedInCanvas: Bool,
+        fontSize: CGFloat,
+        editorBackground: Color,
+        hideResolvedImageEmbeds: Bool,
+        imageEmbedMaxWidth: CGFloat?,
+        hideTaskListMarkers: Bool,
         vaultURL: URL?
     ) {
         #if os(macOS)
@@ -578,6 +700,21 @@ enum NoteTextEditingCoordinatorSupport {
                     vaultURL: vaultURL
                 )
             )
+        } else if usesWysiwygEditing(
+            embeddedInCanvas: embeddedInCanvas,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        ) {
+            textView.setSelectedRange(
+                MarkdownWysiwygEditingSupport.displayRange(
+                    fromMarkdown: markdownRange,
+                    in: markdown,
+                    fontSize: fontSize,
+                    editorBackground: editorBackground,
+                    hideTaskListMarkers: hideTaskListMarkers
+                )
+            )
         } else {
             textView.setSelectedRange(markdownRange)
         }
@@ -588,6 +725,19 @@ enum NoteTextEditingCoordinatorSupport {
                 fromMarkdownRange: markdownRange,
                 in: markdown,
                 vaultURL: vaultURL
+            )
+        } else if usesWysiwygEditing(
+            embeddedInCanvas: embeddedInCanvas,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        ) {
+            textView.selectedRange = MarkdownWysiwygEditingSupport.displayRange(
+                fromMarkdown: markdownRange,
+                in: markdown,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                hideTaskListMarkers: hideTaskListMarkers
             )
         } else {
             textView.selectedRange = markdownRange
@@ -603,7 +753,8 @@ enum NoteTextEditingCoordinatorSupport {
         vaultURL: URL?,
         hideResolvedImageEmbeds: Bool,
         imageEmbedMaxWidth: CGFloat? = nil,
-        hideTaskListMarkers: Bool = false
+        hideTaskListMarkers: Bool = false,
+        embeddedInCanvas: Bool = false
     ) -> NSAttributedString {
         if NoteImageEmbedAttributedSupport.usesInlineAttachments(
             hideResolvedImageEmbeds: hideResolvedImageEmbeds,
@@ -617,6 +768,20 @@ enum NoteTextEditingCoordinatorSupport {
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
                 imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers
+            )
+        }
+
+        if usesWysiwygEditing(
+            embeddedInCanvas: embeddedInCanvas,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        ) {
+            return MarkdownWysiwygEditingSupport.displayAttributedString(
+                from: content,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
                 hideTaskListMarkers: hideTaskListMarkers
             )
         }
@@ -657,6 +822,7 @@ enum NoteTextEditingCoordinatorSupport {
         source: String,
         result: (text: String, selectedRange: NSRange),
         usesAttachments: Bool,
+        embeddedInCanvas: Bool,
         fontSize: CGFloat,
         editorBackground: Color,
         vaultURL: URL?,
@@ -668,6 +834,13 @@ enum NoteTextEditingCoordinatorSupport {
         textView.undoManager?.beginUndoGrouping()
         defer { textView.undoManager?.endUndoGrouping() }
 
+        let usesWysiwyg = usesWysiwygEditing(
+            embeddedInCanvas: embeddedInCanvas,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        )
+
         if usesAttachments {
             let styled = styledContent(
                 result.text,
@@ -677,9 +850,24 @@ enum NoteTextEditingCoordinatorSupport {
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
                 imageEmbedMaxWidth: imageEmbedMaxWidth,
-                hideTaskListMarkers: hideTaskListMarkers
+                hideTaskListMarkers: hideTaskListMarkers,
+                embeddedInCanvas: embeddedInCanvas
             )
             storage.setAttributedString(styled)
+        } else if usesWysiwyg {
+            storage.setAttributedString(
+                styledContent(
+                    result.text,
+                    selectedRange: NSRange(location: NSNotFound, length: 0),
+                    fontSize: fontSize,
+                    editorBackground: editorBackground,
+                    vaultURL: vaultURL,
+                    hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                    imageEmbedMaxWidth: imageEmbedMaxWidth,
+                    hideTaskListMarkers: hideTaskListMarkers,
+                    embeddedInCanvas: embeddedInCanvas
+                )
+            )
         } else {
             let (replaceRange, _) = markdownReplacementDelta(from: source, to: result.text)
             let fullStyled = styledContent(
@@ -690,7 +878,8 @@ enum NoteTextEditingCoordinatorSupport {
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
                 imageEmbedMaxWidth: imageEmbedMaxWidth,
-                hideTaskListMarkers: hideTaskListMarkers
+                hideTaskListMarkers: hideTaskListMarkers,
+                embeddedInCanvas: embeddedInCanvas
             )
             let styledReplacement = fullStyled.attributedSubstring(from: replaceRange)
             storage.replaceCharacters(in: replaceRange, with: styledReplacement)
@@ -701,6 +890,12 @@ enum NoteTextEditingCoordinatorSupport {
             markdown: result.text,
             to: textView,
             usesAttachments: usesAttachments,
+            embeddedInCanvas: embeddedInCanvas,
+            fontSize: fontSize,
+            editorBackground: editorBackground,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            imageEmbedMaxWidth: imageEmbedMaxWidth,
+            hideTaskListMarkers: hideTaskListMarkers,
             vaultURL: vaultURL
         )
     }
@@ -710,6 +905,7 @@ enum NoteTextEditingCoordinatorSupport {
         source: String,
         result: (text: String, selectedRange: NSRange),
         usesAttachments: Bool,
+        embeddedInCanvas: Bool,
         fontSize: CGFloat,
         editorBackground: Color,
         vaultURL: URL?,
@@ -720,6 +916,13 @@ enum NoteTextEditingCoordinatorSupport {
         textView.undoManager?.beginUndoGrouping()
         defer { textView.undoManager?.endUndoGrouping() }
 
+        let usesWysiwyg = usesWysiwygEditing(
+            embeddedInCanvas: embeddedInCanvas,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        )
+
         if usesAttachments {
             textView.attributedText = styledContent(
                 result.text,
@@ -729,7 +932,20 @@ enum NoteTextEditingCoordinatorSupport {
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
                 imageEmbedMaxWidth: imageEmbedMaxWidth,
-                hideTaskListMarkers: hideTaskListMarkers
+                hideTaskListMarkers: hideTaskListMarkers,
+                embeddedInCanvas: embeddedInCanvas
+            )
+        } else if usesWysiwyg {
+            textView.attributedText = styledContent(
+                result.text,
+                selectedRange: NSRange(location: NSNotFound, length: 0),
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                vaultURL: vaultURL,
+                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers,
+                embeddedInCanvas: embeddedInCanvas
             )
         } else {
             let storage = textView.textStorage
@@ -742,7 +958,8 @@ enum NoteTextEditingCoordinatorSupport {
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
                 imageEmbedMaxWidth: imageEmbedMaxWidth,
-                hideTaskListMarkers: hideTaskListMarkers
+                hideTaskListMarkers: hideTaskListMarkers,
+                embeddedInCanvas: embeddedInCanvas
             )
             let styledReplacement = fullStyled.attributedSubstring(from: replaceRange)
             storage.replaceCharacters(in: replaceRange, with: styledReplacement)
@@ -753,6 +970,12 @@ enum NoteTextEditingCoordinatorSupport {
             markdown: result.text,
             to: textView,
             usesAttachments: usesAttachments,
+            embeddedInCanvas: embeddedInCanvas,
+            fontSize: fontSize,
+            editorBackground: editorBackground,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            imageEmbedMaxWidth: imageEmbedMaxWidth,
+            hideTaskListMarkers: hideTaskListMarkers,
             vaultURL: vaultURL
         )
     }
@@ -761,6 +984,8 @@ enum NoteTextEditingCoordinatorSupport {
     static func applyMarkdownEdit(
         _ action: MarkdownEditAction,
         textView: AnyObject,
+        markdownBinding: String,
+        embeddedInCanvas: Bool,
         fontSize: CGFloat,
         editorBackground: Color,
         vaultURL: URL? = nil,
@@ -770,9 +995,14 @@ enum NoteTextEditingCoordinatorSupport {
     ) -> (text: String, selectedRange: NSRange) {
         let editingState = editingSourceAndRange(
             from: textView,
+            markdownBinding: markdownBinding,
+            embeddedInCanvas: embeddedInCanvas,
+            fontSize: fontSize,
+            editorBackground: editorBackground,
             hideResolvedImageEmbeds: hideResolvedImageEmbeds,
             vaultURL: vaultURL,
-            imageEmbedMaxWidth: imageEmbedMaxWidth
+            imageEmbedMaxWidth: imageEmbedMaxWidth,
+            hideTaskListMarkers: hideTaskListMarkers
         )
         let source = editingState.source
         let range = editingState.range
@@ -788,6 +1018,7 @@ enum NoteTextEditingCoordinatorSupport {
                 source: source,
                 result: result,
                 usesAttachments: usesAttachments,
+                embeddedInCanvas: embeddedInCanvas,
                 fontSize: fontSize,
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
@@ -797,20 +1028,33 @@ enum NoteTextEditingCoordinatorSupport {
             )
         } else {
             NoteUndoRegistration.perform(on: textView.undoManager) {
-                restyleInPlace(
-                    textView: textView,
-                    fontSize: fontSize,
-                    editorBackground: editorBackground,
-                    vaultURL: vaultURL,
+                if !usesWysiwygEditing(
+                    embeddedInCanvas: embeddedInCanvas,
                     hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: imageEmbedMaxWidth,
-                    hideTaskListMarkers: hideTaskListMarkers
-                )
+                    vaultURL: vaultURL,
+                    imageEmbedMaxWidth: imageEmbedMaxWidth
+                ) {
+                    restyleInPlace(
+                        textView: textView,
+                        fontSize: fontSize,
+                        editorBackground: editorBackground,
+                        vaultURL: vaultURL,
+                        hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                        imageEmbedMaxWidth: imageEmbedMaxWidth,
+                        hideTaskListMarkers: hideTaskListMarkers
+                    )
+                }
                 applySelectedRange(
                     result.selectedRange,
                     markdown: result.text,
                     to: textView,
                     usesAttachments: usesAttachments,
+                    embeddedInCanvas: embeddedInCanvas,
+                    fontSize: fontSize,
+                    editorBackground: editorBackground,
+                    hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                    imageEmbedMaxWidth: imageEmbedMaxWidth,
+                    hideTaskListMarkers: hideTaskListMarkers,
                     vaultURL: vaultURL
                 )
             }
@@ -823,6 +1067,7 @@ enum NoteTextEditingCoordinatorSupport {
                 source: source,
                 result: result,
                 usesAttachments: usesAttachments,
+                embeddedInCanvas: embeddedInCanvas,
                 fontSize: fontSize,
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
@@ -832,20 +1077,33 @@ enum NoteTextEditingCoordinatorSupport {
             )
         } else {
             NoteUndoRegistration.perform(on: textView.undoManager) {
-                restyleInPlace(
-                    textView: textView,
-                    fontSize: fontSize,
-                    editorBackground: editorBackground,
-                    vaultURL: vaultURL,
+                if !usesWysiwygEditing(
+                    embeddedInCanvas: embeddedInCanvas,
                     hideResolvedImageEmbeds: hideResolvedImageEmbeds,
-                    imageEmbedMaxWidth: imageEmbedMaxWidth,
-                    hideTaskListMarkers: hideTaskListMarkers
-                )
+                    vaultURL: vaultURL,
+                    imageEmbedMaxWidth: imageEmbedMaxWidth
+                ) {
+                    restyleInPlace(
+                        textView: textView,
+                        fontSize: fontSize,
+                        editorBackground: editorBackground,
+                        vaultURL: vaultURL,
+                        hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                        imageEmbedMaxWidth: imageEmbedMaxWidth,
+                        hideTaskListMarkers: hideTaskListMarkers
+                    )
+                }
                 applySelectedRange(
                     result.selectedRange,
                     markdown: result.text,
                     to: textView,
                     usesAttachments: usesAttachments,
+                    embeddedInCanvas: embeddedInCanvas,
+                    fontSize: fontSize,
+                    editorBackground: editorBackground,
+                    hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                    imageEmbedMaxWidth: imageEmbedMaxWidth,
+                    hideTaskListMarkers: hideTaskListMarkers,
                     vaultURL: vaultURL
                 )
             }
@@ -858,6 +1116,8 @@ enum NoteTextEditingCoordinatorSupport {
     static func insertSnippet(
         _ snippet: String,
         textView: AnyObject,
+        markdownBinding: String,
+        embeddedInCanvas: Bool,
         fontSize: CGFloat,
         editorBackground: Color,
         vaultURL: URL? = nil,
@@ -867,9 +1127,14 @@ enum NoteTextEditingCoordinatorSupport {
     ) -> (text: String, selectedRange: NSRange) {
         let editingState = editingSourceAndRange(
             from: textView,
+            markdownBinding: markdownBinding,
+            embeddedInCanvas: embeddedInCanvas,
+            fontSize: fontSize,
+            editorBackground: editorBackground,
             hideResolvedImageEmbeds: hideResolvedImageEmbeds,
             vaultURL: vaultURL,
-            imageEmbedMaxWidth: imageEmbedMaxWidth
+            imageEmbedMaxWidth: imageEmbedMaxWidth,
+            hideTaskListMarkers: hideTaskListMarkers
         )
         let source = editingState.source
         let range = editingState.range
@@ -894,6 +1159,7 @@ enum NoteTextEditingCoordinatorSupport {
             source: source,
             result: finalResult,
             usesAttachments: usesAttachments,
+            embeddedInCanvas: embeddedInCanvas,
             fontSize: fontSize,
             editorBackground: editorBackground,
             vaultURL: vaultURL,
@@ -908,6 +1174,7 @@ enum NoteTextEditingCoordinatorSupport {
             source: source,
             result: finalResult,
             usesAttachments: usesAttachments,
+            embeddedInCanvas: embeddedInCanvas,
             fontSize: fontSize,
             editorBackground: editorBackground,
             vaultURL: vaultURL,
@@ -923,6 +1190,7 @@ enum NoteTextEditingCoordinatorSupport {
     static func applyEditedText(
         _ result: (text: String, selectedRange: NSRange),
         textView: AnyObject,
+        embeddedInCanvas: Bool,
         fontSize: CGFloat,
         editorBackground: Color,
         vaultURL: URL? = nil,
@@ -935,19 +1203,28 @@ enum NoteTextEditingCoordinatorSupport {
             vaultURL: vaultURL,
             imageEmbedMaxWidth: imageEmbedMaxWidth
         )
+        let styleSelection = usesWysiwygEditing(
+            embeddedInCanvas: embeddedInCanvas,
+            hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+            vaultURL: vaultURL,
+            imageEmbedMaxWidth: imageEmbedMaxWidth
+        )
+            ? NSRange(location: NSNotFound, length: 0)
+            : result.selectedRange
 
         #if os(macOS)
         guard let textView = textView as? NSTextView else { return ("", NSRange(location: 0, length: 0)) }
         NoteUndoRegistration.perform(on: textView.undoManager) {
             let styled = styledContent(
                 result.text,
-                selectedRange: result.selectedRange,
+                selectedRange: styleSelection,
                 fontSize: fontSize,
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
                 imageEmbedMaxWidth: imageEmbedMaxWidth,
-                hideTaskListMarkers: hideTaskListMarkers
+                hideTaskListMarkers: hideTaskListMarkers,
+                embeddedInCanvas: embeddedInCanvas
             )
             textView.textStorage?.setAttributedString(styled)
             applySelectedRange(
@@ -955,6 +1232,12 @@ enum NoteTextEditingCoordinatorSupport {
                 markdown: result.text,
                 to: textView,
                 usesAttachments: usesAttachments,
+                embeddedInCanvas: embeddedInCanvas,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers,
                 vaultURL: vaultURL
             )
         }
@@ -963,19 +1246,26 @@ enum NoteTextEditingCoordinatorSupport {
         NoteUndoRegistration.perform(on: textView.undoManager) {
             textView.attributedText = styledContent(
                 result.text,
-                selectedRange: result.selectedRange,
+                selectedRange: styleSelection,
                 fontSize: fontSize,
                 editorBackground: editorBackground,
                 vaultURL: vaultURL,
                 hideResolvedImageEmbeds: hideResolvedImageEmbeds,
                 imageEmbedMaxWidth: imageEmbedMaxWidth,
-                hideTaskListMarkers: hideTaskListMarkers
+                hideTaskListMarkers: hideTaskListMarkers,
+                embeddedInCanvas: embeddedInCanvas
             )
             applySelectedRange(
                 result.selectedRange,
                 markdown: result.text,
                 to: textView,
                 usesAttachments: usesAttachments,
+                embeddedInCanvas: embeddedInCanvas,
+                fontSize: fontSize,
+                editorBackground: editorBackground,
+                hideResolvedImageEmbeds: hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: imageEmbedMaxWidth,
+                hideTaskListMarkers: hideTaskListMarkers,
                 vaultURL: vaultURL
             )
         }
@@ -1023,10 +1313,11 @@ enum NoteTextEditingCoordinatorSupport {
         vaultURL: URL? = nil,
         hideResolvedImageEmbeds: Bool = false,
         imageEmbedMaxWidth: CGFloat? = nil,
-        hideTaskListMarkers: Bool = false
+        hideTaskListMarkers: Bool = false,
+        selectedRangeOverride: NSRange? = nil
     ) {
         let storage = textView.textStorage
-        let selected = textView.selectedRange
+        let selected = selectedRangeOverride ?? textView.selectedRange
         NoteUndoRegistration.perform(on: textView.undoManager) {
             storage.beginEditing()
             WikilinkEditorSupport.restyleInPlace(
@@ -1040,7 +1331,7 @@ enum NoteTextEditingCoordinatorSupport {
                 hideTaskListMarkers: hideTaskListMarkers
             )
             storage.endEditing()
-            if textView.selectedRange != selected {
+            if selectedRangeOverride == nil, textView.selectedRange != selected {
                 textView.selectedRange = selected
             }
         }
@@ -1536,8 +1827,16 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             textView.selectedTextAttributes = [
                 .backgroundColor: NSColor.clear,
             ]
-        } else if embeddedInCanvas {
+        } else if hideResolvedImageEmbeds && !embeddedInCanvas {
+            textView.insertionPointColor = .clear
+            textView.selectedTextAttributes = [
+                .backgroundColor: NSColor.clear,
+            ]
+        } else {
             textView.insertionPointColor = NSColor(AppColors.textPrimary)
+            textView.selectedTextAttributes = [
+                .backgroundColor: NSColor.systemBlue.withAlphaComponent(0.28),
+            ]
         }
         textView.registerForImageDragTypes()
     }
@@ -1655,6 +1954,11 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                 vaultURL: parent.vaultURL,
                 imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            ) || NoteTextEditingCoordinatorSupport.usesWysiwygEditing(
+                embeddedInCanvas: parent.embeddedInCanvas,
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
             ) {
                 applyContent(parent.text, selectedRange: parent.selectedRange, to: textView)
             } else {
@@ -1768,6 +2072,7 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             let updates = NoteTextEditingCoordinatorSupport.applyEditedText(
                 result,
                 textView: textView,
+                embeddedInCanvas: parent.embeddedInCanvas,
                 fontSize: parent.fontSize,
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
@@ -1797,6 +2102,8 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             let updates = NoteTextEditingCoordinatorSupport.applyMarkdownEdit(
                 action,
                 textView: textView,
+                markdownBinding: parent.text,
+                embeddedInCanvas: parent.embeddedInCanvas,
                 fontSize: parent.fontSize,
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
@@ -1820,6 +2127,8 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             let updates = NoteTextEditingCoordinatorSupport.insertSnippet(
                 snippet,
                 textView: textView,
+                markdownBinding: parent.text,
+                embeddedInCanvas: parent.embeddedInCanvas,
                 fontSize: parent.fontSize,
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
@@ -1913,7 +2222,8 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                     vaultURL: parent.vaultURL,
                     hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                     imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
-                    hideTaskListMarkers: parent.hideTaskListMarkers
+                    hideTaskListMarkers: parent.hideTaskListMarkers,
+                    embeddedInCanvas: parent.embeddedInCanvas
                 )
                 textView.textStorage?.setAttributedString(styled)
                 if usesAttachments {
@@ -1922,6 +2232,21 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
                             fromMarkdownRange: selectedRange,
                             in: content,
                             vaultURL: parent.vaultURL
+                        )
+                    )
+                } else if NoteTextEditingCoordinatorSupport.usesWysiwygEditing(
+                    embeddedInCanvas: parent.embeddedInCanvas,
+                    hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                    vaultURL: parent.vaultURL,
+                    imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                ) {
+                    textView.setSelectedRange(
+                        MarkdownWysiwygEditingSupport.displayRange(
+                            fromMarkdown: selectedRange,
+                            in: content,
+                            fontSize: parent.fontSize,
+                            editorBackground: parent.editorBackground,
+                            hideTaskListMarkers: parent.hideTaskListMarkers
                         )
                     )
                 } else {
@@ -2011,9 +2336,13 @@ private struct NoteBodyTextViewRepresentable: NSViewRepresentable {
             let newRange = NoteTextEditingCoordinatorSupport.markdownBindingRange(
                 fromAttributedRange: textView.selectedRange(),
                 markdown: parent.text,
+                embeddedInCanvas: parent.embeddedInCanvas,
+                fontSize: parent.fontSize,
+                editorBackground: parent.editorBackground,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                 vaultURL: parent.vaultURL,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
             if !NoteImageEmbedAttributedSupport.usesInlineAttachments(
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
@@ -2306,6 +2635,30 @@ final class NoteEditingUITextView: UITextView {
     var imageDropHandler: ((Data, String?) -> Bool)?
     var onScroll: (() -> Void)?
     var canvasMinimalScrolling = false
+    var suggestKeyHandler: ((WikilinkSuggestKey) -> Bool)?
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard suggestKeyHandler != nil else { return super.keyCommands }
+        let commands = [
+            UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(handleSuggestUpKey)),
+            UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(handleSuggestDownKey)),
+            UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(handleSuggestEscapeKey)),
+        ]
+        commands.forEach { $0.wantsPriorityOverSystemBehavior = true }
+        return commands + (super.keyCommands ?? [])
+    }
+
+    @objc private func handleSuggestUpKey() {
+        _ = suggestKeyHandler?(.up)
+    }
+
+    @objc private func handleSuggestDownKey() {
+        _ = suggestKeyHandler?(.down)
+    }
+
+    @objc private func handleSuggestEscapeKey() {
+        _ = suggestKeyHandler?(.escape)
+    }
 
     override func scrollRangeToVisible(_ range: NSRange) {
         guard !canvasMinimalScrolling else { return }
@@ -2354,13 +2707,12 @@ final class NoteEditingUITextView: UITextView {
         }
         if let bridge {
             bridge.attachInputAccessory(to: self)
-        } else {
-            inputAccessoryView = UIView(frame: .zero)
+        } else if inputAccessoryView != nil {
+            inputAccessoryView = nil
             if isFirstResponder {
                 reloadInputViews()
             }
         }
-        bridge?.scheduleRefresh()
     }
 
     func refreshFormattingToolbar() {
@@ -2369,11 +2721,9 @@ final class NoteEditingUITextView: UITextView {
 
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
-        if became {
-            toolbarBridge?.textView = self
-            toolbarBridge?.attachInputAccessory(to: self)
+        if became, let toolbarBridge {
+            toolbarBridge.attachInputAccessory(to: self)
             refreshFormattingToolbar()
-            reloadInputViews()
         }
         return became
     }
@@ -2408,6 +2758,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     @Binding var caretRect: CGRect
     @Binding var selectionRects: [CGRect]
     @Binding var suggestAnchorRect: CGRect
+    var wikilinkInsertRevision: Int = 0
     var isFocused: FocusState<Bool>.Binding
     var fontSize: CGFloat
     var embeddedInCanvas: Bool
@@ -2426,6 +2777,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     var selectionRevealToken: Int = 0
     var onContentScroll: ((CanvasNoteScrollMetrics) -> Void)? = nil
     var fillsAvailableHeight: Bool = false
+    @Binding var keyboardBottomOverlap: CGFloat
 
     var imageEmbedLayoutWidth: CGFloat? {
         guard hideResolvedImageEmbeds else { return nil }
@@ -2440,7 +2792,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
     }
 
     var hidesNativeInsertionPoint: Bool {
-        !embeddedInCanvas || hideResolvedImageEmbeds
+        hideResolvedImageEmbeds
     }
 
     func makeCoordinator() -> Coordinator {
@@ -2482,10 +2834,18 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
 
         context.coordinator.parent = self
         context.coordinator.syncFontSizeIfNeeded(in: textView, container: container)
+        textView.editingDelegate = context.coordinator
         textView.configureToolbarBridge(toolbarBridge)
         textView.imageDropHandler = onImageAttachmentDrop
         textView.refreshDropInteraction()
         context.coordinator.syncIfNeeded(text: text, selectedRange: selectedRange, in: textView)
+        if wikilinkInsertRevision != context.coordinator.lastWikilinkInsertRevision {
+            context.coordinator.lastWikilinkInsertRevision = wikilinkInsertRevision
+            if context.coordinator.isLiveEditing(in: textView) {
+                context.coordinator.applyContent(text, selectedRange: selectedRange, to: textView)
+                context.coordinator.syncEditingChrome(in: textView)
+            }
+        }
         context.coordinator.revealSelectionIfNeeded(token: selectionRevealToken, in: textView)
         container?.relayoutDocumentTextView()
         context.coordinator.refreshLayoutIfNeeded(
@@ -2502,12 +2862,17 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         if hidesNativeInsertionPoint {
             textView.tintColor = .clear
         } else {
-            textView.tintColor = UIColor(AppColors.textPrimary)
+            #if os(iOS)
+            textView.tintColor = .systemBlue
+            #endif
         }
         if isFocused.wrappedValue {
             Task { @MainActor in
                 context.coordinator.syncEditingChrome(in: textView)
             }
+        }
+        textView.suggestKeyHandler = { key in
+            context.coordinator.parent.onSuggestKey(key)
         }
 
         if fillsAvailableHeight, let containerSize, containerSize.height > 0, container == nil {
@@ -2521,6 +2886,10 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
               containerSize.width > 1,
               containerSize.height > 1 else { return nil }
         return containerSize
+    }
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.detachKeyboardObserver()
     }
 
     private func makeConfiguredTextView(context: Context) -> NoteEditingUITextView {
@@ -2547,7 +2916,9 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         if hidesNativeInsertionPoint {
             textView.tintColor = .clear
         } else {
-            textView.tintColor = UIColor(AppColors.textPrimary)
+            #if os(iOS)
+            textView.tintColor = .systemBlue
+            #endif
         }
         textView.imageDropHandler = onImageAttachmentDrop
         textView.refreshDropInteraction()
@@ -2562,6 +2933,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         private var isApplyingProgrammaticChange = false
         private var lastLayoutRefreshToken = -1
         private var lastSelectionRevealToken = -1
+        var lastWikilinkInsertRevision = -1
         private var lastAppliedFontSize: CGFloat = -1
         private let standaloneKeyboardObserver = NoteStandaloneEditorKeyboardObserver()
 
@@ -2577,6 +2949,11 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                 vaultURL: parent.vaultURL,
                 imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            ) || NoteTextEditingCoordinatorSupport.usesWysiwygEditing(
+                embeddedInCanvas: parent.embeddedInCanvas,
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
             ) {
                 applyContent(parent.text, selectedRange: parent.selectedRange, to: textView)
             } else {
@@ -2588,20 +2965,31 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         func attach(textView: NoteEditingUITextView, container: CanvasNoteUITextContainerView? = nil) {
             self.textView = textView
             self.containerView = container
+            textView.suggestKeyHandler = { [weak self] key in
+                self?.parent.onSuggestKey(key) ?? false
+            }
             if let container {
                 container.onScroll = { [weak self] in
                     guard let self, let scrollView = self.containerView?.scrollView else { return }
-                    self.emitContentScroll(from: scrollView)
+                    self.emitContentScroll(from: scrollView, deferUpdate: true)
                     self.updateCaretRect(for: textView)
                 }
             } else {
                 textView.onScroll = { [weak self] in
                     guard let self, let textView = self.textView else { return }
-                    self.emitContentScroll(from: textView)
+                    self.emitContentScroll(from: textView, deferUpdate: true)
                     self.updateCaretRect(for: textView)
                 }
                 if parent.fillsAvailableHeight {
-                    standaloneKeyboardObserver.attach(to: textView, fontSize: parent.fontSize)
+                    standaloneKeyboardObserver.attach(
+                        to: textView,
+                        fontSize: parent.fontSize,
+                        onOverlapChange: { [weak self] overlap in
+                            Task { @MainActor in
+                                self?.parent.keyboardBottomOverlap = overlap
+                            }
+                        }
+                    )
                 }
             }
             if parent.embeddedInCanvas {
@@ -2609,7 +2997,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                     guard let self else { return .none }
                     if let scrollView = self.containerView?.scrollView {
                         let result = CanvasNoteCardScrollBridge.scroll(scrollView, by: delta)
-                        self.emitContentScroll(from: scrollView)
+                        self.emitContentScroll(from: scrollView, deferUpdate: true)
                         if let textView = self.textView {
                             self.updateCaretRect(for: textView)
                         }
@@ -2617,7 +3005,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                     }
                     guard let textView = self.textView else { return .none }
                     let result = CanvasNoteCardScrollBridge.scroll(textView, by: delta)
-                    self.emitContentScroll(from: textView)
+                    self.emitContentScroll(from: textView, deferUpdate: true)
                     self.updateCaretRect(for: textView)
                     return result
                 }
@@ -2653,6 +3041,8 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             let updates = NoteTextEditingCoordinatorSupport.applyMarkdownEdit(
                 action,
                 textView: textView,
+                markdownBinding: parent.text,
+                embeddedInCanvas: parent.embeddedInCanvas,
                 fontSize: parent.fontSize,
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
@@ -2660,15 +3050,16 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
                 hideTaskListMarkers: parent.hideTaskListMarkers
             )
-            textView.refreshFormattingToolbar()
-            Task { @MainActor in
-                parent.text = updates.text
-                parent.selectedRange = updates.selectedRange
-                updateCaretRect(for: textView)
-                parent.onSelectionChange()
-                parent.onTextEdited?(updates.text, false)
-                isApplyingProgrammaticChange = false
+            if !usesWysiwygEditing {
+                restyle(textView)
             }
+            textView.refreshFormattingToolbar()
+            parent.text = updates.text
+            parent.selectedRange = updates.selectedRange
+            updateCaretRect(for: textView)
+            parent.onSelectionChange()
+            parent.onTextEdited?(updates.text, false)
+            isApplyingProgrammaticChange = false
         }
 
         func noteEditingTextView(_ textView: NoteEditingUITextView, insertSnippet snippet: String) {
@@ -2676,6 +3067,8 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             let updates = NoteTextEditingCoordinatorSupport.insertSnippet(
                 snippet,
                 textView: textView,
+                markdownBinding: parent.text,
+                embeddedInCanvas: parent.embeddedInCanvas,
                 fontSize: parent.fontSize,
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
@@ -2683,21 +3076,52 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
                 hideTaskListMarkers: parent.hideTaskListMarkers
             )
-            textView.refreshFormattingToolbar()
-            Task { @MainActor in
-                parent.text = updates.text
-                parent.selectedRange = updates.selectedRange
-                updateCaretRect(for: textView)
-                parent.onSelectionChange()
-                parent.onTextEdited?(updates.text, false)
-                isApplyingProgrammaticChange = false
+            if !usesWysiwygEditing {
+                restyle(textView)
             }
+            textView.refreshFormattingToolbar()
+            parent.text = updates.text
+            parent.selectedRange = updates.selectedRange
+            updateCaretRect(for: textView)
+            parent.onSelectionChange()
+            parent.onTextEdited?(updates.text, false)
+            isApplyingProgrammaticChange = false
         }
 
         func noteTextViewDidApplyEdit(_ textView: AnyObject) {}
 
+        func detachKeyboardObserver() {
+            standaloneKeyboardObserver.detach()
+            textView?.suggestKeyHandler = nil
+        }
+
+        private var usesWysiwygEditing: Bool {
+            NoteTextEditingCoordinatorSupport.usesWysiwygEditing(
+                embeddedInCanvas: parent.embeddedInCanvas,
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                vaultURL: parent.vaultURL,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+            )
+        }
+
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            guard text == "\n", !isApplyingProgrammaticChange else { return true }
+            guard !isApplyingProgrammaticChange else { return true }
+
+            if text == "\n", parent.onSuggestKey(.enter) {
+                return false
+            }
+
+            if usesWysiwygEditing {
+                if text == "\n" {
+                    applyWysiwygNewline(at: range, to: textView)
+                } else {
+                    applyWysiwygTextReplacement(range: range, replacement: text, to: textView)
+                }
+                return false
+            }
+
+            guard text == "\n" else { return true }
+
             let source = textView.text ?? ""
 
             if parent.embeddedInCanvas,
@@ -2711,12 +3135,68 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 return false
             }
 
-            if let result = MarkdownEditingSupport.newlineInTaskList(in: source, selectedRange: range) {
-                applyProgrammaticNewline(result, to: textView)
-                return false
-            }
+            let result = MarkdownEditingSupport.newlineInDocument(in: source, selectedRange: range)
+            applyProgrammaticNewline(result, to: textView)
+            return false
+        }
 
-            return true
+        private func applyWysiwygTextReplacement(range: NSRange, replacement: String, to textView: UITextView) {
+            let markdown = parent.text
+            let markdownRange = MarkdownWysiwygEditingSupport.markdownRange(
+                fromDisplay: range,
+                in: markdown,
+                fontSize: parent.fontSize,
+                editorBackground: parent.editorBackground,
+                hideTaskListMarkers: parent.hideTaskListMarkers
+            )
+            let ns = markdown as NSString
+            let newText = ns.replacingCharacters(in: markdownRange, with: replacement)
+            let newSelection = NSRange(
+                location: markdownRange.location + (replacement as NSString).length,
+                length: 0
+            )
+            commitWysiwygEdit((newText, newSelection), to: textView)
+        }
+
+        private func applyWysiwygNewline(at range: NSRange, to textView: UITextView) {
+            let markdown = parent.text
+            let markdownRange = MarkdownWysiwygEditingSupport.markdownRange(
+                fromDisplay: range,
+                in: markdown,
+                fontSize: parent.fontSize,
+                editorBackground: parent.editorBackground,
+                hideTaskListMarkers: parent.hideTaskListMarkers
+            )
+            let result = MarkdownEditingSupport.newlineInDocument(in: markdown, selectedRange: markdownRange)
+            commitWysiwygEdit(result, to: textView)
+        }
+
+        private func commitWysiwygEdit(
+            _ result: (text: String, selectedRange: NSRange),
+            to textView: UITextView
+        ) {
+            isApplyingProgrammaticChange = true
+            let updates = NoteTextEditingCoordinatorSupport.applyEditedText(
+                result,
+                textView: textView,
+                embeddedInCanvas: parent.embeddedInCanvas,
+                fontSize: parent.fontSize,
+                editorBackground: parent.editorBackground,
+                vaultURL: parent.vaultURL,
+                hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
+            )
+            (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
+            parent.text = updates.text
+            parent.selectedRange = updates.selectedRange
+            updateCaretRect(for: textView)
+            if parent.fillsAvailableHeight {
+                scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
+            }
+            parent.onSelectionChange()
+            parent.onTextEdited?(updates.text, false)
+            isApplyingProgrammaticChange = false
         }
 
         private func applyProgrammaticNewline(
@@ -2727,6 +3207,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             let updates = NoteTextEditingCoordinatorSupport.applyEditedText(
                 result,
                 textView: textView,
+                embeddedInCanvas: parent.embeddedInCanvas,
                 fontSize: parent.fontSize,
                 editorBackground: parent.editorBackground,
                 vaultURL: parent.vaultURL,
@@ -2748,21 +3229,28 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             }
         }
 
-        private func isLiveEditing(in textView: UITextView) -> Bool {
+        func isLiveEditing(in textView: UITextView) -> Bool {
             textView.isFirstResponder
         }
 
         func syncIfNeeded(text: String, selectedRange: NSRange, in textView: UITextView) {
             guard !isApplyingProgrammaticChange else { return }
-            if isLiveEditing(in: textView), textView.text != text {
-                return
-            }
 
             let usesAttachments = NoteImageEmbedAttributedSupport.usesInlineAttachments(
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                 vaultURL: parent.vaultURL,
                 imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
             )
+
+            if usesWysiwygEditing {
+                if isLiveEditing(in: textView) { return }
+                applyContent(text, selectedRange: selectedRange, to: textView)
+                return
+            }
+
+            if isLiveEditing(in: textView), textView.text != text {
+                return
+            }
 
             if usesAttachments {
                 if NoteImageEmbedAttributedSupport.shouldRebuildAttributedText(
@@ -2786,8 +3274,10 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
 
             if textView.text != text {
                 applyContent(text, selectedRange: selectedRange, to: textView)
-            } else if !isLiveEditing(in: textView), textView.selectedRange != selectedRange {
-                textView.selectedRange = selectedRange
+            } else if !isLiveEditing(in: textView) {
+                if textView.selectedRange != selectedRange {
+                    textView.selectedRange = selectedRange
+                }
                 restyle(textView)
             }
         }
@@ -2801,23 +3291,33 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 vaultURL: parent.vaultURL,
                 imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
             )
+            let styleSelection = styleSelection(for: textView, selectedRange: selectedRange)
 
             NoteUndoRegistration.perform(on: textView.undoManager) {
                 textView.attributedText = NoteTextEditingCoordinatorSupport.styledContent(
                     content,
-                    selectedRange: selectedRange,
+                    selectedRange: styleSelection,
                     fontSize: parent.fontSize,
                     editorBackground: parent.editorBackground,
                     vaultURL: parent.vaultURL,
                     hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                     imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
-                    hideTaskListMarkers: parent.hideTaskListMarkers
+                    hideTaskListMarkers: parent.hideTaskListMarkers,
+                    embeddedInCanvas: parent.embeddedInCanvas
                 )
                 if usesAttachments {
                     textView.selectedRange = NoteImageEmbedAttributedSupport.attributedRange(
                         fromMarkdownRange: selectedRange,
                         in: content,
                         vaultURL: parent.vaultURL
+                    )
+                } else if usesWysiwygEditing {
+                    textView.selectedRange = MarkdownWysiwygEditingSupport.displayRange(
+                        fromMarkdown: selectedRange,
+                        in: content,
+                        fontSize: parent.fontSize,
+                        editorBackground: parent.editorBackground,
+                        hideTaskListMarkers: parent.hideTaskListMarkers
                     )
                 } else {
                     textView.selectedRange = clampedRange(selectedRange, in: content)
@@ -2858,6 +3358,21 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             NoteStandaloneEditorKeyboardSupport.scrollSelectionIntoView(textView, fontSize: parent.fontSize)
         }
 
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused.wrappedValue = true
+            guard let noteTextView = textView as? NoteEditingUITextView else { return }
+            noteTextView.configureToolbarBridge(parent.toolbarBridge)
+            noteTextView.refreshFormattingToolbar()
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.isFocused.wrappedValue = false
+            if !usesWysiwygEditing {
+                restyle(textView)
+            }
+            (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
+        }
+
         func textViewDidChange(_ textView: UITextView) {
             guard !isApplyingProgrammaticChange else { return }
 
@@ -2881,6 +3396,9 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                     in: newText,
                     vaultURL: parent.vaultURL
                 )
+                restyle(textView)
+            } else if usesWysiwygEditing {
+                return
             } else {
                 restyle(textView)
                 newText = textView.text ?? ""
@@ -2902,7 +3420,8 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                                 vaultURL: parent.vaultURL,
                                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                                 imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
-                                hideTaskListMarkers: parent.hideTaskListMarkers
+                                hideTaskListMarkers: parent.hideTaskListMarkers,
+                                embeddedInCanvas: parent.embeddedInCanvas
                             )
                             textView.selectedRange = sanitized.selectedRange ?? newRange
                         }
@@ -2927,9 +3446,9 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                     scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
                 }
                 if let scrollView = containerView?.scrollView {
-                    emitContentScroll(from: scrollView)
+                    emitContentScroll(from: scrollView, deferUpdate: true)
                 } else {
-                    emitContentScroll(from: textView)
+                    emitContentScroll(from: textView, deferUpdate: true)
                 }
                 parent.onSelectionChange()
                 parent.onTextEdited?(newText, fromTextUndo)
@@ -2969,17 +3488,22 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             let newRange = NoteTextEditingCoordinatorSupport.markdownBindingRange(
                 fromAttributedRange: textView.selectedRange,
                 markdown: parent.text,
+                embeddedInCanvas: parent.embeddedInCanvas,
+                fontSize: parent.fontSize,
+                editorBackground: parent.editorBackground,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                 vaultURL: parent.vaultURL,
-                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
+                imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
+                hideTaskListMarkers: parent.hideTaskListMarkers
             )
             if !NoteImageEmbedAttributedSupport.usesInlineAttachments(
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                 vaultURL: parent.vaultURL,
                 imageEmbedMaxWidth: parent.imageEmbedLayoutWidth
-            ) {
+            ), !usesWysiwygEditing {
                 restyle(textView)
             }
+            updateEditingChrome(for: textView)
             (textView as? NoteEditingUITextView)?.refreshFormattingToolbar()
             Task { @MainActor in
                 parent.selectedRange = newRange
@@ -2993,7 +3517,13 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
             }
         }
 
-        private func restyle(_ textView: UITextView) {
+        private func restyle(_ textView: UITextView, hideAllDelimiters explicit: Bool? = nil) {
+            guard !usesWysiwygEditing else { return }
+            // Canvas cards may reveal delimiters near the caret while actively editing inline markdown.
+            let hide = explicit ?? !parent.embeddedInCanvas
+            let selectedOverride = hide
+                ? NSRange(location: NSNotFound, length: 0)
+                : nil
             NoteTextEditingCoordinatorSupport.restyleInPlace(
                 textView: textView,
                 fontSize: parent.fontSize,
@@ -3001,8 +3531,16 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 vaultURL: parent.vaultURL,
                 hideResolvedImageEmbeds: parent.hideResolvedImageEmbeds,
                 imageEmbedMaxWidth: parent.imageEmbedLayoutWidth,
-                hideTaskListMarkers: parent.hideTaskListMarkers
+                hideTaskListMarkers: parent.hideTaskListMarkers,
+                selectedRangeOverride: selectedOverride
             )
+        }
+
+        private func styleSelection(for textView: UITextView, selectedRange: NSRange) -> NSRange {
+            if parent.embeddedInCanvas, isLiveEditing(in: textView) {
+                return selectedRange
+            }
+            return NSRange(location: NSNotFound, length: 0)
         }
 
         func restyleForLayoutRefresh(in textView: UITextView, container: CanvasNoteUITextContainerView?) {
@@ -3043,6 +3581,7 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
         func revealSelectionIfNeeded(token: Int, in textView: UITextView) {
             guard token != lastSelectionRevealToken else { return }
             lastSelectionRevealToken = token
+            applyContent(parent.text, selectedRange: parent.selectedRange, to: textView)
             scrollEmbeddedCaretIntoViewIfNeeded(for: textView)
             if parent.fillsAvailableHeight {
                 NoteStandaloneEditorKeyboardSupport.scrollSelectionIntoView(textView, fontSize: parent.fontSize)
@@ -3064,6 +3603,8 @@ private struct NoteBodyTextViewRepresentable: UIViewRepresentable {
                 parent.caretRect = rect
                 if let selection {
                     parent.selectionRects = selection
+                } else if !parent.showsCustomEditingChrome {
+                    parent.selectionRects = []
                 }
                 parent.suggestAnchorRect = suggestAnchorRect
             }

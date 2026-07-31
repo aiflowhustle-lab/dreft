@@ -166,7 +166,10 @@ struct CanvasCardSurface: View {
                         .foregroundStyle(themeState.theme.textPrimary)
                 }
             } else if !isEditing {
-                notePreviewBody(displayMarkdown: displayMarkdown)
+                notePreviewBody(
+                    displayMarkdown: displayMarkdown,
+                    showsTaskCheckboxOverlay: showsTaskCheckboxOverlay
+                )
             }
         }
         .multilineTextAlignment(.leading)
@@ -180,9 +183,9 @@ struct CanvasCardSurface: View {
                     content: displayMarkdown,
                     maxWidth: max(1, frameWidth - 16),
                     fontSize: CanvasConstants.noteCardFontSize,
-                    onToggleTaskRawLine: { rawLine in
+                    onToggleTaskAtLine: { lineIndex in
                         onTaskCheckboxTap?()
-                        toggleTask(matchingRawLine: rawLine, in: displayMarkdown)
+                        toggleTask(atLineIndex: lineIndex, in: displayMarkdown)
                     }
                 )
                 .padding(.horizontal, 8)
@@ -192,16 +195,20 @@ struct CanvasCardSurface: View {
     }
 
     @ViewBuilder
-    private func notePreviewBody(displayMarkdown: String) -> some View {
+    private func notePreviewBody(displayMarkdown: String, showsTaskCheckboxOverlay: Bool) -> some View {
         let body = CanvasNoteCardBodyView(
             content: displayMarkdown,
             vaultURL: vaultURL,
             maxImageWidth: max(1, frameWidth - 16),
             cacheRevision: imageCacheRevision,
+            showsInlineTaskCheckboxes: !showsTaskCheckboxOverlay,
             onContentSizeChange: onImageLoaded,
-            onToggleTaskRawLine: onUpdateContent == nil ? nil : { rawLine in
-                toggleTask(matchingRawLine: rawLine, in: displayMarkdown)
-            }
+            onToggleTaskRawLine: showsTaskCheckboxOverlay || onUpdateContent == nil
+                ? nil
+                : { rawLine in
+                    guard let updated = NoteCardTaskSupport.toggleTask(matchingRawLine: rawLine, in: displayMarkdown) else { return }
+                    onUpdateContent?(updated)
+                }
         )
         let scrollHeight = max(1, frameHeight - 16)
 
@@ -229,8 +236,8 @@ struct CanvasCardSurface: View {
         }
     }
 
-    private func toggleTask(matchingRawLine rawLine: String, in markdown: String) {
-        guard let updated = NoteCardTaskSupport.toggleTask(matchingRawLine: rawLine, in: markdown) else { return }
+    private func toggleTask(atLineIndex index: Int, in markdown: String) {
+        guard let updated = NoteCardTaskSupport.toggleTask(atLineIndex: index, in: markdown) else { return }
         onUpdateContent?(updated)
     }
 }
@@ -296,6 +303,9 @@ struct CanvasCardCompactView: View {
         .onDisappear {
             cancelActiveDrag()
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(CanvasAccessibility.cardLabel(for: card, isSelected: false))
+        .accessibilityHint(CanvasAccessibility.cardHint(for: card))
         #if os(macOS)
         .modifier(CanvasCardCompactCursorModifier(isGrabbing: isPressingCard))
         #endif

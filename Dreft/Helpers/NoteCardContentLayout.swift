@@ -171,6 +171,11 @@ enum NoteCardContentLayout {
         fontSize: CGFloat = CanvasConstants.noteCardFontSize,
         imageSizeForPath: (String) -> CGSize
     ) -> CGFloat {
+        if !content.contains("![["),
+           let taskHeight = requiredTaskListBodyHeight(content: content, maxWidth: maxWidth, fontSize: fontSize) {
+            return taskHeight
+        }
+
         let segments = NoteCardEmbedSupport.segments(from: content, vaultURL: vaultURL)
         let rows = flowRows(
             from: segments,
@@ -235,6 +240,28 @@ enum NoteCardContentLayout {
 
     static func singleLineHeight(fontSize: CGFloat) -> CGFloat {
         ceil(fontSize * 1.35)
+    }
+
+    /// Matches task-row spacing used by checkbox overlays while editing (`CanvasNoteCardTaskTapOverlay`).
+    private static let taskLineSpacing: CGFloat = 4
+
+    static func requiredTaskListBodyHeight(
+        content: String,
+        maxWidth: CGFloat,
+        fontSize: CGFloat
+    ) -> CGFloat? {
+        let lines = NoteCardTaskSupport.parsedLines(from: content)
+        guard lines.contains(where: { if case .task = $0 { return true }; return false }) else { return nil }
+        guard !lines.isEmpty else { return singleLineHeight(fontSize: fontSize) }
+
+        var height: CGFloat = 0
+        for (index, line) in lines.enumerated() {
+            height += NoteCardTaskSupport.lineHeight(for: line, fontSize: fontSize, maxWidth: maxWidth)
+            if index < lines.count - 1 {
+                height += taskLineSpacing
+            }
+        }
+        return max(singleLineHeight(fontSize: fontSize), height)
     }
 
     static func textBlockHeight(_ text: String, maxWidth: CGFloat, fontSize: CGFloat) -> CGFloat {

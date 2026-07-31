@@ -20,16 +20,8 @@ struct InfiniteCanvasView: View {
 
   /// Single render transform — never nil-flipped during gestures (prevents shake).
   @State private var displayTransform = CanvasViewTransform()
-  @State private var isCanvasInteracting = false
-  @State private var isCardDragging = false
-  @State private var isCardResizing = false
-  /// Camera locked while moving/resizing a card so pinch drift can't flash card scale.
-  @State private var cardInteractionFrozenTransform: CanvasViewTransform?
-  @State private var cardDragOverrides: [String: CGPoint] = [:]
-  @State private var cardResizeOverrides: [String: CGRect] = [:]
-  @State private var panActive = false
-  @State private var panAnchor = CGSize.zero
-  @State private var pinchStartZoom: CGFloat?
+  @State private var interaction = CanvasInteractionState()
+  @State private var viewport = CanvasViewportController()
   @State private var showCanvasSettings = false
   @AppStorage("canvasShowGrid") private var showCanvasGrid = true
   @State private var showImagePicker = false
@@ -42,7 +34,6 @@ struct InfiniteCanvasView: View {
   @State private var cardToolbarCustomColorOpen = false
   @State private var edgeToolbarColorRowOpen = false
   @State private var edgeToolbarCustomColorOpen = false
-  @State private var suppressCanvasTapUntil: Date?
   @State private var imageTitleRenameTokens: [String: Int] = [:]
   @State private var hoverEdgeID: String?
   @State private var editingEdgeLabelID: String?
@@ -64,10 +55,6 @@ struct InfiniteCanvasView: View {
   @State private var timelapseCurrentDate: Date?
   @State private var timelapseTask: Task<Void, Never>?
   @State private var timelapseRevision = 0
-  /// Cards kept in the view tree — expands while panning, trims when navigation settles.
-  @State private var mountedCardIDs: Set<String> = []
-  @State private var mountedEdgeIDs: Set<String> = []
-  @State private var cullingDebounceTask: Task<Void, Never>?
   /// Locks note edit typography when a card enters edit mode so typing stays the same size.
   @State private var noteEditFontSize: CGFloat?
   @State private var noteEditImageInserter: NoteImageInserter?
@@ -108,6 +95,13 @@ struct InfiniteCanvasView: View {
               vaultFiles: vaultFiles,
               edgesInView: edgesInView
             )
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(
+              CanvasAccessibility.canvasLabel(
+                zoomPercent: Int((displayTransform.zoom * 100).rounded()),
+                cardCount: store.cards.count
+              )
+            )
             .frame(width: size.width, height: size.height)
             .clipped()
           }
@@ -130,6 +124,7 @@ struct InfiniteCanvasView: View {
           panOffset: CGSize(width: displayTransform.x, height: displayTransform.y),
           dotColor: AppColors.gridDotColor
         )
+        .accessibilityHidden(true)
       }
 
       canvasInteractionBackground(canvasSize: size)
@@ -145,8 +140,8 @@ struct InfiniteCanvasView: View {
         cardIndex: cardIndex,
         edges: edgesInView,
         connectingFrom: store.connectingFrom,
-        positionOverrides: cardDragOverrides,
-        resizeOverrides: cardResizeOverrides,
+        positionOverrides: interaction.cardDragOverrides,
+        resizeOverrides: interaction.cardResizeOverrides,
         selectedEdgeID: store.selectedEdgeID,
         editingEdgeID: editingEdgeLabelID,
         editingLabelDraft: edgeLabelDraft
@@ -157,8 +152,8 @@ struct InfiniteCanvasView: View {
         transform: displayTransform,
         cardIndex: cardIndex,
         edges: edgesInView,
-        positionOverrides: cardDragOverrides,
-        resizeOverrides: cardResizeOverrides,
+        positionOverrides: interaction.cardDragOverrides,
+        resizeOverrides: interaction.cardResizeOverrides,
         editingEdgeID: editingEdgeLabelID,
         labelDraft: $edgeLabelDraft,
         onCommit: { edgeID, label in
@@ -179,6 +174,7 @@ struct InfiniteCanvasView: View {
           .onTapGesture {
             store.dismissPendingEndpoint()
             store.selectedCardID = nil
+            store.endContentEdit()
             store.focusCardID = nil
           }
           .zIndex(99)
@@ -196,13 +192,13 @@ struct InfiniteCanvasView: View {
       transform: displayTransform,
       cardIndex: cardIndex,
       edges: edgesInView,
-      positionOverrides: cardDragOverrides,
-      resizeOverrides: cardResizeOverrides,
+      positionOverrides: interaction.cardDragOverrides,
+      resizeOverrides: interaction.cardResizeOverrides,
       edgeEndpoint: { edge in
         store.edgeEndpoint(
           for: edge,
-          positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides
+          positionOverrides: interaction.cardDragOverrides,
+          resizeOverrides: interaction.cardResizeOverrides
         )
       },
       onHoverEdge: { edgeID in
@@ -246,10 +242,14 @@ struct InfiniteCanvasView: View {
         replaceMountedContent(for: size)
       }
       .onChange(of: cardToolbarColorRowOpen) { _, isOpen in
-        if isOpen { settleInFlightCardInteraction() }
+        if isOpen, interaction.isCardDragging || interaction.isCardResizing || interaction.panActive {
+          settleInFlightCardInteraction()
+        }
       }
       .onChange(of: cardToolbarCustomColorOpen) { _, isOpen in
-        if isOpen { settleInFlightCardInteraction() }
+        if isOpen, interaction.isCardDragging || interaction.isCardResizing || interaction.panActive {
+          settleInFlightCardInteraction()
+        }
       }
       .onChange(of: store.selectedEdgeID) { _, newValue in
         if let editingID = editingEdgeLabelID, newValue != editingID {
@@ -355,31 +355,39 @@ struct InfiniteCanvasView: View {
           .zIndex(350)
         }
       }
+      #if os(iOS)
+      .overlay {
+        NoteInsertAttachmentMenuOverlay(
+          isPresented: $showNoteAttachmentMenu,
+          anchor: canvasAttachmentMenuAnchor(canvasSize: size),
+          onPhotoLibrary: { showNotePhotoPicker = true },
+          onTakePhoto: { showNoteCamera = true },
+          onChooseFile: { showNoteFileImporter = true }
+        )
+        .zIndex(600)
+      }
+      #endif
       .background(AppColors.canvasBackground)
       #if os(iOS)
       .onReceive(noteEditKeyboardObserver.$height) { _ in
-        Task { @MainActor in
-          updateCanvasKeyboardAvoidance(canvasSize: size)
-        }
+        requestCanvasKeyboardAvoidanceUpdate(canvasSize: size)
       }
       .onReceive(noteEditKeyboardObserver.$isVisible) { visible in
-        Task { @MainActor in
-          if visible, store.focusCardID != nil {
-            updateCanvasKeyboardAvoidance(canvasSize: size)
-          } else {
-            resetCanvasKeyboardAvoidance(animated: true)
-          }
+        if visible, store.focusCardID != nil {
+          requestCanvasKeyboardAvoidanceUpdate(canvasSize: size)
         }
       }
       .onChange(of: store.focusCardID) { _, newID in
+        keyboardAvoidanceTask?.cancel()
+        keyboardAvoidanceTask = nil
         if newID == nil {
-          keyboardAvoidanceTask?.cancel()
-          keyboardAvoidanceTask = nil
-          Task { @MainActor in
-            resetCanvasKeyboardAvoidance(animated: true)
-          }
+          store.endContentEdit()
+          showNoteAttachmentMenu = false
+          clearCanvasKeyboardPanTracking()
+          noteEditImageInserter = nil
+          canvasNoteToolbarBridge.detachFromEditor()
         } else {
-          scheduleCanvasKeyboardAvoidance(canvasSize: size)
+          requestCanvasKeyboardAvoidanceUpdate(canvasSize: size)
         }
       }
       #endif
@@ -394,27 +402,32 @@ struct InfiniteCanvasView: View {
         blocksCanvasNavigation(at: point, canvasSize: canvasSize)
       },
       onPan: { delta in
-        isCanvasInteracting = true
+        if interaction.mode != .canvasNavigation {
+          interaction.mode = .canvasNavigation
+        }
         displayTransform.x += delta.width
         displayTransform.y += delta.height
       },
       onPanBegan: {
-        isCanvasInteracting = true
-        panActive = true
+        interaction.beginCanvasNavigation(
+          anchor: CGSize(width: displayTransform.x, height: displayTransform.y)
+        )
         cancelPendingEdgeInteraction()
       },
       onPanEnded: {
-        panActive = false
+        interaction.endCanvasNavigation()
         finishCanvasInteraction()
       },
       onPinchBegan: { _ in
-        guard !isCardDragging, !isCardResizing else { return }
-        isCanvasInteracting = true
-        pinchStartZoom = displayTransform.zoom
+        guard !interaction.isCardDragging, !interaction.isCardResizing else { return }
+        if interaction.mode == .idle {
+          interaction.mode = .canvasNavigation
+        }
+        interaction.pinchStartZoom = displayTransform.zoom
       },
       onPinchChanged: { scale, anchor in
-        guard !isCardDragging, !isCardResizing else { return }
-        let startZoom = pinchStartZoom ?? displayTransform.zoom
+        guard !interaction.isCardDragging, !interaction.isCardResizing else { return }
+        let startZoom = interaction.pinchStartZoom ?? displayTransform.zoom
         let newZoom = min(
           CanvasViewTransform.maxZoom,
           max(CanvasViewTransform.minZoom, startZoom * scale)
@@ -422,7 +435,7 @@ struct InfiniteCanvasView: View {
         applyZoom(at: anchor, targetZoom: newZoom)
       },
       onPinchEnded: {
-        pinchStartZoom = nil
+        interaction.pinchStartZoom = nil
         finishCanvasInteraction()
       },
       onLongPress: { location in
@@ -469,7 +482,7 @@ struct InfiniteCanvasView: View {
           store.vaultURL = newURL
         }
         .onChange(of: store.transform) { _, newValue in
-          guard !independentCamera, !isCanvasInteracting, !isCardDragging else { return }
+          guard !independentCamera, !interaction.isCanvasInteracting, !interaction.isCardDragging else { return }
           displayTransform = newValue
         }
         .onDrop(of: [.image, .fileURL], isTargeted: $store.isDragOver) { providers, location in
@@ -489,7 +502,9 @@ struct InfiniteCanvasView: View {
         shouldPassScrollToNoteCard(at: location, canvasSize: size)
       }) { delta, location, zoomRequested, phaseEnded in
         if store.contextMenu != nil || store.isVaultOpen { return }
-        isCanvasInteracting = true
+        if interaction.mode == .idle {
+          interaction.mode = .canvasNavigation
+        }
         if zoomRequested {
           applyZoom(at: location, factor: exp(-delta.height * 0.0015))
         } else {
@@ -545,42 +560,24 @@ struct InfiniteCanvasView: View {
     @ViewBuilder content: () -> Content
   ) -> some View {
     content()
-      .photosPicker(isPresented: $showNotePhotoPicker, selection: $noteAttachmentPhotoItem, matching: .images)
-      .onChange(of: noteAttachmentPhotoItem) { _, item in
-        guard let item else { return }
-        Task { await importNoteAttachmentPhoto(item) }
-      }
-      .fullScreenCover(isPresented: $showNoteCamera) {
-        CameraImagePicker(
-          onImage: { data in
-            insertNoteAttachment(data: data, suggestedName: "photo.jpg")
-          },
-          onCancel: {
-            showNoteCamera = false
+      .noteAttachmentImportModifiers(
+        showAttachmentMenu: $showNoteAttachmentMenu,
+        showPhotoPicker: $showNotePhotoPicker,
+        showCamera: $showNoteCamera,
+        showFileImporter: $showNoteFileImporter,
+        photoItem: $noteAttachmentPhotoItem,
+        menuAnchor: { canvasAttachmentMenuAnchor(canvasSize: size) },
+        presentsMenuOverlay: false,
+        onInsertImage: { data, name in
+          insertNoteAttachment(data: data, suggestedName: name)
+        },
+        onImportFile: importNoteAttachmentFile,
+        onRegisterInsertAttachment: {
+          canvasNoteToolbarBridge.onInsertAttachment = {
+            showNoteAttachmentMenu = true
           }
-        )
-        .ignoresSafeArea()
-      }
-      .overlay {
-        NoteInsertAttachmentMenuOverlay(
-          isPresented: $showNoteAttachmentMenu,
-          onPhotoLibrary: { showNotePhotoPicker = true },
-          onTakePhoto: { showNoteCamera = true },
-          onChooseFile: { showNoteFileImporter = true }
-        )
-      }
-      .fileImporter(
-        isPresented: $showNoteFileImporter,
-        allowedContentTypes: [.image],
-        allowsMultipleSelection: false
-      ) { result in
-        importNoteAttachmentFile(from: result)
-      }
-      .onAppear {
-        canvasNoteToolbarBridge.onInsertAttachment = {
-          showNoteAttachmentMenu = true
         }
-      }
+      )
   }
   #elseif os(macOS)
   @ViewBuilder
@@ -691,98 +688,69 @@ struct InfiniteCanvasView: View {
   }
 
   private func canvasViewportPadding() -> CGFloat {
-    if isCardResizing || isCardDragging {
+    if interaction.isCardResizing || interaction.isCardDragging {
       return CanvasConstants.interactionViewportPadding
     }
     return CanvasConstants.viewportPadding
   }
 
-  private func viewport(for canvasSize: CGSize, padding: CGFloat) -> CGRect {
-    CanvasViewport.worldRect(
+  private func viewportEnvironment(canvasSize: CGSize) -> CanvasViewportEnvironment {
+    CanvasViewportEnvironment(
       canvasSize: canvasSize,
-      transform: displayTransform,
-      padding: padding
-    )
-  }
-
-  private func computeVisibleCardIDs(for canvasSize: CGSize, padding: CGFloat? = nil) -> Set<String> {
-    let pad = padding ?? canvasViewportPadding()
-    return CanvasViewport.visibleCardIDs(
+      displayTransform: displayTransform,
       cards: store.cards,
-      viewport: viewport(for: canvasSize, padding: pad),
-      positionOverrides: cardDragOverrides,
-      resizeOverrides: cardResizeOverrides,
-      selectedID: store.selectedCardID,
-      hoverID: store.hoverCardID,
+      edges: activeCanvasEdges,
+      cardIndex: cardIndex,
+      cardDragOverrides: interaction.cardDragOverrides,
+      cardResizeOverrides: interaction.cardResizeOverrides,
+      selectedCardID: store.selectedCardID,
+      hoverCardID: store.hoverCardID,
+      focusCardID: store.focusCardID,
+      selectedEdgeID: store.selectedEdgeID,
+      editingEdgeLabelID: editingEdgeLabelID,
+      storeEditingEdgeID: store.editingEdgeID,
+      pendingEdgeInteractionID: pendingEdgeInteractionID,
+      isCardDragging: interaction.isCardDragging,
+      isCardResizing: interaction.isCardResizing,
+      isCanvasInteracting: interaction.isCanvasInteracting,
+      timelapseActive: timelapseActive,
       spatialIndex: store.spatialIndexForCulling()
     )
   }
 
-  private func computeVisibleEdgeIDs(for canvasSize: CGSize, padding: CGFloat? = nil) -> Set<String> {
-    let pad = padding ?? canvasViewportPadding()
-    return CanvasViewport.visibleEdgeIDs(
-      edges: activeCanvasEdges,
-      cardIndex: cardIndex,
-      viewport: viewport(for: canvasSize, padding: pad),
-      positionOverrides: cardDragOverrides,
-      resizeOverrides: cardResizeOverrides,
-      selectedID: store.selectedEdgeID,
-      editingID: editingEdgeLabelID ?? store.editingEdgeID,
-      pendingInteractionID: pendingEdgeInteractionID
-    )
-  }
-
   private func replaceMountedContent(for canvasSize: CGSize) {
-    guard !timelapseActive else { return }
-    cullingDebounceTask?.cancel()
-    mountedCardIDs = computeVisibleCardIDs(for: canvasSize)
-    mountedEdgeIDs = computeVisibleEdgeIDs(for: canvasSize)
+    viewport.replaceMountedContent(using: viewportEnvironment(canvasSize: canvasSize))
   }
 
   private func expandMountedContent(for canvasSize: CGSize) {
-    guard !timelapseActive else { return }
-    mountedCardIDs.formUnion(computeVisibleCardIDs(for: canvasSize))
-    mountedEdgeIDs.formUnion(computeVisibleEdgeIDs(for: canvasSize))
+    viewport.expandMountedContent(using: viewportEnvironment(canvasSize: canvasSize))
   }
 
   private func handleViewportChanged(canvasSize: CGSize) {
-    guard !timelapseActive else { return }
-    if isCanvasInteracting || isCardResizing || isCardDragging {
-      scheduleMountedContentExpansion(for: canvasSize)
-    } else {
-      replaceMountedContent(for: canvasSize)
-    }
+    viewport.handleViewportChanged(using: viewportEnvironment(canvasSize: canvasSize))
   }
 
-  private func scheduleMountedContentExpansion(for canvasSize: CGSize) {
-    cullingDebounceTask?.cancel()
-    cullingDebounceTask = Task { @MainActor in
-      try? await Task.sleep(for: .milliseconds(CanvasConstants.cullingDebounceMs))
-      guard !Task.isCancelled else { return }
-      expandMountedContent(for: canvasSize)
-    }
+  private func computeVisibleCardIDs(for canvasSize: CGSize, padding: CGFloat? = nil) -> Set<String> {
+    viewport.computeVisibleCardIDs(using: viewportEnvironment(canvasSize: canvasSize), padding: padding)
+  }
+
+  private func computeVisibleEdgeIDs(for canvasSize: CGSize, padding: CGFloat? = nil) -> Set<String> {
+    viewport.computeVisibleEdgeIDs(using: viewportEnvironment(canvasSize: canvasSize), padding: padding)
   }
 
   private func mountedCards(for canvasSize: CGSize) -> [CanvasCard] {
     let sourceCards = timelapseActive ? timelapseFilteredCards : store.cards
-    if timelapseActive {
-      return sourceCards
-    }
-    let ids = mountedCardIDs.isEmpty
-      ? computeVisibleCardIDs(for: canvasSize)
-      : mountedCardIDs
-    return sourceCards.filter { ids.contains($0.id) }
+    return viewport.mountedCards(
+      sourceCards: sourceCards,
+      using: viewportEnvironment(canvasSize: canvasSize)
+    )
   }
 
   private func mountedEdges(for canvasSize: CGSize) -> [CanvasEdge] {
-    let sourceEdges = activeCanvasEdges
-    if timelapseActive {
-      return sourceEdges
-    }
-    let ids = mountedEdgeIDs.isEmpty
-      ? computeVisibleEdgeIDs(for: canvasSize)
-      : mountedEdgeIDs
-    return sourceEdges.filter { ids.contains($0.id) }
+    viewport.mountedEdges(
+      sourceEdges: activeCanvasEdges,
+      using: viewportEnvironment(canvasSize: canvasSize)
+    )
   }
 
   private func liveVisibleEdges(for canvasSize: CGSize) -> [CanvasEdge] {
@@ -807,11 +775,21 @@ struct InfiniteCanvasView: View {
         handleCanvasTap(at: location, canvasSize: canvasSize)
       }
       .onTapGesture(coordinateSpace: .named("canvasScreen")) { location in
-        guard !isCanvasInteracting, !panActive else { return }
+        guard !interaction.isCanvasInteracting, !interaction.panActive else { return }
         // Tapping a connection line selects it (floating toolbar); the edge drag
         // gesture also selects, but this tap fires later and must not clear it.
         if let edgeID = hitTestEdge(at: location, canvasSize: canvasSize) {
           store.selectEdge(edgeID)
+          return
+        }
+        // Never clear selection/edit when the tap landed on a card — sibling
+        // background taps can otherwise race card gestures and block re-edit.
+        let world = store.screenToWorld(location, in: canvasSize, transform: displayTransform)
+        if store.card(
+          at: world,
+          positionOverrides: interaction.cardDragOverrides,
+          resizeOverrides: interaction.cardResizeOverrides
+        ) != nil {
           return
         }
         store.selectedCardID = nil
@@ -825,8 +803,8 @@ struct InfiniteCanvasView: View {
 
   private var canvasPanZoomEnabled: Bool {
     store.contextMenu == nil
-      && !isCardDragging
-      && !isCardResizing
+      && !interaction.isCardDragging
+      && !interaction.isCardResizing
       && !store.isConnectingLine
       && store.focusCardID == nil
       && !store.isVaultOpen
@@ -837,21 +815,25 @@ struct InfiniteCanvasView: View {
   }
 
   private var canvasPanGestureEnabled: Bool {
+    #if os(iOS)
+    false
+    #else
     canvasPanZoomEnabled
+    #endif
   }
 
   /// Double-click empty canvas → place a new note card at the click location.
   private func handleCanvasTap(at screenPoint: CGPoint, canvasSize: CGSize) {
     guard canvasNavigationEnabled, !store.isVaultOpen else { return }
-    if let until = suppressCanvasTapUntil, Date() < until { return }
+    if let until = interaction.suppressCanvasTapUntil, Date() < until { return }
 
     store.dismissPendingEndpoint()
 
     let worldPoint = store.screenToWorld(screenPoint, in: canvasSize, transform: displayTransform)
     if store.card(
       at: worldPoint,
-      positionOverrides: cardDragOverrides,
-      resizeOverrides: cardResizeOverrides
+      positionOverrides: interaction.cardDragOverrides,
+      resizeOverrides: interaction.cardResizeOverrides
     ) != nil {
       return
     }
@@ -903,13 +885,13 @@ struct InfiniteCanvasView: View {
   /// Pencil/finger long-press on empty canvas → add-card menu (Apple Pencil creation flow).
   private func handleCanvasLongPress(at screenPoint: CGPoint, canvasSize: CGSize) {
     guard canvasNavigationEnabled, !store.isVaultOpen else { return }
-    if let until = suppressCanvasTapUntil, Date() < until { return }
+    if let until = interaction.suppressCanvasTapUntil, Date() < until { return }
 
     let worldPoint = store.screenToWorld(screenPoint, in: canvasSize, transform: displayTransform)
     if store.card(
       at: worldPoint,
-      positionOverrides: cardDragOverrides,
-      resizeOverrides: cardResizeOverrides
+      positionOverrides: interaction.cardDragOverrides,
+      resizeOverrides: interaction.cardResizeOverrides
     ) != nil {
       return
     }
@@ -931,11 +913,14 @@ struct InfiniteCanvasView: View {
     )
   }
 
-  private func noteCardScreenRect(for card: CanvasCard) -> CGRect {
+  private func noteCardScreenRect(
+    for card: CanvasCard,
+    transform: CanvasViewTransform? = nil
+  ) -> CGRect {
     let worldFrame = cardDisplayFrame(card)
-    let transform = cardRenderTransform
-    let origin = cardScreenOrigin(for: worldFrame, transform: transform)
-    let zoom = transform.zoom
+    let resolvedTransform = transform ?? cardRenderTransform
+    let origin = cardScreenOrigin(for: worldFrame, transform: resolvedTransform)
+    let zoom = resolvedTransform.zoom
     return CGRect(
       x: origin.x,
       y: origin.y,
@@ -943,6 +928,15 @@ struct InfiniteCanvasView: View {
       height: worldFrame.height * zoom
     )
   }
+
+  #if os(iOS)
+  /// Card screen rect before keyboard-avoidance pan — avoids pan ↔ measure feedback loops.
+  private func noteCardScreenRectBeforeKeyboardPan(for card: CanvasCard) -> CGRect {
+    var transform = cardRenderTransform
+    transform.y += canvasPanYOffsetForKeyboard
+    return noteCardScreenRect(for: card, transform: transform)
+  }
+  #endif
 
   #if os(macOS)
   /// Let note-card scroll views consume the wheel when the pointer is over editable/selected card content.
@@ -967,52 +961,39 @@ struct InfiniteCanvasView: View {
   #endif
 
   private var cardRenderTransform: CanvasViewTransform {
-    if isCardDragging || isCardResizing, let frozen = cardInteractionFrozenTransform {
-      return frozen
-    }
-    return displayTransform
+    interaction.cardRenderTransform(displayTransform: displayTransform)
   }
 
   private func beginCardInteractionFreeze() {
-    cardInteractionFrozenTransform = displayTransform
+    interaction.cardInteractionFrozenTransform = displayTransform
   }
 
   private func endCardInteractionFreeze() {
-    cardInteractionFrozenTransform = nil
+    interaction.cardInteractionFrozenTransform = nil
   }
 
   /// Drop any in-flight card drag/resize so camera, cards, and edges share one transform.
   private func clearCardInteractionState() {
-    isCardDragging = false
-    isCardResizing = false
-    cardInteractionFrozenTransform = nil
-    cardDragOverrides.removeAll()
-    cardResizeOverrides.removeAll()
+    interaction.clearCardInteraction()
   }
 
   /// Persist and clear card drag/resize when SwiftUI drops a gesture without onEnded (common on iPad toolbar/color UI).
   private func settleInFlightCardInteraction() {
-    for cardID in Array(cardDragOverrides.keys) {
+    for cardID in Array(interaction.cardDragOverrides.keys) {
       handleCardMoveEnd(cardID: cardID)
     }
-    for cardID in Array(cardResizeOverrides.keys) {
-      if let frame = cardResizeOverrides[cardID] {
+    for cardID in Array(interaction.cardResizeOverrides.keys) {
+      if let frame = interaction.cardResizeOverrides[cardID] {
         store.resizeCard(cardID, frame: frame)
-        cardResizeOverrides.removeValue(forKey: cardID)
+        interaction.cardResizeOverrides.removeValue(forKey: cardID)
       }
     }
-    if isCardResizing {
-      isCardResizing = false
+    if interaction.isCardResizing || interaction.isCardDragging {
+      interaction.endCardDragOrResize()
       endCardInteractionFreeze()
     }
-    if isCardDragging {
-      isCardDragging = false
-      endCardInteractionFreeze()
-    }
-    if panActive {
-      panActive = false
-      finishCanvasInteraction()
-    } else if isCanvasInteracting {
+    if interaction.panActive || interaction.isCanvasInteracting {
+      interaction.endCanvasNavigation()
       finishCanvasInteraction()
     }
   }
@@ -1025,8 +1006,8 @@ struct InfiniteCanvasView: View {
     let world = store.screenToWorld(screenPoint, in: canvasSize, transform: displayTransform)
     return store.card(
       at: world,
-      positionOverrides: cardDragOverrides,
-      resizeOverrides: cardResizeOverrides
+      positionOverrides: interaction.cardDragOverrides,
+      resizeOverrides: interaction.cardResizeOverrides
     ) != nil
   }
   #endif
@@ -1105,10 +1086,10 @@ struct InfiniteCanvasView: View {
     )
 
     func cardCenter(_ card: CanvasCard) -> CGPoint {
-      if let frame = cardResizeOverrides[card.id] {
+      if let frame = interaction.cardResizeOverrides[card.id] {
         return CGPoint(x: frame.midX, y: frame.midY)
       }
-      let origin = cardDragOverrides[card.id] ?? CGPoint(x: card.x, y: card.y)
+      let origin = interaction.cardDragOverrides[card.id] ?? CGPoint(x: card.x, y: card.y)
       return CGPoint(x: origin.x + card.width / 2, y: origin.y + card.height / 2)
     }
 
@@ -1124,15 +1105,15 @@ struct InfiniteCanvasView: View {
       .filter { prefetchIDs.contains($0.id) && !strictIDs.contains($0.id) && $0.kind == .image }
       .sorted { distance(from: $0) < distance(from: $1) }
 
+    var loadedAnyImage = false
+
     for card in strictImages + ringImages {
       let loaded = await CanvasImageCache.shared.prepareDisplayImageIfNeeded(
         forCardID: card.id,
         content: card.content,
         vaultURL: effectiveVaultURL
       )
-      if loaded {
-        await MainActor.run { store.imageCacheRevision += 1 }
-      }
+      if loaded { loadedAnyImage = true }
     }
 
     let visibleNotes = store.cards.filter { prefetchIDs.contains($0.id) && $0.kind != .image }
@@ -1145,43 +1126,44 @@ struct InfiniteCanvasView: View {
           content: path,
           vaultURL: vault
         )
-        if loaded {
-          await MainActor.run { store.imageCacheRevision += 1 }
-        }
+        if loaded { loadedAnyImage = true }
       }
+    }
+
+    if loadedAnyImage {
+      await MainActor.run { store.imageCacheRevision += 1 }
     }
   }
 
   private func cardUsesInteractiveChrome(_ card: CanvasCard) -> Bool {
     store.selectedCardID == card.id
       || store.focusCardID == card.id
-      || cardResizeOverrides[card.id] != nil
+      || interaction.cardResizeOverrides[card.id] != nil
   }
 
-  private func handleCardDragBegan() {
-    isCardDragging = true
-    beginCardInteractionFreeze()
+  private func handleCardDragBegan(cardID: String) {
+    interaction.beginDraggingCard(cardID, frozenTransform: displayTransform)
   }
 
   private func handleCardMove(cardID: String, preview: CGPoint) {
-    if var frame = cardResizeOverrides[cardID] {
+    if var frame = interaction.cardResizeOverrides[cardID] {
       frame.origin = preview
-      cardResizeOverrides[cardID] = frame
+      interaction.cardResizeOverrides[cardID] = frame
     } else {
-      cardDragOverrides[cardID] = preview
+      interaction.cardDragOverrides[cardID] = preview
     }
   }
 
   private func handleCardMoveEnd(cardID: String) {
-    if let frame = cardResizeOverrides[cardID] {
+    if let frame = interaction.cardResizeOverrides[cardID] {
       store.resizeCard(cardID, frame: frame)
-      cardResizeOverrides.removeValue(forKey: cardID)
-    } else if let origin = cardDragOverrides[cardID] {
+      interaction.cardResizeOverrides.removeValue(forKey: cardID)
+    } else if let origin = interaction.cardDragOverrides[cardID] {
       store.moveCard(cardID, to: origin)
-      cardDragOverrides.removeValue(forKey: cardID)
+      interaction.cardDragOverrides.removeValue(forKey: cardID)
     }
-    suppressCanvasTapUntil = Date().addingTimeInterval(0.35)
-    isCardDragging = false
+    interaction.suppressCanvasTapUntil = Date().addingTimeInterval(0.35)
+    interaction.endCardDragOrResize()
     endCardInteractionFreeze()
     settleMountedContent()
   }
@@ -1208,6 +1190,32 @@ struct InfiniteCanvasView: View {
         vaultFiles: vaultFiles
       )
     }
+  }
+
+  private func zoomCardToSelection(_ card: CanvasCard, canvasSize: CGSize) {
+    store.selectedCardID = card.id
+    store.zoomToSelection(canvasSize: canvasSize)
+    displayTransform = store.transform
+  }
+
+  private func renameCardTitle(_ card: CanvasCard) {
+    store.selectedCardID = card.id
+    imageTitleRenameTokens[card.id, default: 0] += 1
+  }
+
+  private func removeCard(_ card: CanvasCard) {
+    guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+    store.deleteCard(card.id)
+  }
+
+  private func beginImageSwap(for card: CanvasCard) {
+    guard entitlements.requireWriteAccess(context: documentTitle) else { return }
+    swapImageCardID = card.id
+    #if os(macOS)
+    openMacImageSwapPanel(for: card.id)
+    #else
+    showImageSwapPicker = true
+    #endif
   }
 
   @ViewBuilder
@@ -1237,71 +1245,24 @@ struct InfiniteCanvasView: View {
       onRequestEdit: {
         beginCardEdit(for: card)
       },
-      onDragBegan: { handleCardDragBegan() },
+      onDragBegan: { handleCardDragBegan(cardID: card.id) },
       onMove: { handleCardMove(cardID: card.id, preview: $0) },
       onMoveEnd: { handleCardMoveEnd(cardID: card.id) }
     )
 
-    if card.kind == .image {
-      cardView.contextMenu {
-        CanvasImageCardContextMenu(
-          workspace: workspace,
-          store: store,
-          entitlements: entitlements,
-          card: card,
-          sidebarVisible: $sidebarVisible,
-          sidebarPanel: $sidebarPanel,
-          onZoom: {
-            store.selectedCardID = card.id
-            store.zoomToSelection(canvasSize: canvasSize)
-            displayTransform = store.transform
-          },
-          onSwap: {
-            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
-            swapImageCardID = card.id
-            #if os(macOS)
-            openMacImageSwapPanel(for: card.id)
-            #else
-            showImageSwapPicker = true
-            #endif
-          },
-          onRemove: {
-            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
-            store.deleteCard(card.id)
-          },
-          onRename: {
-            store.selectedCardID = card.id
-            imageTitleRenameTokens[card.id, default: 0] += 1
-          }
-        )
-      }
-    } else if card.kind == .note || card.kind == .text {
-      cardView.contextMenu {
-        CanvasNoteCardContextMenu(
-          workspace: workspace,
-          store: store,
-          entitlements: entitlements,
-          card: card,
-          sidebarVisible: $sidebarVisible,
-          sidebarPanel: $sidebarPanel,
-          onZoom: {
-            store.selectedCardID = card.id
-            store.zoomToSelection(canvasSize: canvasSize)
-            displayTransform = store.transform
-          },
-          onRemove: {
-            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
-            store.deleteCard(card.id)
-          },
-          onRename: {
-            store.selectedCardID = card.id
-            imageTitleRenameTokens[card.id, default: 0] += 1
-          }
-        )
-      }
-    } else {
-      cardView
-    }
+    CanvasCardContextMenuAttachment.apply(
+      to: cardView,
+      card: card,
+      workspace: workspace,
+      store: store,
+      entitlements: entitlements,
+      sidebarVisible: $sidebarVisible,
+      sidebarPanel: $sidebarPanel,
+      onZoom: { zoomCardToSelection(card, canvasSize: canvasSize) },
+      onRemove: { removeCard(card) },
+      onRename: { renameCardTitle(card) },
+      onSwap: card.kind == .image ? { beginImageSwap(for: card) } : nil
+    )
   }
 
   @ViewBuilder
@@ -1323,20 +1284,19 @@ struct InfiniteCanvasView: View {
       onSelect: {
         store.selectCard(card.id)
       },
-      onDragBegan: { handleCardDragBegan() },
+      onDragBegan: { handleCardDragBegan(cardID: card.id) },
       onMove: { handleCardMove(cardID: card.id, preview: $0) },
       onMoveEnd: { handleCardMoveEnd(cardID: card.id) },
-      onResize: { cardResizeOverrides[card.id] = $0 },
+      onResize: { interaction.cardResizeOverrides[card.id] = $0 },
       onResizeBegan: {
-        isCardResizing = true
-        beginCardInteractionFreeze()
+        interaction.beginResizingCard(card.id, frozenTransform: displayTransform)
       },
       onResizeEnd: {
-        if let frame = cardResizeOverrides[card.id] {
+        if let frame = interaction.cardResizeOverrides[card.id] {
           store.resizeCard(card.id, frame: frame)
-          cardResizeOverrides.removeValue(forKey: card.id)
+          interaction.cardResizeOverrides.removeValue(forKey: card.id)
         }
-        isCardResizing = false
+        interaction.endCardDragOrResize()
         endCardInteractionFreeze()
         settleMountedContent()
       },
@@ -1346,7 +1306,7 @@ struct InfiniteCanvasView: View {
       },
       onZoomToCard: {
         clearCardInteractionState()
-        isCanvasInteracting = false
+        interaction.endCanvasNavigation()
         store.zoomToSelection(canvasSize: canvasSize)
         displayTransform = store.transform
       },
@@ -1355,15 +1315,15 @@ struct InfiniteCanvasView: View {
         store.beginConnecting(
           fromID: card.id,
           side: side,
-          positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides
+          positionOverrides: interaction.cardDragOverrides,
+          resizeOverrides: interaction.cardResizeOverrides
         )
       },
       onUpdateConnect: { screen in
         store.updateConnecting(
           to: store.screenToWorld(screen, in: canvasSize, transform: displayTransform),
-          positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides
+          positionOverrides: interaction.cardDragOverrides,
+          resizeOverrides: interaction.cardResizeOverrides
         )
       },
       onEndConnect: { screen, moved in
@@ -1371,8 +1331,8 @@ struct InfiniteCanvasView: View {
           at: store.screenToWorld(screen, in: canvasSize, transform: displayTransform),
           moved: moved,
           screenPoint: screen,
-          positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides
+          positionOverrides: interaction.cardDragOverrides,
+          resizeOverrides: interaction.cardResizeOverrides
         )
       },
       onUpdateContent: { store.updateContent(for: card.id, content: $0) },
@@ -1402,66 +1362,19 @@ struct InfiniteCanvasView: View {
       }
     )
 
-    if card.kind == .image {
-      cardView.contextMenu {
-        CanvasImageCardContextMenu(
-          workspace: workspace,
-          store: store,
-          entitlements: entitlements,
-          card: card,
-          sidebarVisible: $sidebarVisible,
-          sidebarPanel: $sidebarPanel,
-          onZoom: {
-            store.selectedCardID = card.id
-            store.zoomToSelection(canvasSize: canvasSize)
-            displayTransform = store.transform
-          },
-          onSwap: {
-            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
-            swapImageCardID = card.id
-            #if os(macOS)
-            openMacImageSwapPanel(for: card.id)
-            #else
-            showImageSwapPicker = true
-            #endif
-          },
-          onRemove: {
-            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
-            store.deleteCard(card.id)
-          },
-          onRename: {
-            store.selectedCardID = card.id
-            imageTitleRenameTokens[card.id, default: 0] += 1
-          }
-        )
-      }
-    } else if card.kind == .note || card.kind == .text {
-      cardView.contextMenu {
-        CanvasNoteCardContextMenu(
-          workspace: workspace,
-          store: store,
-          entitlements: entitlements,
-          card: card,
-          sidebarVisible: $sidebarVisible,
-          sidebarPanel: $sidebarPanel,
-          onZoom: {
-            store.selectedCardID = card.id
-            store.zoomToSelection(canvasSize: canvasSize)
-            displayTransform = store.transform
-          },
-          onRemove: {
-            guard entitlements.requireWriteAccess(context: documentTitle) else { return }
-            store.deleteCard(card.id)
-          },
-          onRename: {
-            store.selectedCardID = card.id
-            imageTitleRenameTokens[card.id, default: 0] += 1
-          }
-        )
-      }
-    } else {
-      cardView
-    }
+    CanvasCardContextMenuAttachment.apply(
+      to: cardView,
+      card: card,
+      workspace: workspace,
+      store: store,
+      entitlements: entitlements,
+      sidebarVisible: $sidebarVisible,
+      sidebarPanel: $sidebarPanel,
+      onZoom: { zoomCardToSelection(card, canvasSize: canvasSize) },
+      onRemove: { removeCard(card) },
+      onRename: { renameCardTitle(card) },
+      onSwap: card.kind == .image ? { beginImageSwap(for: card) } : nil
+    )
   }
 
   @ViewBuilder
@@ -1575,20 +1488,20 @@ struct InfiniteCanvasView: View {
   }
 
   private func cardDisplayFrame(_ card: CanvasCard) -> CGRect {
-    if let frame = cardResizeOverrides[card.id] { return frame }
-    let origin = cardDragOverrides[card.id] ?? CGPoint(x: card.x, y: card.y)
+    if let frame = interaction.cardResizeOverrides[card.id] { return frame }
+    let origin = interaction.cardDragOverrides[card.id] ?? CGPoint(x: card.x, y: card.y)
     return CGRect(x: origin.x, y: origin.y, width: card.width, height: card.height)
   }
 
-  /// Persisted card frame for the drag target — origin stays fixed while `cardDragOverrides` moves the view.
+  /// Persisted card frame for the drag target — origin stays fixed while `interaction.cardDragOverrides` moves the view.
   private func cardLayoutFrame(_ card: CanvasCard) -> CGRect {
-    if let frame = cardResizeOverrides[card.id] { return frame }
+    if let frame = interaction.cardResizeOverrides[card.id] { return frame }
     return CGRect(x: card.x, y: card.y, width: card.width, height: card.height)
   }
 
   /// Stable layout origin while dragging — avoids re-positioning the gesture target mid-drag.
   private func cardPositionOrigin(_ card: CanvasCard) -> CGPoint {
-    if let frame = cardResizeOverrides[card.id] { return frame.origin }
+    if let frame = interaction.cardResizeOverrides[card.id] { return frame.origin }
     return CGPoint(x: card.x, y: card.y)
   }
 
@@ -1596,16 +1509,22 @@ struct InfiniteCanvasView: View {
   private func canvasCardToolbarLayer(canvasSize: CGSize) -> some View {
     if let selectedID = store.selectedCardID,
        let card = cardIndex[selectedID],
-       !isCardResizing {
+       !interaction.isCardResizing {
       let worldFrame = cardDisplayFrame(card)
       let transform = cardRenderTransform
       let zoom = transform.zoom
-      let screenCenter = cardScreenCenter(for: worldFrame, transform: transform)
+      let screenOrigin = cardScreenOrigin(for: worldFrame, transform: transform)
+      let screenW = worldFrame.width * zoom
+      let slotScreen = CanvasFloatingToolbarChrome.toolbarSlotHeight(showColorRow: cardToolbarColorRowOpen)
+      let toolbarPosition = CGPoint(
+        x: screenOrigin.x + screenW / 2,
+        y: screenOrigin.y - slotScreen / 2
+      )
 
       CanvasCardFloatingToolbarLayer(
         card: card,
-        frameWidth: worldFrame.width,
-        frameHeight: worldFrame.height,
+        frameWidth: screenW,
+        frameHeight: slotScreen,
         zoom: zoom,
         cardColors: store.cardColors,
         showColorRow: $cardToolbarColorRowOpen,
@@ -1620,7 +1539,7 @@ struct InfiniteCanvasView: View {
         },
         onZoomToCard: {
           clearCardInteractionState()
-          isCanvasInteracting = false
+          interaction.endCanvasNavigation()
           store.zoomToSelection(canvasSize: canvasSize)
           displayTransform = store.transform
         },
@@ -1635,8 +1554,7 @@ struct InfiniteCanvasView: View {
           imageTitleRenameTokens[card.id, default: 0] += 1
         }
       )
-      .scaleEffect(zoom, anchor: .center)
-      .position(screenCenter)
+      .position(toolbarPosition)
       .allowsHitTesting(true)
       .transaction { transaction in
         transaction.disablesAnimations = true
@@ -1646,8 +1564,8 @@ struct InfiniteCanvasView: View {
     if let edgeID = store.selectedEdgeID,
        store.selectedCardID == nil,
        let edge = store.edges.first(where: { $0.id == edgeID }),
-       !isCardDragging,
-       !isCardResizing {
+       !interaction.isCardDragging,
+       !interaction.isCardResizing {
       edgeFloatingToolbar(for: edge, canvasSize: canvasSize)
     }
   }
@@ -1657,14 +1575,14 @@ struct InfiniteCanvasView: View {
     if let from = cardIndex[edge.fromID],
        let endpoint = store.edgeEndpoint(
         for: edge,
-        positionOverrides: cardDragOverrides,
-        resizeOverrides: cardResizeOverrides
+        positionOverrides: interaction.cardDragOverrides,
+        resizeOverrides: interaction.cardResizeOverrides
        ) {
       let p1 = CanvasGeometry.anchor(
         for: from,
         side: edge.fromSide,
-        overrides: cardDragOverrides,
-        resizeOverrides: cardResizeOverrides
+        overrides: interaction.cardDragOverrides,
+        resizeOverrides: interaction.cardResizeOverrides
       )
       let mid = CanvasGeometry.pointOnCurve(
         from: p1,
@@ -1726,17 +1644,17 @@ struct InfiniteCanvasView: View {
   private var canvasPanGesture: some Gesture {
     DragGesture(minimumDistance: 4, coordinateSpace: .named("canvasScreen"))
       .onChanged { value in
-        if !panActive {
-          panActive = true
-          isCanvasInteracting = true
+        if !interaction.panActive {
+          interaction.beginCanvasNavigation(
+            anchor: CGSize(width: displayTransform.x, height: displayTransform.y)
+          )
           cancelPendingEdgeInteraction()
-          panAnchor = CGSize(width: displayTransform.x, height: displayTransform.y)
         }
-        displayTransform.x = panAnchor.width + value.translation.width
-        displayTransform.y = panAnchor.height + value.translation.height
+        displayTransform.x = interaction.panAnchor.width + value.translation.width
+        displayTransform.y = interaction.panAnchor.height + value.translation.height
       }
       .onEnded { _ in
-        panActive = false
+        interaction.endCanvasNavigation()
         finishCanvasInteraction()
       }
   }
@@ -1818,17 +1736,19 @@ struct InfiniteCanvasView: View {
   private func pinchGesture(in size: CGSize) -> some Gesture {
     MagnificationGesture()
       .onChanged { value in
-        if pinchStartZoom == nil {
-          isCanvasInteracting = true
-          pinchStartZoom = displayTransform.zoom
+        if interaction.pinchStartZoom == nil {
+          if interaction.mode == .idle {
+            interaction.mode = .canvasNavigation
+          }
+          interaction.pinchStartZoom = displayTransform.zoom
         }
         let anchor = CGPoint(x: size.width / 2, y: size.height / 2)
-        let startZoom = pinchStartZoom ?? displayTransform.zoom
+        let startZoom = interaction.pinchStartZoom ?? displayTransform.zoom
         let newZoom = min(CanvasViewTransform.maxZoom, max(CanvasViewTransform.minZoom, startZoom * value))
         applyZoom(at: anchor, targetZoom: newZoom)
       }
       .onEnded { _ in
-        pinchStartZoom = nil
+        interaction.pinchStartZoom = nil
         finishCanvasInteraction()
       }
   }
@@ -1840,7 +1760,7 @@ struct InfiniteCanvasView: View {
   }
 
   private func applyZoom(at anchor: CGPoint, targetZoom: CGFloat) {
-    guard !isCardDragging, !isCardResizing else { return }
+    guard !interaction.isCardDragging, !interaction.isCardResizing else { return }
     var t = displayTransform
     let newZoom = min(CanvasViewTransform.maxZoom, max(CanvasViewTransform.minZoom, targetZoom))
     let ratio = newZoom / t.zoom
@@ -1865,23 +1785,19 @@ struct InfiniteCanvasView: View {
       #endif
       store.setTransform(transform)
     }
-    isCanvasInteracting = false
+    interaction.endCanvasNavigation()
     settleMountedContent()
   }
 
   #if os(iOS)
-  private func scheduleCanvasKeyboardAvoidance(canvasSize: CGSize) {
+  private func requestCanvasKeyboardAvoidanceUpdate(canvasSize: CGSize) {
+    guard store.focusCardID != nil else { return }
     keyboardAvoidanceTask?.cancel()
     keyboardAvoidanceTask = Task { @MainActor in
-      updateCanvasKeyboardAvoidance(canvasSize: canvasSize, allowEstimatedKeyboard: true)
-
-      try? await Task.sleep(nanoseconds: 100_000_000)
+      // Coalesce rapid keyboard frame updates into one pass per frame.
+      try? await Task.sleep(nanoseconds: 32_000_000)
       guard !Task.isCancelled else { return }
       updateCanvasKeyboardAvoidance(canvasSize: canvasSize, allowEstimatedKeyboard: true)
-
-      try? await Task.sleep(nanoseconds: 250_000_000)
-      guard !Task.isCancelled else { return }
-      updateCanvasKeyboardAvoidance(canvasSize: canvasSize, allowEstimatedKeyboard: false)
     }
   }
 
@@ -1889,39 +1805,48 @@ struct InfiniteCanvasView: View {
     canvasSize: CGSize,
     allowEstimatedKeyboard: Bool = false
   ) {
+    _ = allowEstimatedKeyboard
     guard store.focusCardID != nil,
           let focusID = store.focusCardID,
           let card = cardIndex[focusID],
           card.kind != .image else {
-      resetCanvasKeyboardAvoidance()
+      clearCanvasKeyboardPanTracking()
       return
     }
 
-    let keyboardOverlap: CGFloat?
-    if noteEditKeyboardObserver.isVisible, noteEditKeyboardObserver.height > 0 {
-      keyboardOverlap = noteEditKeyboardObserver.height
-    } else if allowEstimatedKeyboard {
-      keyboardOverlap = CanvasNoteEditKeyboardAvoidance.estimatedKeyboardOverlap
-    } else {
+    guard noteEditKeyboardObserver.isVisible, noteEditKeyboardObserver.height > 0 else {
       return
     }
 
-    guard let keyboardOverlap else { return }
-
+    let keyboardOverlap = noteEditKeyboardObserver.height
     let bottomObstruction = keyboardOverlap
       + NoteFormattingToolbarAccessoryContainer.preferredHeight
       + canvasSafeAreaBottom
-    let cardRect = noteCardScreenRect(for: card)
+    let cardRect = noteCardScreenRectBeforeKeyboardPan(for: card)
+    let zoom = displayTransform.zoom
+    let cardToolbarHeight = (38 + 12) * zoom
+
+    var caretScreenY: CGFloat?
+    if let textView = canvasNoteToolbarBridge.textView {
+      let editFontSize = noteEditFontSize ?? (CanvasConstants.noteCardFontSize * zoom)
+      let caretInCard = NoteEditingChromeSupport.documentCaretRect(in: textView, fontSize: editFontSize)
+      caretScreenY = cardRect.minY + 8 + caretInCard.maxY
+    }
+
     let requiredPan = CanvasNoteEditKeyboardAvoidance.requiredPanDeltaY(
       cardScreenRect: cardRect,
+      caretScreenY: caretScreenY,
       canvasHeight: canvasSize.height,
-      bottomObstructionHeight: bottomObstruction
+      bottomObstructionHeight: bottomObstruction,
+      cardToolbarScreenHeight: cardToolbarHeight
     )
-    applyCanvasKeyboardPan(requiredPan, animated: true)
+    let isInitialPanUp = canvasPanYOffsetForKeyboard < 0.5 && requiredPan > 0.5
+    applyCanvasKeyboardPan(requiredPan, animated: isInitialPanUp)
   }
 
-  private func resetCanvasKeyboardAvoidance(animated: Bool = false) {
-    applyCanvasKeyboardPan(0, animated: animated)
+  /// Clears pan bookkeeping without moving the canvas — iPad users prefer the view to stay put after editing.
+  private func clearCanvasKeyboardPanTracking() {
+    canvasPanYOffsetForKeyboard = 0
   }
 
   private func applyCanvasKeyboardPan(_ requiredPan: CGFloat, animated: Bool = false) {
@@ -2002,16 +1927,29 @@ struct InfiniteCanvasView: View {
   }
 
   #if os(iOS)
-  private func importNoteAttachmentPhoto(_ item: PhotosPickerItem) async {
-    defer {
-      Task { @MainActor in
-        noteAttachmentPhotoItem = nil
+  private func canvasAttachmentMenuAnchor(canvasSize: CGSize) -> NoteInsertAttachmentMenuAnchor? {
+    guard showNoteAttachmentMenu,
+          let focusID = store.focusCardID,
+          let card = cardIndex[focusID],
+          card.kind != .image else {
+      return nil
+    }
+
+    let cardRect = noteCardScreenRect(for: card)
+    let menuHeight: CGFloat = 152
+    var topLeading = CGPoint(x: cardRect.minX, y: cardRect.maxY + 8)
+
+    if noteEditKeyboardObserver.isVisible, noteEditKeyboardObserver.height > 0 {
+      let keyboardTop = canvasSize.height
+        - noteEditKeyboardObserver.height
+        - NoteFormattingToolbarAccessoryContainer.preferredHeight
+        - canvasSafeAreaBottom
+      if topLeading.y + menuHeight > keyboardTop - 8 {
+        topLeading.y = max(12, cardRect.minY - menuHeight - 8)
       }
     }
-    guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-    await MainActor.run {
-      insertNoteAttachment(data: data, suggestedName: item.itemIdentifier)
-    }
+
+    return .noteEditor(topLeading: topLeading)
   }
 
   private func importNoteAttachmentFile(from result: Result<[URL], Error>) {
@@ -2025,17 +1963,38 @@ struct InfiniteCanvasView: View {
   #endif
 
   private func insertNoteAttachment(data: Data, suggestedName: String?) {
-    guard store.focusCardID != nil else { return }
+    guard let focusID = store.focusCardID else { return }
     if let noteEditImageInserter, noteEditImageInserter(data, suggestedName) {
       return
     }
-    guard let vault = effectiveVaultURL else { return }
-    guard let path = try? VaultFilesystem.saveCanvasImage(
+    guard let vault = effectiveVaultURL,
+          let card = store.cards.first(where: { $0.id == focusID }) else { return }
+
+    let innerWidth = max(1, card.width - NoteCardContentLayout.contentHorizontalPadding)
+    guard let path = NoteAttachmentInsertSupport.saveImage(
       data: data,
+      suggestedName: suggestedName,
       vaultURL: vault,
-      suggestedName: suggestedName
+      maxWidth: innerWidth
     ) else { return }
-    canvasNoteToolbarBridge.insertSnippet("![[\(path)]]")
+
+    let markdown = CanvasCardContent.markdownBody(
+      for: card,
+      vaultURL: vault,
+      vaultFiles: VaultFile.openableFiles(from: workspace.files)
+    )
+    let selectedRange = canvasNoteToolbarBridge.textView?.selectedRange
+      ?? NSRange(location: (markdown as NSString).length, length: 0)
+    let prepared = NoteAttachmentInsertSupport.prepareEmbedInsert(
+      path: path,
+      in: markdown,
+      selectedRange: selectedRange,
+      vaultURL: vault
+    )
+    store.updateContent(for: focusID, content: prepared.text)
+    if let textView = canvasNoteToolbarBridge.textView {
+      textView.selectedRange = prepared.selectedRange
+    }
     Task {
       _ = await CanvasImageCache.shared.prepareDisplayImageIfNeeded(
         forCardID: "note-embed|\(path)",
@@ -2044,9 +2003,7 @@ struct InfiniteCanvasView: View {
       )
       await MainActor.run {
         store.imageCacheRevision += 1
-        if let focusID = store.focusCardID {
-          store.fitNoteCardToContent(for: focusID)
-        }
+        store.fitNoteCardToContent(for: focusID)
         store.flushPendingContentEdit()
       }
     }
@@ -2229,14 +2186,14 @@ struct InfiniteCanvasView: View {
 
   private func zoomToFitAll(canvasSize: CGSize) {
     clearCardInteractionState()
-    isCanvasInteracting = false
+    interaction.endCanvasNavigation()
     store.zoomToFit(canvasSize: canvasSize)
     displayTransform = store.transform
   }
 
   private func zoomToSelection(canvasSize: CGSize) {
     clearCardInteractionState()
-    isCanvasInteracting = false
+    interaction.endCanvasNavigation()
     store.zoomToSelection(canvasSize: canvasSize)
     displayTransform = store.transform
   }
@@ -2441,7 +2398,9 @@ struct InfiniteCanvasView: View {
             value: Binding(
               get: { displayTransform.zoom },
               set: { newZoom in
-                isCanvasInteracting = true
+                if interaction.mode == .idle {
+                  interaction.mode = .canvasNavigation
+                }
                 applyZoom(
                   at: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
                   targetZoom: newZoom
@@ -2472,7 +2431,9 @@ struct InfiniteCanvasView: View {
   }
 
   private func stepZoom(factor: CGFloat, canvasSize: CGSize) {
-    isCanvasInteracting = true
+    if interaction.mode == .idle {
+      interaction.mode = .canvasNavigation
+    }
     applyZoom(
       at: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
       factor: factor
@@ -2595,8 +2556,8 @@ struct InfiniteCanvasView: View {
       let p1 = CanvasGeometry.anchor(
         for: from,
         side: edge.fromSide,
-        overrides: cardDragOverrides,
-        resizeOverrides: cardResizeOverrides
+        overrides: interaction.cardDragOverrides,
+        resizeOverrides: interaction.cardResizeOverrides
       )
       let p1Screen = store.worldToScreen(p1, transform: displayTransform)
       let dx = tip.x - p1Screen.x
@@ -2743,7 +2704,7 @@ struct InfiniteCanvasView: View {
   private func isPointOnSelectedCardToolbar(_ screenPoint: CGPoint, ignoringDragState: Bool = false) -> Bool {
     guard let selectedID = store.selectedCardID,
           let card = cardIndex[selectedID] else { return false }
-    if !ignoringDragState, isCardDragging || isCardResizing { return false }
+    if !ignoringDragState, interaction.isCardDragging || interaction.isCardResizing { return false }
 
     let worldFrame = cardDisplayFrame(card)
     let rect = CanvasCardFloatingToolbarLayer.screenHitRect(
@@ -2801,9 +2762,9 @@ struct InfiniteCanvasView: View {
     DragGesture(minimumDistance: 0, coordinateSpace: .named("canvasScreen"))
       .onChanged { value in
         guard !timelapsePlaying else { return }
-        guard store.contextMenu == nil, !isCardDragging, !isCardResizing else { return }
+        guard store.contextMenu == nil, !interaction.isCardDragging, !interaction.isCardResizing else { return }
         guard !store.isConnectingLine else { return }
-        guard !isCanvasInteracting, !panActive else {
+        guard !interaction.isCanvasInteracting, !interaction.panActive else {
           cancelPendingEdgeInteraction()
           return
         }
@@ -2832,8 +2793,8 @@ struct InfiniteCanvasView: View {
             }
             store.beginEditingEdgeEndpoint(
               pendingID,
-              positionOverrides: cardDragOverrides,
-              resizeOverrides: cardResizeOverrides
+              positionOverrides: interaction.cardDragOverrides,
+              resizeOverrides: interaction.cardResizeOverrides
             )
           } else if moved >= 4 {
             cancelPendingEdgeInteraction()
@@ -2845,8 +2806,8 @@ struct InfiniteCanvasView: View {
         let world = store.screenToWorld(value.location, in: canvasSize, transform: displayTransform)
         store.updateConnecting(
           to: world,
-          positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides
+          positionOverrides: interaction.cardDragOverrides,
+          resizeOverrides: interaction.cardResizeOverrides
         )
       }
       .onEnded { value in
@@ -2856,9 +2817,9 @@ struct InfiniteCanvasView: View {
           edgeInteractionStartLocation = nil
         }
 
-        guard store.contextMenu == nil, !isCardDragging, !isCardResizing else { return }
+        guard store.contextMenu == nil, !interaction.isCardDragging, !interaction.isCardResizing else { return }
         guard !store.isConnectingLine else { return }
-        guard !isCanvasInteracting, !panActive else { return }
+        guard !interaction.isCanvasInteracting, !interaction.panActive else { return }
         guard !isPointOnSelectedCardToolbar(value.startLocation) else { return }
         guard !isPointOnCanvasToolbar(value.startLocation, canvasSize: canvasSize) else { return }
         guard !isPointOnSelectedCardConnectHandle(value.startLocation) else { return }
@@ -2877,8 +2838,8 @@ struct InfiniteCanvasView: View {
           at: world,
           moved: moved,
           screenPoint: value.location,
-          positionOverrides: cardDragOverrides,
-          resizeOverrides: cardResizeOverrides
+          positionOverrides: interaction.cardDragOverrides,
+          resizeOverrides: interaction.cardResizeOverrides
         )
       }
   }
@@ -2895,15 +2856,15 @@ struct InfiniteCanvasView: View {
       guard let from = store.cards.first(where: { $0.id == edge.fromID }),
             let endpoint = store.edgeEndpoint(
               for: edge,
-              positionOverrides: cardDragOverrides,
-              resizeOverrides: cardResizeOverrides
+              positionOverrides: interaction.cardDragOverrides,
+              resizeOverrides: interaction.cardResizeOverrides
             ) else { continue }
 
       let p1 = CanvasGeometry.anchor(
         for: from,
         side: edge.fromSide,
-        overrides: cardDragOverrides,
-        resizeOverrides: cardResizeOverrides
+        overrides: interaction.cardDragOverrides,
+        resizeOverrides: interaction.cardResizeOverrides
       )
       let distance = CanvasGeometry.screenDistanceToEdge(
         screenPoint: screenPoint,
@@ -3109,7 +3070,7 @@ private struct CanvasEdgeHandCursorModifier: ViewModifier {
 #if os(iOS)
 import UIKit
 
-/// iPad two-finger pan and pinch zoom. Use `passesThroughHits` when single-finger
+/// iPad one-finger pan (empty canvas) and pinch zoom. Use `passesThroughHits` when single-finger
 /// content (e.g. graph nodes) must stay draggable above this layer.
 struct CanvasTouchCaptureView: UIViewRepresentable {
   var passesThroughHits = false
@@ -3211,8 +3172,8 @@ final class CanvasTouchUIView: UIView, UIGestureRecognizerDelegate {
     didInstallGestures = true
 
     let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-    pan.minimumNumberOfTouches = 2
-    pan.maximumNumberOfTouches = 2
+    pan.minimumNumberOfTouches = 1
+    pan.maximumNumberOfTouches = 1
     pan.cancelsTouchesInView = false
     pan.delaysTouchesBegan = false
     pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]

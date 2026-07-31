@@ -24,12 +24,12 @@ struct AppRootView: View {
 
     var body: some View {
         ZStack {
-            WorkspaceShellView(
-                entitlements: entitlements,
-                storeManager: storeManager
-            )
-            .opacity(showOnboarding ? 0 : 1)
-            .allowsHitTesting(!showOnboarding)
+            if hasCompletedOnboarding {
+                WorkspaceShellView(
+                    entitlements: entitlements,
+                    storeManager: storeManager
+                )
+            }
 
             if showOnboarding {
                 OnboardingPresentationContainer {
@@ -80,9 +80,6 @@ struct AppRootView: View {
     private func finishOnboarding() {
         hasCompletedOnboarding = true
         showOnboarding = false
-        if entitlements.isLocked {
-            entitlements.presentPaywall(.onboarding)
-        }
     }
 
     private func applyAppearanceMode(rawValue: String) {

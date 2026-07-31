@@ -132,6 +132,7 @@ final class WorkspacePersistenceCoordinator {
     private let documents: CanvasDocumentRegistry
     private var trackedVaultID: String?
     private var saveTask: Task<Void, Never>?
+    private var scheduledSaveUrgency: CanvasSaveUrgency = .debounced
     private var terminationObserver: NSObjectProtocol?
     private let vaultWatcher = VaultFilesystemWatcher()
     private var dirtyTracker = VaultDirtyTracker()
@@ -165,19 +166,26 @@ final class WorkspacePersistenceCoordinator {
         workspace.onFlushNoteToDisk = { [weak self] relativePath in
             self?.flushNoteToDisk(relativePath: relativePath)
         }
+        workspace.onFlushCanvasToDisk = { [weak self] relativePath in
+            self?.flushCanvasToDisk(relativePath: relativePath)
+        }
         workspace.onFileRelativePathChanged = { [weak self] oldPath, newPath in
             self?.dirtyTracker.rekeyNote(from: oldPath, to: newPath)
             self?.dirtyTracker.rekeyCanvas(from: oldPath, to: newPath)
+            self?.documents.rekeyVaultReferences(from: oldPath, to: newPath)
         }
         workspace.onWorkspaceStateDirty = { [weak self] in
             self?.dirtyTracker.markWorkspaceState()
             self?.scheduleSave()
         }
-        documents.onCanvasMutated = { [weak self] in
-            self?.scheduleSave()
+        documents.onCanvasMutated = { [weak self] urgency in
+            self?.scheduleSave(urgency: urgency)
         }
         documents.onCanvasDirty = { [weak self] relativePath in
             self?.dirtyTracker.markCanvas(relativePath)
+        }
+        documents.onCanvasPersistError = { [weak self] title, message in
+            self?.workspace.reportVaultError(title: title, message: message)
         }
         documents.onLinkedNoteBodyChanged = { [weak self] relativePath, body in
             self?.workspace.updateNoteContent(forRelativePath: relativePath, content: body)
@@ -306,9 +314,15 @@ final class WorkspacePersistenceCoordinator {
         }
 
         if !dirtyCanvases.isEmpty {
-            let snapshots = documents.snapshotAll(validIDs: workspace.allKnownFileIDs())
-            let pending = snapshots.filter { dirtyCanvases.contains($0.key) }
-            let canvasResult = VaultFilesystem.writeCanvases(pending, vaultURL: vaultURL)
+            let allSnapshots = documents.snapshotAll(validIDs: workspace.allKnownFileIDs())
+            let pending = allSnapshots.filter { dirtyCanvases.contains($0.key) }
+            let historyAssetPaths = documents.referencedAssetPathsFromUndoHistory()
+            let canvasResult = VaultFilesystem.writeCanvases(
+                pending,
+                vaultURL: vaultURL,
+                additionalReferencedPaths: historyAssetPaths,
+                referenceSnapshots: allSnapshots
+            )
             let writtenCanvases = Set(pending.keys.filter { key in
                 !canvasResult.failures.contains(where: { $0.path == key })
             })
@@ -348,6 +362,24 @@ final class WorkspacePersistenceCoordinator {
         }
     }
 
+    private func flushCanvasToDisk(relativePath: String) {
+        guard let vault = workspace.activeVault,
+              let store = documents.loadedStore(for: relativePath) else { return }
+        workspace.suppressFilesystemWatch()
+        let vaultURL = VaultSecurityAccess.resolvedURL(for: vault)
+        documents.setVaultURL(vaultURL)
+        let snapshot = store.documentSnapshot
+        do {
+            try VaultFilesystem.writeCanvas(snapshot, relativePath: relativePath, vaultURL: vaultURL)
+            dirtyTracker.clearCanvas(relativePath)
+        } catch {
+            workspace.reportVaultError(
+                title: "Couldn't save canvas",
+                message: error.localizedDescription
+            )
+        }
+    }
+
     private func writeDirtyNotes(_ paths: Set<String>, vaultURL: URL) -> DirtyNoteWriteOutcome {
         var result = VaultBatchWriteResult()
         var writtenPaths = Set<String>()
@@ -370,14 +402,22 @@ final class WorkspacePersistenceCoordinator {
         dirtyTracker.markWorkspaceState()
     }
 
-    private func scheduleSave() {
+    private func scheduleSave(urgency: CanvasSaveUrgency = .debounced) {
+        if urgency == .structural {
+            scheduledSaveUrgency = .structural
+        } else if saveTask == nil {
+            scheduledSaveUrgency = .debounced
+        }
+
         saveTask?.cancel()
         workspace.markSaveStatus(.saving)
+        let debounceNanoseconds: UInt64 = scheduledSaveUrgency == .structural ? 100_000_000 : 500_000_000
         saveTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: debounceNanoseconds)
             guard !Task.isCancelled else { return }
             self?.flushToDisk()
             self?.workspace.markSaveStatus(.saved)
+            self?.scheduledSaveUrgency = .debounced
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled else { return }
             if self?.workspace.saveStatus == .saved {

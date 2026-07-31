@@ -53,13 +53,11 @@ final class CanvasImageCache {
 
     Task {
       guard await loadCoordinator.tryStart(keyString) else { return }
-      let loaded = await Task.detached(priority: .userInitiated) { [weak self] in
+      _ = await Task.detached(priority: .userInitiated) { [weak self] in
         self?.storeImage(forCardID: id, content: content, vaultURL: vaultURL) ?? false
       }.value
       await loadCoordinator.finish(keyString)
-      if loaded {
-        await MainActor.run { onComplete() }
-      }
+      await MainActor.run { onComplete() }
     }
   }
 

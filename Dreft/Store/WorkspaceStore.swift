@@ -67,6 +67,8 @@ final class WorkspaceStore {
     var onNoteContentDirty: ((String) -> Void)?
     /// Write one note immediately if it has unsaved edits (used before rename/move).
     var onFlushNoteToDisk: ((String) -> Void)?
+    /// Write one canvas immediately from its in-memory store (used before rename/move).
+    var onFlushCanvasToDisk: ((String) -> Void)?
     /// A vault file's relative path changed on disk/in-memory (rename/move/rekey).
     var onFileRelativePathChanged: ((String, String) -> Void)?
     /// Tabs, selection, or vault UI changed — drives workspace.json saves.
@@ -211,6 +213,21 @@ final class WorkspaceStore {
             loadVaultFromDisk(vault)
         } catch {
             reportVaultError(title: "Couldn't create default vault", message: error.localizedDescription)
+        }
+    }
+
+    func bootstrapOnboardingVaultIfNeeded(worldName: String, welcomeContent: String) {
+        guard vaults.isEmpty else { return }
+        do {
+            let vault = try VaultFilesystem.bootstrapOnboardingVault(
+                worldName: worldName,
+                welcomeContent: welcomeContent
+            )
+            vaults = [vault]
+            activeVaultID = vault.id
+            loadVaultFromDisk(vault)
+        } catch {
+            reportVaultError(title: "Couldn't create your vault", message: error.localizedDescription)
         }
     }
 
@@ -962,6 +979,9 @@ final class WorkspaceStore {
         let oldRelativePath = file.relativePath
         suppressFilesystemWatch()
         onFlushNoteToDisk?(oldRelativePath)
+        if file.kind == .canvas {
+            onFlushCanvasToDisk?(oldRelativePath)
+        }
 
         do {
             try VaultFilesystem.renameOnDisk(from: oldRelativePath, to: newRelativePath, vaultURL: vaultURL)
@@ -977,6 +997,10 @@ final class WorkspaceStore {
         files[index] = file
 
         onFileRelativePathChanged?(oldRelativePath, newRelativePath)
+
+        if file.kind == .canvas {
+            onCanvasDocumentRekeyed?(oldID, newRelativePath)
+        }
 
         if file.kind == .folder {
             rekeyDescendants(of: oldID, to: newRelativePath)
@@ -1144,6 +1168,9 @@ final class WorkspaceStore {
         )
         suppressFilesystemWatch()
         onFlushNoteToDisk?(oldRelativePath)
+        if file.kind == .canvas {
+            onFlushCanvasToDisk?(oldRelativePath)
+        }
 
         do {
             try VaultFilesystem.renameOnDisk(from: oldRelativePath, to: newRelativePath, vaultURL: vaultURL)
@@ -1162,6 +1189,9 @@ final class WorkspaceStore {
             rekeyDescendants(of: oldID, to: newRelativePath)
         } else {
             onFileRelativePathChanged?(oldRelativePath, newRelativePath)
+            if file.kind == .canvas {
+                onCanvasDocumentRekeyed?(oldID, newRelativePath)
+            }
         }
         rekeyTabs(from: oldID, to: newRelativePath, newTitle: file.name)
         rekeyBookmarkFileID(from: oldID, to: newRelativePath)

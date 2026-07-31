@@ -92,28 +92,16 @@ struct CanvasCardView: View {
         return Color(hexString: hex)
     }
 
-    /// Toolbar layout height in screen points (before counter-scale).
-    private var toolbarLayoutHeight: CGFloat { 38 }
-    private var toolbarGapAboveCard: CGFloat { 12 }
-
-    /// Counter-scale the toolbar so it stays a comfortable screen size.
-    /// Clamped: doesn't grow huge when zoomed out, doesn't shrink too small when zoomed in.
-    private var toolbarWorldScale: CGFloat {
+    /// Counter-scale title chrome so it stays readable at any canvas zoom.
+    private var titleWorldScale: CGFloat {
         let clampedZoom = min(max(zoom, 0.45), 1.35)
         return 1 / clampedZoom
     }
 
-    private var floatingToolbarSlotHeight: CGFloat {
-        (toolbarLayoutHeight + toolbarGapAboveCard) * toolbarWorldScale
-    }
-
-    /// Offset so the toolbar slot sits fully above the card with a small gap at any zoom.
-    private var floatingToolbarOffsetY: CGFloat {
-        -floatingToolbarSlotHeight
-    }
-
     private var imageTitleOffsetY: CGFloat {
-        floatingToolbarOffsetY - (18 * toolbarWorldScale)
+        let slotWorld = CanvasFloatingToolbarChrome.toolbarSlotHeight() * titleWorldScale
+        let titleGapWorld = (CanvasFloatingToolbarChrome.imageTitleGap + 16) * titleWorldScale
+        return -(slotWorld + titleGapWorld)
     }
 
     var body: some View {
@@ -153,7 +141,7 @@ struct CanvasCardView: View {
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
-                    .offset(y: isSelected ? imageTitleOffsetY : (-18 * toolbarWorldScale))
+                    .offset(y: isSelected ? imageTitleOffsetY : (-18 * titleWorldScale))
                     .onChange(of: beginTitleRenameToken) { _, _ in
                         guard beginTitleRenameToken > 0 else { return }
                         cancelActiveDrag()
@@ -180,6 +168,10 @@ struct CanvasCardView: View {
         .onDisappear {
             cancelActiveDrag()
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(CanvasAccessibility.cardLabel(for: card, isSelected: isSelected))
+        .accessibilityHint(CanvasAccessibility.cardHint(for: card))
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private var imageDisplayTitle: String {

@@ -143,10 +143,13 @@ final class StoreManager {
     private func renewalDescription(for transaction: StoreKit.Transaction) -> String? {
         guard let expirationDate = transaction.expirationDate else { return nil }
         let formatted = expirationDate.formatted(date: .abbreviated, time: .omitted)
-        if expirationDate > Date() {
-            return "Renews \(formatted)"
+        if expirationDate <= Date() {
+            return "Expired \(formatted)"
         }
-        return "Expired \(formatted)"
+        if transaction.offerType == .introductory {
+            return "Free trial ends \(formatted)"
+        }
+        return "Renews \(formatted)"
     }
 
     func isYearlyTrialEligible(_ product: Product) -> Bool {

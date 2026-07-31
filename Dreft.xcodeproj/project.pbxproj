@@ -139,11 +139,19 @@
 		SM000139 /* SubscribeCTAButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100139 /* SubscribeCTAButton.swift */; };
 		SM000141 /* CanvasNoteEditKeyboardAvoidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100141 /* CanvasNoteEditKeyboardAvoidance.swift */; };
 		SM000146 /* NoteStandaloneEditorKeyboardSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100146 /* NoteStandaloneEditorKeyboardSupport.swift */; };
+		SM000149 /* UIKeyboardOverlap.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100149 /* UIKeyboardOverlap.swift */; };
+		SM000150 /* NoteAttachmentInsertSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100150 /* NoteAttachmentInsertSupport.swift */; };
+		SM000151 /* NoteAttachmentImportModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100151 /* NoteAttachmentImportModifiers.swift */; };
 		SM000147 /* NoteInsertAttachmentMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100147 /* NoteInsertAttachmentMenu.swift */; };
 		SM000148 /* CameraImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100148 /* CameraImagePicker.swift */; };
 		SM000142 /* PaywallCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100142 /* PaywallCopy.swift */; };
 		SM000143 /* SubscriptionStatusCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100143 /* SubscriptionStatusCopy.swift */; };
 		SM000145 /* PaywallTrigger.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100145 /* PaywallTrigger.swift */; };
+		SM000152 /* CanvasInteractionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100152 /* CanvasInteractionState.swift */; };
+		SM000153 /* CanvasCardContextMenuAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100153 /* CanvasCardContextMenuAttachment.swift */; };
+		SM000154 /* CanvasViewportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100154 /* CanvasViewportController.swift */; };
+		SM000155 /* CanvasAccessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100155 /* CanvasAccessibility.swift */; };
+		SM000156 /* CanvasBundleTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = SM100156 /* CanvasBundleTransfer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -288,11 +296,19 @@
 		SM100139 /* SubscribeCTAButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/SubscribeCTAButton.swift; sourceTree = SOURCE_ROOT; };
 		SM100141 /* CanvasNoteEditKeyboardAvoidance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNoteEditKeyboardAvoidance.swift; sourceTree = "<group>"; };
 		SM100146 /* NoteStandaloneEditorKeyboardSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteStandaloneEditorKeyboardSupport.swift; sourceTree = "<group>"; };
+		SM100149 /* UIKeyboardOverlap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKeyboardOverlap.swift; sourceTree = "<group>"; };
+		SM100150 /* NoteAttachmentInsertSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteAttachmentInsertSupport.swift; sourceTree = "<group>"; };
+		SM100151 /* NoteAttachmentImportModifiers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Views/Shell/NoteAttachmentImportModifiers.swift; sourceTree = SOURCE_ROOT; };
 		SM100147 /* NoteInsertAttachmentMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteInsertAttachmentMenu.swift; sourceTree = "<group>"; };
 		SM100148 /* CameraImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraImagePicker.swift; sourceTree = "<group>"; };
 		SM100142 /* PaywallCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/PaywallCopy.swift; sourceTree = SOURCE_ROOT; };
 		SM100143 /* SubscriptionStatusCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/SubscriptionStatusCopy.swift; sourceTree = SOURCE_ROOT; };
 		SM100145 /* PaywallTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dreft/Store/Monetization/PaywallTrigger.swift; sourceTree = SOURCE_ROOT; };
+		SM100152 /* CanvasInteractionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasInteractionState.swift; sourceTree = "<group>"; };
+		SM100153 /* CanvasCardContextMenuAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardContextMenuAttachment.swift; sourceTree = "<group>"; };
+		SM100154 /* CanvasViewportController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasViewportController.swift; sourceTree = "<group>"; };
+		SM100155 /* CanvasAccessibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasAccessibility.swift; sourceTree = "<group>"; };
+		SM100156 /* CanvasBundleTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBundleTransfer.swift; sourceTree = "<group>"; };
 		SM100138 /* DreftStore.storekit */ = {isa = PBXFileReference; lastKnownFileType = file.storekit; path = DreftStore.storekit; sourceTree = SOURCE_ROOT; };
 		SM200001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		SM200002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -440,6 +456,8 @@
 				SM100110 /* CanvasNoteCardBodyView.swift */,
 				SM100118 /* NoteCardTaskCheckbox.swift */,
 				SM100119 /* CanvasNoteCardTaskTapOverlay.swift */,
+				SM100152 /* CanvasInteractionState.swift */,
+				SM100153 /* CanvasCardContextMenuAttachment.swift */,
 			);
 			path = Canvas;
 			sourceTree = "<group>";
@@ -467,6 +485,7 @@
 				SM100055 /* NoteBodyTextView.swift */,
 				SM100116 /* NoteEditingCaretOverlay.swift */,
 				SM100147 /* NoteInsertAttachmentMenu.swift */,
+				SM100151 /* NoteAttachmentImportModifiers.swift */,
 				SM100056 /* WikilinkSuggestPopover.swift */,
 				SM100057 /* AddBookmarkSheet.swift */,
 				SM100058 /* CanvasDocumentOptionsMenu.swift */,
@@ -487,6 +506,7 @@
 				SM100014 /* ImagePixelSize.swift */,
 				SM100015 /* CanvasImageCache.swift */,
 				SM100018 /* CanvasViewport.swift */,
+				SM100154 /* CanvasViewportController.swift */,
 				SM100019 /* CanvasMath.swift */,
 				SM100020 /* CanvasLayout.swift */,
 				SM100090 /* CanvasPencilInteraction.swift */,
@@ -502,6 +522,8 @@
 				SM100114 /* CanvasNoteCardScrollBridge.swift */,
 				SM100141 /* CanvasNoteEditKeyboardAvoidance.swift */,
 				SM100146 /* NoteStandaloneEditorKeyboardSupport.swift */,
+				SM100149 /* UIKeyboardOverlap.swift */,
+				SM100150 /* NoteAttachmentInsertSupport.swift */,
 				SM100148 /* CameraImagePicker.swift */,
 				SM100113 /* CanvasNoteCardScrollIndicator.swift */,
 				SM100112 /* NoteImageDropSupport.swift */,
@@ -512,6 +534,8 @@
 				SM100045 /* GraphLinkIndexPersistence.swift */,
 				SM100046 /* GraphBarnesHut.swift */,
 				SM100047 /* CanvasSpatialIndex.swift */,
+				SM100155 /* CanvasAccessibility.swift */,
+				SM100156 /* CanvasBundleTransfer.swift */,
 				SM100048 /* GoToFileSearchIndex.swift */,
 				SM100049 /* VaultFilesystemWatcher.swift */,
 				SM100034 /* VaultSecurityAccess.swift */,
@@ -669,6 +693,8 @@
 				SM000006 /* CanvasEdgesView.swift in Sources */,
 				SM000007 /* CanvasCardView.swift in Sources */,
 				SM000008 /* InfiniteCanvasView.swift in Sources */,
+				SM000152 /* CanvasInteractionState.swift in Sources */,
+				SM000153 /* CanvasCardContextMenuAttachment.swift in Sources */,
 				SM000009 /* VaultSearchSheet.swift in Sources */,
 				SM000010 /* IconRailView.swift in Sources */,
 				SM000011 /* SidebarView.swift in Sources */,
@@ -678,6 +704,9 @@
 				SM000016 /* DotGridBackground.swift in Sources */,
 				SM000017 /* CachedCardImage.swift in Sources */,
 				SM000018 /* CanvasViewport.swift in Sources */,
+				SM000154 /* CanvasViewportController.swift in Sources */,
+				SM000155 /* CanvasAccessibility.swift in Sources */,
+				SM000156 /* CanvasBundleTransfer.swift in Sources */,
 				SM000019 /* CanvasMath.swift in Sources */,
 				SM000020 /* CanvasLayout.swift in Sources */,
 				SM000090 /* CanvasPencilInteraction.swift in Sources */,
@@ -727,6 +756,9 @@
 				SM000114 /* CanvasNoteCardScrollBridge.swift in Sources */,
 				SM000141 /* CanvasNoteEditKeyboardAvoidance.swift in Sources */,
 				SM000146 /* NoteStandaloneEditorKeyboardSupport.swift in Sources */,
+				SM000149 /* UIKeyboardOverlap.swift in Sources */,
+				SM000150 /* NoteAttachmentInsertSupport.swift in Sources */,
+				SM000151 /* NoteAttachmentImportModifiers.swift in Sources */,
 				SM000148 /* CameraImagePicker.swift in Sources */,
 				SM000113 /* CanvasNoteCardScrollIndicator.swift in Sources */,
 				SM000112 /* NoteImageDropSupport.swift in Sources */,
@@ -917,15 +949,17 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Dreft/Dreft.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = K2Q9PMD826;
-				ENABLE_HARDENED_RUNTIME = YES;
+				"ENABLE_HARDENED_RUNTIME[sdk=macosx*]" = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Dreft;
@@ -961,15 +995,17 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Dreft/Dreft.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Dreft/Dreft.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = K2Q9PMD826;
-				ENABLE_HARDENED_RUNTIME = YES;
+				"ENABLE_HARDENED_RUNTIME[sdk=macosx*]" = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Dreft;

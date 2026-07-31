@@ -1,6 +1,13 @@
 import Foundation
 import Observation
 
+enum CanvasSaveUrgency {
+    /// Typing, pan/zoom, and other high-frequency edits.
+    case debounced
+    /// Add/delete cards, images, edges, moves — flush quickly to shrink data-loss window.
+    case structural
+}
+
 /// Serialized contents of one canvas document (one `.canvas` file).
 struct CanvasDocumentSnapshot: Codable {
     var cards: [CanvasCard]
@@ -14,9 +21,10 @@ final class CanvasDocumentRegistry {
     private var stores: [String: CanvasStore] = [:]
     /// Bumped when any canvas document mutates — drives autosave observation.
     private(set) var mutationGeneration = 0
-    var onCanvasMutated: (() -> Void)?
+    var onCanvasMutated: ((CanvasSaveUrgency) -> Void)?
     var onCanvasDirty: ((String) -> Void)?
     var onLinkedNoteBodyChanged: ((String, String) -> Void)?
+    var onCanvasPersistError: ((String, String) -> Void)?
     var vaultURL: URL?
     var writeAccessChecker: () -> Bool = { true }
 
@@ -33,20 +41,28 @@ final class CanvasDocumentRegistry {
         return store
     }
 
+    /// Returns an already-loaded store without creating an empty placeholder.
+    func loadedStore(for documentID: String) -> CanvasStore? {
+        stores[documentID]
+    }
+
     private func configure(_ store: CanvasStore, documentID: String) {
         store.documentRelativePath = documentID
         store.vaultURL = vaultURL
         store.writeAccessChecker = writeAccessChecker
-        store.onDidMutate = { [weak self, weak store] in
+        store.onDidMutate = { [weak self, weak store] urgency in
             guard let self, let store else { return }
             self.mutationGeneration += 1
             if let path = store.documentRelativePath {
                 self.onCanvasDirty?(path)
             }
-            self.onCanvasMutated?()
+            self.onCanvasMutated?(urgency)
         }
         store.onLinkedNoteBodyChanged = { [weak self] path, body in
             self?.onLinkedNoteBodyChanged?(path, body)
+        }
+        store.onPersistError = { [weak self] title, message in
+            self?.onCanvasPersistError?(title, message)
         }
     }
 
@@ -70,6 +86,14 @@ final class CanvasDocumentRegistry {
         stores[newID] = store
     }
 
+    /// Updates vault path references on note/image cards when a linked file is renamed or moved.
+    func rekeyVaultReferences(from oldPath: String, to newPath: String) {
+        guard oldPath != newPath else { return }
+        for store in stores.values {
+            store.rekeyVaultPathReferences(from: oldPath, to: newPath)
+        }
+    }
+
     func clear() {
         stores.removeAll()
     }
@@ -90,6 +114,15 @@ final class CanvasDocumentRegistry {
             result[documentID] = snapshot
         }
         return result
+    }
+
+    /// Canvas image assets still reachable via undo/redo on any open document.
+    func referencedAssetPathsFromUndoHistory() -> Set<String> {
+        var paths = Set<String>()
+        for store in stores.values {
+            paths.formUnion(store.historyReferencedAssetPaths)
+        }
+        return paths
     }
 
     func migrateEmbeddedImages(vaultURL: URL) {
@@ -140,5 +173,17 @@ extension CanvasStore {
         edges = snapshot.edges
         transform = snapshot.transform
         clearUndoHistory()
+    }
+
+    func rekeyVaultPathReferences(from oldPath: String, to newPath: String) {
+        guard oldPath != newPath else { return }
+        var changed = false
+        for index in cards.indices where cards[index].content == oldPath {
+            cards[index].content = newPath
+            changed = true
+        }
+        if changed {
+            onDidMutate?(.structural)
+        }
     }
 }
